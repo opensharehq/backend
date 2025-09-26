@@ -33,7 +33,6 @@ repos:
     rev: v0.1
     hooks:
       - id: xenon
-        args: ["--max-complexity=A"]
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v4.2.0
     hooks:

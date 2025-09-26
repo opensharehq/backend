@@ -8,6 +8,7 @@ dependencies = [
     "django>=5.2.6",
     "django-environ>=0.12.0",
     "pre-commit>=4.3.0",
+    "whitenoise>=6.11.0",
 ]
 
 [tool.djlint]

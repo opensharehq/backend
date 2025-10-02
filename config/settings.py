@@ -148,6 +148,7 @@ AUTHENTICATION_BACKENDS = (
 
 # custom user
 AUTH_USER_MODEL = "accounts.User"
+SOCIAL_AUTH_USER_MODEL = "accounts.User"
 
 SOCIAL_AUTH_URL_NAMESPACE = "social"
 SOCIAL_AUTH_ADMIN_USER_SEARCH_FIELDS = ["username", "first_name", "email"]

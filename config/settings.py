@@ -28,6 +28,8 @@ env = environ.Env(
     AWS_S3_ENDPOINT_URL=(str, ""),
     SOCIAL_AUTH_GITHUB_KEY=(str, ""),
     SOCIAL_AUTH_GITHUB_SECRET=(str, ""),
+    MAILGUN_API_KEY=(str, "MAILGUN_API_KEY"),
+    MAILGUN_SENDER_DOMAIN=(str, "MAILGUN_SENDER_DOMAIN"),
 )
 
 SECRET_KEY = env("SECRET_KEY")
@@ -56,6 +58,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django_extensions",
     "social_django",
+    "anymail",
     "homepage",
     "accounts",
 ]
@@ -164,3 +167,14 @@ SOCIAL_AUTH_USERNAME_FORM_HTML = "login_form.html"
 # Github Backend
 SOCIAL_AUTH_GITHUB_KEY = env("SOCIAL_AUTH_GITHUB_KEY")
 SOCIAL_AUTH_GITHUB_SECRET = env("SOCIAL_AUTH_GITHUB_SECRET")
+
+
+# anymail config
+
+ANYMAIL = {
+    "MAILGUN_API_KEY": env("MAILGUN_API_KEY"),
+    "MAILGUN_SENDER_DOMAIN": env("MAILGUN_SENDER_DOMAIN"),
+}
+EMAIL_BACKEND = "anymail.backends.mailgun.EmailBackend"
+DEFAULT_FROM_EMAIL = "no-reply@openshare.cn"
+SERVER_EMAIL = "server@openshare.cn"

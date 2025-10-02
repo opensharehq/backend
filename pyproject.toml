@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "django>=5.2.6",
+    "django-anymail[mailgun]>=13.1",
     "django-environ>=0.12.0",
     "django-extensions>=4.1",
     "django-storages[s3]>=1.14.6",

@@ -26,6 +26,8 @@ env = environ.Env(
     AWS_S3_REGION_NAME=(str, ""),
     AWS_S3_CUSTOM_DOMAIN=(str, ""),
     AWS_S3_ENDPOINT_URL=(str, ""),
+    SOCIAL_AUTH_GITHUB_KEY=(str, ""),
+    SOCIAL_AUTH_GITHUB_SECRET=(str, ""),
 )
 
 SECRET_KEY = env("SECRET_KEY")
@@ -53,6 +55,8 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django_extensions",
+    "social_django",
+    "homepage",
 ]
 
 MIDDLEWARE = [
@@ -78,6 +82,8 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "social_django.context_processors.backends",
+                "social_django.context_processors.login_redirect",
             ],
         },
     },
@@ -132,3 +138,24 @@ STORAGES = {
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+SOCIAL_AUTH_JSONFIELD_ENABLED = True
+
+AUTHENTICATION_BACKENDS = (
+    "social_core.backends.github.GithubOAuth2",
+    "django.contrib.auth.backends.ModelBackend",
+)
+
+SOCIAL_AUTH_URL_NAMESPACE = "social"
+SOCIAL_AUTH_ADMIN_USER_SEARCH_FIELDS = ["username", "first_name", "email"]
+
+
+# email backend
+SOCIAL_AUTH_EMAIL_FORM_URL = "/login-form/"
+SOCIAL_AUTH_EMAIL_FORM_HTML = "login_form.html"
+# username auth
+SOCIAL_AUTH_USERNAME_FORM_URL = "/login-form/"
+SOCIAL_AUTH_USERNAME_FORM_HTML = "login_form.html"
+
+# Github Backend
+SOCIAL_AUTH_GITHUB_KEY = env("SOCIAL_AUTH_GITHUB_KEY")
+SOCIAL_AUTH_GITHUB_SECRET = env("SOCIAL_AUTH_GITHUB_SECRET")

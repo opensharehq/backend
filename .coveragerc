@@ -1,0 +1,14 @@
+[run]
+source =
+    accounts
+    homepage
+    config
+omit =
+    config/asgi.py
+    config/wsgi.py
+parallel = True
+concurrency = multiprocessing
+
+[report]
+show_missing = True
+fail_under = 95

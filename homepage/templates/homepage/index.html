@@ -1,7 +1,54 @@
-{% extends "base.html" %}
+{% extends "base.html" %} {% block content %}
+<div class="bg-light min-vh-100">
+    <nav
+        class="navbar navbar-expand-lg navbar-light bg-white border-bottom shadow-sm"
+    >
+        <div class="container-fluid px-4 py-2">
+            <a class="navbar-brand fw-bold fs-4 text-dark" href="#"
+                >OpenShare</a
+            >
 
-{% block content %}
-<h1>hi</h1>
-<a href="{% url "social:begin" "github" %}">Github</a>
+            <div class="d-flex ms-auto align-items-center">
+                <a
+                    class="btn btn-link text-decoration-none me-3 text-dark fw-semibold"
+                    href="#"
+                    >login</a
+                >
+                <button
+                    class="btn btn-primary rounded-pill px-3 py-1 fw-bold border-2"
+                    type="button"
+                >
+                    sign up
+                </button>
+            </div>
+        </div>
+    </nav>
 
+    <div class="container-fluid main-content min-vh-100 pt-5 pt-md-0">
+        <div class="row w-100">
+            <div
+                class="col-12 d-flex flex-column align-items-center text-center"
+            >
+                <h1 class="display-5 fw-bolder mb-5 mt-5 mt-md-0">
+                    Open For All
+                </h1>
+
+                <div class="w-100 max-w-600 px-3">
+                    <div class="input-group">
+                        <input
+                            type="text"
+                            class="form-control rounded-5 ps-5 pe-5 border-dark border-2 text-center py-2 fs-6"
+                            placeholder="input your github/gitlab/gitee username or projectname"
+                            aria-label="Search field"
+                        />
+
+                        <span class="position-absolute end-0 p-3 pt-3 me-2">
+                            <i class="bi bi-search fs-5 text-dark"></i>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock content %}

@@ -19,6 +19,13 @@ env = environ.Env(
     USE_I18N=(bool, True),
     USE_TZ=(bool, True),
     DEFAULT_AUTO_FIELD=(str, "django.db.models.BigAutoField"),
+    AWS_S3_ACCESS_KEY_ID=(str, ""),
+    AWS_S3_SECRET_ACCESS_KEY=(str, ""),
+    AWS_STORAGE_BUCKET_NAME=(str, ""),
+    AWS_LOCATION=(str, ""),
+    AWS_S3_REGION_NAME=(str, ""),
+    AWS_S3_CUSTOM_DOMAIN=(str, ""),
+    AWS_S3_ENDPOINT_URL=(str, ""),
 )
 
 SECRET_KEY = env("SECRET_KEY")
@@ -28,7 +35,16 @@ LANGUAGE_CODE = env("LANGUAGE_CODE")
 TIME_ZONE = env("TIME_ZONE")
 USE_I18N = env("USE_I18N")
 USE_TZ = env("USE_TZ")
-
+AWS_S3_ACCESS_KEY_ID = env("AWS_S3_ACCESS_KEY_ID")
+AWS_S3_SECRET_ACCESS_KEY = env("AWS_S3_SECRET_ACCESS_KEY")
+AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME")
+AWS_LOCATION = env("AWS_LOCATION")
+AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME")
+AWS_S3_CUSTOM_DOMAIN = env("AWS_S3_CUSTOM_DOMAIN")
+AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL")
+AWS_S3_ADDRESSING_STYLE = "virtual"
+AWS_S3_MAX_FILENO_MEMORY_SIZE = 0  # 尝试设置为0或一个较小的值，以鼓励流式传输
+AWS_S3_SIGNATURE_VERSION = "s3"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -105,7 +121,9 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 STORAGES = {
-    # ...
+    "default": {
+        "BACKEND": "storages.backends.s3.S3Storage",
+    },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },

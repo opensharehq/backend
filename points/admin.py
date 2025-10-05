@@ -3,6 +3,7 @@
 from django import forms
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.utils.html import format_html
 
 from .models import PointSource, PointTransaction, Tag
 
@@ -13,10 +14,19 @@ User = get_user_model()
 class TagAdmin(admin.ModelAdmin):
     """Admin for Tag model."""
 
-    list_display = ("name", "description", "is_default")
+    list_display = ("name", "slug", "is_default", "description_short")
     list_filter = ("is_default",)
-    search_fields = ("name", "description")
+    search_fields = ("name", "slug", "description")
     ordering = ("name",)
+    readonly_fields = ("slug",)
+    prepopulated_fields = {}  # slug is auto-generated in model
+
+    @admin.display(description="描述")
+    def description_short(self, obj):
+        """Display shortened description."""
+        if len(obj.description) > 50:
+            return f"{obj.description[:50]}..."
+        return obj.description
 
 
 class GrantPointsForm(forms.Form):
@@ -58,14 +68,18 @@ class PointSourceAdmin(admin.ModelAdmin):
         "user_profile",
         "initial_points",
         "remaining_points",
+        "usage_percentage",
+        "display_tags",
         "created_at",
         "expires_at",
+        "is_expired",
     )
-    list_filter = ("created_at", "expires_at")
+    list_filter = ("created_at", "expires_at", "tags")
     search_fields = ("user_profile__username", "user_profile__email", "notes")
     filter_horizontal = ("tags",)
     readonly_fields = ("created_at",)
     ordering = ("-created_at",)
+    date_hierarchy = "created_at"
 
     fieldsets = (
         (
@@ -88,6 +102,32 @@ class PointSourceAdmin(admin.ModelAdmin):
         ),
     )
 
+    @admin.display(description="使用率")
+    def usage_percentage(self, obj):
+        """Display usage percentage."""
+        if obj.initial_points == 0:
+            return "N/A"
+        used = obj.initial_points - obj.remaining_points
+        percentage = (used / obj.initial_points) * 100
+        return f"{percentage:.1f}%"
+
+    @admin.display(description="标签")
+    def display_tags(self, obj):
+        """Display tags as colored badges."""
+        tags = obj.tags.all()
+        if not tags:
+            return "-"
+        return ", ".join([tag.name for tag in tags])
+
+    @admin.display(boolean=True, description="已过期")
+    def is_expired(self, obj):
+        """Check if points are expired."""
+        if obj.expires_at is None:
+            return False
+        from django.utils import timezone
+
+        return timezone.now() > obj.expires_at
+
 
 @admin.register(PointTransaction)
 class PointTransactionAdmin(admin.ModelAdmin):
@@ -97,14 +137,17 @@ class PointTransactionAdmin(admin.ModelAdmin):
         "id",
         "user_profile",
         "transaction_type",
-        "points",
+        "colored_points",
         "description",
         "created_at",
+        "source_count",
     )
     list_filter = ("transaction_type", "created_at")
     search_fields = ("user_profile__username", "user_profile__email", "description")
     readonly_fields = ("created_at",)
     ordering = ("-created_at",)
+    date_hierarchy = "created_at"
+    filter_horizontal = ("consumed_sources",)
 
     fieldsets = (
         (
@@ -128,11 +171,24 @@ class PointTransactionAdmin(admin.ModelAdmin):
         ),
     )
 
+    @admin.display(description="积分")
+    def colored_points(self, obj):
+        """Display points with color based on transaction type."""
+        if obj.transaction_type == PointTransaction.TransactionType.EARN:
+            color = "green"
+            prefix = "+"
+        else:
+            color = "red"
+            prefix = "-"
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}{}</span>',
+            color,
+            prefix,
+            abs(obj.points),
+        )
 
-# Add a custom admin action for granting points
-class GrantPointsAdminSite(admin.AdminSite):
-    """Custom admin site with grant points functionality."""
-
-    site_header = "积分管理后台"
-    site_title = "积分管理"
-    index_title = "欢迎使用积分管理系统"
+    @admin.display(description="消费源数量")
+    def source_count(self, obj):
+        """Display count of consumed sources."""
+        count = obj.consumed_sources.count()
+        return count if count > 0 else "-"

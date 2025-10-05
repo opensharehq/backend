@@ -1,78 +1,63 @@
-{% extends "base.html" %}
+{% extends "horizontal_base.html" %}
 
-{% block title %}修改邮箱 - Open Share{% endblock title %}
+{% block title %}修改邮箱{% endblock title %}
 
 {% block content %}
-    <div class="container py-5">
-        {% if messages %}
-            <div class="row justify-content-center">
-                <div class="col-md-8 col-lg-6">
-                    {% for message in messages %}
-                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                            {{ message }}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                        </div>
-                    {% endfor %}
-                </div>
-            </div>
-        {% endif %}
-        <div class="row justify-content-center">
-            <div class="col-md-8 col-lg-6">
-                <div class="card shadow">
-                    <div class="card-body p-4">
-                        <div class="d-flex justify-content-between align-items-center mb-4">
-                            <h1 class="card-title h3 mb-0">修改邮箱</h1>
-                            <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary">
-                                <i class="bi bi-arrow-left"></i> 返回
-                            </a>
-                        </div>
-                        <div class="alert alert-secondary mb-4" role="alert">
-                            <i class="bi bi-envelope"></i>
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">修改邮箱</h4>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap">
+            <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-8 col-lg-6">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i data-lucide="mail" class="icon-sm"></i> 修改邮箱
+                    </h6>
+                    <div class="alert alert-secondary mb-4 d-flex align-items-center" role="alert">
+                        <i data-lucide="mail" class="icon-sm me-2"></i>
+                        <div>
                             <strong>当前邮箱：</strong>{{ current_email|default:"未设置" }}
                         </div>
-                        <form method="post">
-                            {% csrf_token %}
-                            {% if form.non_field_errors %}
-                                <div class="alert alert-danger" role="alert">
-                                    {{ form.non_field_errors }}
-                                </div>
+                    </div>
+                    <form method="post" class="forms-sample">
+                        {% csrf_token %}
+                        {% if form.non_field_errors %}
+                            <div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>
+                        {% endif %}
+                        <div class="mb-3">
+                            <label for="{{ form.email.id_for_label }}" class="form-label">{{ form.email.label }}</label>
+                            {{ form.email }}
+                            {% if form.email.errors %}
+                                <div class="invalid-feedback d-block">{{ form.email.errors.0 }}</div>
                             {% endif %}
-                            <div class="mb-3">
-                                <label for="{{ form.email.id_for_label }}" class="form-label">
-                                    {{ form.email.label }}
-                                </label>
-                                {{ form.email }}
-                                {% if form.email.errors %}
-                                    <div class="invalid-feedback d-block">
-                                        {{ form.email.errors.0 }}
-                                    </div>
-                                {% endif %}
-                            </div>
-                            <div class="mb-3">
-                                <label for="{{ form.password.id_for_label }}" class="form-label">
-                                    {{ form.password.label }}
-                                </label>
-                                {{ form.password }}
-                                {% if form.password.help_text %}
-                                    <small class="form-text text-muted">
-                                        {{ form.password.help_text }}
-                                    </small>
-                                {% endif %}
-                                {% if form.password.errors %}
-                                    <div class="invalid-feedback d-block">
-                                        {{ form.password.errors.0 }}
-                                    </div>
-                                {% endif %}
-                            </div>
-                            <div class="alert alert-warning" role="alert">
-                                <i class="bi bi-exclamation-triangle"></i>
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.password.id_for_label }}" class="form-label">{{ form.password.label }}</label>
+                            {{ form.password }}
+                            {% if form.password.help_text %}
+                                <div class="form-text">{{ form.password.help_text }}</div>
+                            {% endif %}
+                            {% if form.password.errors %}
+                                <div class="invalid-feedback d-block">{{ form.password.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="alert alert-warning d-flex align-items-start" role="alert">
+                            <i data-lucide="alert-triangle" class="icon-sm me-2 mt-1"></i>
+                            <div>
                                 <strong>注意：</strong>修改邮箱后，您需要使用新邮箱登录。
                             </div>
-                            <button type="submit" class="btn btn-primary w-100">
-                                <i class="bi bi-check-circle"></i> 确认修改
-                            </button>
-                        </form>
-                    </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i data-lucide="check-circle"></i> 确认修改
+                        </button>
+                    </form>
                 </div>
             </div>
         </div>

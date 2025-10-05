@@ -1,0 +1,70 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <meta name="description" content="{% block meta_description %}开源分享平台{% endblock meta_description %}">
+    <meta name="keywords" content="{% block meta_keywords %}开源,分享,社区{% endblock meta_keywords %}">
+    <title>{% block title %}OpenShare{% endblock title %} - 开源分享平台</title>
+    <!-- color-modes:js -->
+    <script src="{% static 'nobleui/js/color-modes.js' %}"></script>
+    <!-- endinject -->
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <!-- End fonts -->
+    <!-- core:css -->
+    <link rel="stylesheet" href="{% static 'nobleui/vendors/core/core.css' %}">
+    <!-- endinject -->
+    <!-- Plugin css for this page -->
+    {% block plugin_css %}{% endblock plugin_css %}
+    <!-- End plugin css for this page -->
+    <!-- Layout styles -->
+    <link rel="stylesheet" href="{% static 'nobleui/css/demo1/style.css' %}">
+    <!-- End layout styles -->
+    <!-- Extra CSS -->
+    {% block extra_css %}{% endblock extra_css %}
+    <link rel="shortcut icon" href="{% static 'nobleui/images/favicon.png' %}" />
+</head>
+<body>
+    <div class="main-wrapper">
+        <div class="page-wrapper full-page">
+            <div class="page-content container-xxl d-flex align-items-center justify-content-center">
+                <div class="row w-100 mx-0 auth-page">
+                    <div class="col-md-10 col-lg-8 col-xl-6 mx-auto">
+                        <div class="card">
+                            <div class="row">
+                                <div class="col-md-4 pe-md-0">
+                                    <div class="auth-side-wrapper"></div>
+                                </div>
+                                <div class="col-md-8 ps-md-0">
+                                    <div class="auth-form-wrapper px-4 py-5">
+                                        <a href="{% url 'homepage:index' %}" class="nobleui-logo d-block mb-2">Open<span>Share</span></a>
+                                        {% include "partials/_messages.html" %}
+                                        {% block auth_content %}{% endblock auth_content %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- core:js -->
+    <script src="{% static 'nobleui/vendors/core/core.js' %}"></script>
+    <!-- endinject -->
+    <!-- Plugin js for this page -->
+    {% block plugin_js %}{% endblock plugin_js %}
+    <!-- End plugin js for this page -->
+    <!-- inject:js -->
+    <script src="{% static 'nobleui/js/app.js' %}"></script>
+    <!-- endinject -->
+    <!-- Custom js for this page -->
+    {% block extra_js %}{% endblock extra_js %}
+    <!-- End custom js for this page -->
+</body>
+</html>

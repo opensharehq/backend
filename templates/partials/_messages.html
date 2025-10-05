@@ -1,0 +1,35 @@
+{% if messages %}
+    <div class="toast-container position-fixed top-0 end-0 p-3">
+        {% for message in messages %}
+            <div class="toast show align-items-center text-white bg-{{ message.tags|default:'primary' }} border-0" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="true" data-bs-delay="5000">
+                <div class="d-flex">
+                    <div class="toast-body">
+                        {% if message.tags == 'success' %}
+                            <i data-lucide="check-circle" class="icon-sm me-2"></i>
+                        {% elif message.tags == 'error' or message.tags == 'danger' %}
+                            <i data-lucide="alert-circle" class="icon-sm me-2"></i>
+                        {% elif message.tags == 'warning' %}
+                            <i data-lucide="alert-triangle" class="icon-sm me-2"></i>
+                        {% else %}
+                            <i data-lucide="info" class="icon-sm me-2"></i>
+                        {% endif %}
+                        {{ message }}
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const toastElList = [].slice.call(document.querySelectorAll('.toast'));
+            toastElList.map(function(toastEl) {
+                const toast = new bootstrap.Toast(toastEl);
+                toast.show();
+                if (window.lucide) {
+                    lucide.createIcons();
+                }
+            });
+        });
+    </script>
+{% endif %}

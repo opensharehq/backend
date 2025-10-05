@@ -1,0 +1,63 @@
+{% load static %}
+<nav class="sidebar">
+    <div class="sidebar-header">
+        <a href="{% url 'homepage:index' %}" class="sidebar-brand">
+            Open<span>Share</span>
+        </a>
+        <div class="sidebar-toggler">
+            {# djlint:off H020 #}
+            <span></span>
+            <span></span>
+            <span></span>
+            {# djlint:on H020 #}
+        </div>
+    </div>
+    <div class="sidebar-body">
+        <ul class="nav" id="sidebarNav">
+            <li class="nav-item nav-category">主菜单</li>
+            <li class="nav-item {% if request.resolver_match.url_name == 'index' %}active{% endif %}">
+                <a href="{% url 'homepage:index' %}" class="nav-link">
+                    <i class="link-icon" data-lucide="home"></i>
+                    <span class="link-title">首页</span>
+                </a>
+            </li>
+            <li class="nav-item nav-category">个人中心</li>
+            <li class="nav-item {% if 'profile' in request.path %}active{% endif %}">
+                <a href="{% url 'accounts:profile' %}" class="nav-link">
+                    <i class="link-icon" data-lucide="user"></i>
+                    <span class="link-title">个人资料</span>
+                </a>
+            </li>
+            <li class="nav-item {% if 'points' in request.path %}active{% endif %}">
+                <a href="{% url 'points:my_points' %}" class="nav-link">
+                    <i class="link-icon" data-lucide="award"></i>
+                    <span class="link-title">我的积分</span>
+                </a>
+            </li>
+            <li class="nav-item nav-category">账户设置</li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="collapse" href="#accountSettings" role="button" aria-expanded="false" aria-controls="accountSettings">
+                    <i class="link-icon" data-lucide="settings"></i>
+                    <span class="link-title">账户管理</span>
+                    <i class="link-arrow" data-lucide="chevron-down"></i>
+                </a>
+                <div class="collapse" data-bs-parent="#sidebarNav" id="accountSettings">
+                    <ul class="nav sub-menu">
+                        <li class="nav-item">
+                            <a href="{% url 'accounts:profile_edit' %}" class="nav-link">编辑资料</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="{% url 'accounts:change_password' %}" class="nav-link">修改密码</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="{% url 'accounts:change_email' %}" class="nav-link">修改邮箱</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="{% url 'accounts:social_connections' %}" class="nav-link">社交账号</a>
+                        </li>
+                    </ul>
+                </div>
+            </li>
+        </ul>
+    </div>
+</nav>

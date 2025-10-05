@@ -1,266 +1,259 @@
-{% extends "base.html" %}
+{% extends "horizontal_base.html" %}
 
-{% block title %}个人中心 - Open Share{% endblock title %}
+{% block title %}个人中心{% endblock title %}
 
 {% block content %}
-    <div class="container py-5">
-        {% if messages %}
-            <div class="row justify-content-center">
-                <div class="col-md-10 col-lg-8">
-                    {% for message in messages %}
-                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                            {{ message }}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">个人中心</h4>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap">
+            <a href="{% url 'accounts:profile_edit' %}" class="btn btn-primary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="edit" class="btn-icon-prepend"></i> 编辑资料
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12 col-xl-12 stretch-card">
+            <div class="row flex-grow-1">
+                <!-- 基本信息卡片 -->
+                <div class="col-md-6 grid-margin stretch-card">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title">
+                                <i data-lucide="user" class="icon-sm"></i> 基本信息
+                            </h6>
+                            <div class="row">
+                                <div class="col-6 col-md-12 col-xl-6 mb-3">
+                                    <label class="text-muted small">用户名</label>
+                                    <p class="mb-0 fw-bold">{{ user.username }}</p>
+                                </div>
+                                <div class="col-6 col-md-12 col-xl-6 mb-3">
+                                    <label class="text-muted small">邮箱</label>
+                                    <p class="mb-0 fw-bold text-break">{{ user.email|default:"未设置" }}</p>
+                                </div>
+                                <div class="col-6 col-md-12 col-xl-6 mb-3">
+                                    <label class="text-muted small">注册时间</label>
+                                    <p class="mb-0">{{ user.date_joined|date:"Y年m月d日" }}</p>
+                                </div>
+                                <div class="col-6 col-md-12 col-xl-6 mb-3">
+                                    <label class="text-muted small">最后登录</label>
+                                    <p class="mb-0">{{ user.last_login|date:"Y年m月d日 H:i"|default:"首次登录" }}</p>
+                                </div>
+                            </div>
                         </div>
-                    {% endfor %}
+                    </div>
                 </div>
-            </div>
-        {% endif %}
-        <div class="row justify-content-center">
-            <div class="col-md-10 col-lg-8">
-                <div class="card shadow">
-                    <div class="card-body p-4">
-                        <div class="d-flex justify-content-between align-items-center mb-4">
-                            <h1 class="card-title h3 mb-0">个人中心</h1>
-                            <div>
-                                <a href="{% url 'homepage:index' %}" class="btn btn-outline-secondary me-2">
-                                    <i class="bi bi-house"></i> 返回首页
-                                </a>
-                                <a href="{% url 'accounts:profile_edit' %}" class="btn btn-primary">
-                                    <i class="bi bi-pencil"></i> 编辑资料
-                                </a>
-                            </div>
+                <!-- 个人资料卡片 -->
+                <div class="col-md-6 grid-margin stretch-card">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title">
+                                <i data-lucide="id-card" class="icon-sm"></i> 个人资料
+                            </h6>
+                            {% if profile.bio or profile.birth_date or profile.company or profile.location %}
+                                <div class="row">
+                                    {% if profile.bio %}
+                                        <div class="col-12 mb-3">
+                                            <label class="text-muted small">个人简介</label>
+                                            <p class="mb-0">{{ profile.bio }}</p>
+                                        </div>
+                                    {% endif %}
+                                    {% if profile.birth_date %}
+                                        <div class="col-6 mb-3">
+                                            <label class="text-muted small">生日</label>
+                                            <p class="mb-0">{{ profile.birth_date|date:"Y年m月d日" }}</p>
+                                        </div>
+                                    {% endif %}
+                                    {% if profile.company %}
+                                        <div class="col-6 mb-3">
+                                            <label class="text-muted small">公司</label>
+                                            <p class="mb-0">{{ profile.company }}</p>
+                                        </div>
+                                    {% endif %}
+                                    {% if profile.location %}
+                                        <div class="col-12 mb-3">
+                                            <label class="text-muted small">位置</label>
+                                            <p class="mb-0">
+                                                <i data-lucide="map-pin" class="icon-sm"></i> {{ profile.location }}
+                                            </p>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            {% else %}
+                                <p class="text-muted">暂无个人资料信息</p>
+                            {% endif %}
                         </div>
-                        <!-- 基本信息 -->
-                        <div class="mb-4">
-                            <h2 class="h5 mb-3 text-primary">
-                                <i class="bi bi-person-circle"></i> 基本信息
-                            </h2>
-                            <div class="row">
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label text-muted small">用户名</label>
-                                    <p class="fw-bold mb-0">{{ user.username }}</p>
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label text-muted small">邮箱</label>
-                                    <p class="fw-bold mb-0">{{ user.email|default:"未设置" }}</p>
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label text-muted small">注册时间</label>
-                                    <p class="fw-bold mb-0">{{ user.date_joined|date:"Y年m月d日" }}</p>
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label text-muted small">最后登录</label>
-                                    <p class="fw-bold mb-0">{{ user.last_login|date:"Y年m月d日 H:i"|default:"首次登录" }}</p>
-                                </div>
-                            </div>
-                        </div>
-                        <hr class="my-4" />
-                        <!-- 个人资料 -->
-                        <div class="mb-4">
-                            <h2 class="h5 mb-3 text-primary">
-                                <i class="bi bi-person-badge"></i> 个人资料
-                            </h2>
-                            <div class="row">
-                                {% if profile.bio %}
-                                    <div class="col-12 mb-3">
-                                        <label class="form-label text-muted small">个人简介</label>
-                                        <p class="mb-0">{{ profile.bio }}</p>
-                                    </div>
-                                {% endif %}
-                                {% if profile.birth_date %}
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label text-muted small">生日</label>
-                                        <p class="mb-0">{{ profile.birth_date|date:"Y年m月d日" }}</p>
-                                    </div>
-                                {% endif %}
-                                {% if profile.company %}
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label text-muted small">公司</label>
-                                        <p class="mb-0">{{ profile.company }}</p>
-                                    </div>
-                                {% endif %}
-                                {% if profile.location %}
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label text-muted small">位置</label>
-                                        <p class="mb-0">
-                                            <i class="bi bi-geo-alt"></i> {{ profile.location }}
-                                        </p>
-                                    </div>
-                                {% endif %}
-                            </div>
-                        </div>
-                        <!-- 社交链接 -->
-                        {% if profile.github_url or profile.homepage_url or profile.blog_url or profile.twitter_url or profile.linkedin_url %}
-                            <hr class="my-4" />
-                            <div class="mb-4">
-                                <h2 class="h5 mb-3 text-primary">
-                                    <i class="bi bi-link-45deg"></i> 社交链接
-                                </h2>
+                    </div>
+                </div>
+                <!-- 社交链接卡片 -->
+                {% if profile.github_url or profile.homepage_url or profile.blog_url or profile.twitter_url or profile.linkedin_url %}
+                    <div class="col-md-6 grid-margin stretch-card">
+                        <div class="card">
+                            <div class="card-body">
+                                <h6 class="card-title">
+                                    <i data-lucide="link" class="icon-sm"></i> 社交链接
+                                </h6>
                                 <div class="d-flex flex-wrap gap-2">
                                     {% if profile.github_url %}
-                                        <a href="{{ profile.github_url }}" target="_blank" class="btn btn-outline-dark btn-sm">
-                                            <i class="bi bi-github"></i> GitHub
+                                        <a href="{{ profile.github_url }}" target="_blank" class="btn btn-outline-dark btn-sm btn-icon-text">
+                                            <i data-lucide="github" class="btn-icon-prepend"></i> GitHub
                                         </a>
                                     {% endif %}
                                     {% if profile.homepage_url %}
-                                        <a href="{{ profile.homepage_url }}" target="_blank" class="btn btn-outline-primary btn-sm">
-                                            <i class="bi bi-house-door"></i> 个人主页
+                                        <a href="{{ profile.homepage_url }}" target="_blank" class="btn btn-outline-primary btn-sm btn-icon-text">
+                                            <i data-lucide="home" class="btn-icon-prepend"></i> 主页
                                         </a>
                                     {% endif %}
                                     {% if profile.blog_url %}
-                                        <a href="{{ profile.blog_url }}" target="_blank" class="btn btn-outline-success btn-sm">
-                                            <i class="bi bi-journal-text"></i> 博客
+                                        <a href="{{ profile.blog_url }}" target="_blank" class="btn btn-outline-success btn-sm btn-icon-text">
+                                            <i data-lucide="book-open" class="btn-icon-prepend"></i> 博客
                                         </a>
                                     {% endif %}
                                     {% if profile.twitter_url %}
-                                        <a href="{{ profile.twitter_url }}" target="_blank" class="btn btn-outline-info btn-sm">
-                                            <i class="bi bi-twitter-x"></i> Twitter
+                                        <a href="{{ profile.twitter_url }}" target="_blank" class="btn btn-outline-info btn-sm btn-icon-text">
+                                            <i data-lucide="twitter" class="btn-icon-prepend"></i> Twitter
                                         </a>
                                     {% endif %}
                                     {% if profile.linkedin_url %}
-                                        <a href="{{ profile.linkedin_url }}" target="_blank" class="btn btn-outline-primary btn-sm">
-                                            <i class="bi bi-linkedin"></i> LinkedIn
+                                        <a href="{{ profile.linkedin_url }}" target="_blank" class="btn btn-outline-primary btn-sm btn-icon-text">
+                                            <i data-lucide="linkedin" class="btn-icon-prepend"></i> LinkedIn
                                         </a>
                                     {% endif %}
                                 </div>
                             </div>
-                        {% endif %}
-                        <!-- 工作经历 -->
-                        {% if profile.work_experiences.all %}
-                            <hr class="my-4" />
-                            <div class="mb-4">
-                                <h2 class="h5 mb-3 text-primary">
-                                    <i class="bi bi-briefcase"></i> 工作经历
-                                </h2>
+                        </div>
+                    </div>
+                {% endif %}
+                <!-- 我的积分卡片 -->
+                <div class="col-md-6 grid-margin stretch-card">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title">
+                                <i data-lucide="award" class="icon-sm"></i> 我的积分
+                            </h6>
+                            <div class="d-flex justify-content-between align-items-baseline mb-2">
+                                <h2 class="mb-0">{{ user.total_points }}</h2>
+                                <a href="{% url 'points:my_points' %}" class="btn btn-sm btn-primary btn-icon-text">
+                                    <i data-lucide="list" class="btn-icon-prepend"></i> 查看详情
+                                </a>
+                            </div>
+                            <p class="text-muted">当前积分余额</p>
+                            {% if user.get_points_by_tag %}
+                                <div class="mt-3">
+                                    <div class="d-flex flex-wrap gap-2">
+                                        {% for item in user.get_points_by_tag %}
+                                            <span class="badge bg-primary">{{ item.tag }}: {{ item.points }}</span>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <!-- 工作经历卡片 -->
+                {% if profile.work_experiences.all %}
+                    <div class="col-md-12 grid-margin stretch-card">
+                        <div class="card">
+                            <div class="card-body">
+                                <h6 class="card-title">
+                                    <i data-lucide="briefcase" class="icon-sm"></i> 工作经历
+                                </h6>
                                 {% for work in profile.work_experiences.all %}
-                                    <div class="mb-3 {% if not forloop.last %}pb-3 border-bottom{% endif %}">
-                                        <div class="d-flex justify-content-between align-items-start mb-1">
-                                            <h3 class="h6 mb-0 fw-bold">{{ work.title }}</h3>
-                                            <small class="text-muted">
-                                                {{ work.start_date|date:"Y年m月" }} -
-                                                {% if work.end_date %}
-                                                    {{ work.end_date|date:"Y年m月" }}
-                                                {% else %}
-                                                    至今
+                                    <div class="d-flex justify-content-between {% if not forloop.last %}mb-3 pb-3 border-bottom{% endif %}">
+                                        <div class="d-flex">
+                                            <i data-lucide="circle" class="icon-md text-primary me-2"></i>
+                                            <div>
+                                                <h6 class="mb-1">{{ work.title }}</h6>
+                                                <p class="text-muted mb-1">{{ work.company_name }}</p>
+                                                {% if work.description %}
+                                                    <p class="mb-0 text-muted tx-13">{{ work.description }}</p>
                                                 {% endif %}
-                                            </small>
-                                        </div>
-                                        <p class="mb-1 text-muted">{{ work.company_name }}</p>
-                                        {% if work.description %}
-                                            <p class="mb-0 small">{{ work.description }}</p>
-                                        {% endif %}
-                                    </div>
-                                {% endfor %}
-                            </div>
-                        {% endif %}
-                        <!-- 学习经历 -->
-                        {% if profile.educations.all %}
-                            <hr class="my-4" />
-                            <div class="mb-4">
-                                <h2 class="h5 mb-3 text-primary">
-                                    <i class="bi bi-mortarboard"></i> 学习经历
-                                </h2>
-                                {% for edu in profile.educations.all %}
-                                    <div class="mb-3 {% if not forloop.last %}pb-3 border-bottom{% endif %}">
-                                        <div class="d-flex justify-content-between align-items-start mb-1">
-                                            <h3 class="h6 mb-0 fw-bold">{{ edu.institution_name }}</h3>
-                                            <small class="text-muted">
-                                                {{ edu.start_date|date:"Y年m月" }} -
-                                                {% if edu.end_date %}
-                                                    {{ edu.end_date|date:"Y年m月" }}
-                                                {% else %}
-                                                    至今
-                                                {% endif %}
-                                            </small>
-                                        </div>
-                                        <p class="mb-0">
-                                            <span class="text-muted">{{ edu.field_of_study }}</span>
-                                            {% if edu.degree %}
-                                                <span class="badge bg-secondary">{{ edu.degree }}</span>
-                                            {% endif %}
-                                        </p>
-                                    </div>
-                                {% endfor %}
-                            </div>
-                        {% endif %}
-                        <hr class="my-4" />
-                        <!-- 我的积分 -->
-                        <div class="mb-4">
-                            <h2 class="h5 mb-3 text-primary">
-                                <i class="bi bi-coin"></i> 我的积分
-                            </h2>
-                            <div class="card border-primary">
-                                <div class="card-body">
-                                    <div class="row align-items-center">
-                                        <div class="col-md-8">
-                                            <h3 class="h6 mb-2 text-muted">当前积分余额</h3>
-                                            <p class="h2 mb-0 text-primary fw-bold">
-                                                <i class="bi bi-award"></i> {{ user.total_points }}
-                                            </p>
-                                        </div>
-                                        <div class="col-md-4 text-md-end mt-3 mt-md-0">
-                                            <a href="{% url 'points:my_points' %}" class="btn btn-primary">
-                                                <i class="bi bi-list-ul"></i> 查看详情
-                                            </a>
-                                        </div>
-                                    </div>
-                                    {% if user.get_points_by_tag %}
-                                        <hr class="my-3" />
-                                        <div>
-                                            <small class="text-muted d-block mb-2">积分分类：</small>
-                                            <div class="d-flex flex-wrap gap-2">
-                                                {% for item in user.get_points_by_tag %}
-                                                    <span class="badge bg-primary">{{ item.tag }}: {{ item.points }}</span>
-                                                {% endfor %}
                                             </div>
                                         </div>
-                                    {% endif %}
-                                </div>
+                                        <div class="text-muted tx-13">
+                                            {{ work.start_date|date:"Y年m月" }} -
+                                            {% if work.end_date %}
+                                                {{ work.end_date|date:"Y年m月" }}
+                                            {% else %}
+                                                至今
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
                             </div>
                         </div>
-                        <hr class="my-4" />
-                        <!-- 账号安全 -->
-                        <div class="mb-4">
-                            <h2 class="h5 mb-3 text-primary">
-                                <i class="bi bi-shield-check"></i> 账号安全
-                            </h2>
-                            <div class="list-group">
-                                <a href="{% url 'accounts:change_password' %}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                    </div>
+                {% endif %}
+                <!-- 学习经历卡片 -->
+                {% if profile.educations.all %}
+                    <div class="col-md-12 grid-margin stretch-card">
+                        <div class="card">
+                            <div class="card-body">
+                                <h6 class="card-title">
+                                    <i data-lucide="graduation-cap" class="icon-sm"></i> 学习经历
+                                </h6>
+                                {% for edu in profile.educations.all %}
+                                    <div class="d-flex justify-content-between {% if not forloop.last %}mb-3 pb-3 border-bottom{% endif %}">
+                                        <div class="d-flex">
+                                            <i data-lucide="circle" class="icon-md text-success me-2"></i>
+                                            <div>
+                                                <h6 class="mb-1">{{ edu.institution_name }}</h6>
+                                                <p class="mb-0">
+                                                    <span class="text-muted">{{ edu.field_of_study }}</span>
+                                                    {% if edu.degree %}
+                                                        <span class="badge bg-secondary">{{ edu.degree }}</span>
+                                                    {% endif %}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div class="text-muted tx-13">
+                                            {{ edu.start_date|date:"Y年m月" }} -
+                                            {% if edu.end_date %}
+                                                {{ edu.end_date|date:"Y年m月" }}
+                                            {% else %}
+                                                至今
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+                <!-- 账号安全卡片 -->
+                <div class="col-md-12 grid-margin stretch-card">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title">
+                                <i data-lucide="shield" class="icon-sm"></i> 账号安全
+                            </h6>
+                            <div class="list-group list-group-flush">
+                                <a href="{% url 'accounts:change_password' %}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center px-0">
                                     <div>
-                                        <i class="bi bi-key"></i>
+                                        <i data-lucide="lock" class="icon-sm me-2"></i>
                                         <strong>修改密码</strong>
-                                        <br>
-                                        <small class="text-muted">定期更换密码，保护账号安全</small>
+                                        <p class="text-muted tx-13 mb-0">定期更换密码，保护账号安全</p>
                                     </div>
-                                    <i class="bi bi-chevron-right"></i>
+                                    <i data-lucide="chevron-right"></i>
                                 </a>
-                                <a href="{% url 'accounts:change_email' %}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                <a href="{% url 'accounts:change_email' %}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center px-0">
                                     <div>
-                                        <i class="bi bi-envelope"></i>
+                                        <i data-lucide="mail" class="icon-sm me-2"></i>
                                         <strong>修改邮箱</strong>
-                                        <br>
-                                        <small class="text-muted">当前邮箱：{{ user.email|default:"未设置" }}</small>
+                                        <p class="text-muted tx-13 mb-0">当前邮箱：{{ user.email|default:"未设置" }}</p>
                                     </div>
-                                    <i class="bi bi-chevron-right"></i>
+                                    <i data-lucide="chevron-right"></i>
                                 </a>
-                                <a href="{% url 'accounts:social_connections' %}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                <a href="{% url 'accounts:social_connections' %}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center px-0">
                                     <div>
-                                        <i class="bi bi-link-45deg"></i>
+                                        <i data-lucide="link-2" class="icon-sm me-2"></i>
                                         <strong>社交账号管理</strong>
-                                        <br>
-                                        <small class="text-muted">绑定或解绑第三方登录</small>
+                                        <p class="text-muted tx-13 mb-0">绑定或解绑第三方登录</p>
                                     </div>
-                                    <i class="bi bi-chevron-right"></i>
+                                    <i data-lucide="chevron-right"></i>
                                 </a>
                             </div>
-                        </div>
-                        <hr class="my-4" />
-                        <!-- 操作按钮 -->
-                        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
-                            <a href="{% url 'accounts:logout' %}" class="btn btn-outline-danger">
-                                <i class="bi bi-box-arrow-right"></i> 退出登录
-                            </a>
                         </div>
                     </div>
                 </div>

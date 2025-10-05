@@ -1,172 +1,311 @@
-{% extends "base.html" %}
+{% extends "horizontal_base.html" %}
+{% load static %}
 
-{% block title %}我的积分 - Open Share{% endblock title %}
+{% block title %}我的积分{% endblock title %}
+
+{% block plugin_css %}{% endblock plugin_css %}
 
 {% block content %}
-    <div class="container py-5">
-        <div class="row justify-content-center">
-            <div class="col-lg-10">
-                <!-- Header -->
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h1 class="h3 mb-0">
-                        <i class="bi bi-coin"></i> 我的积分
-                    </h1>
-                    <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary">
-                        <i class="bi bi-arrow-left"></i> 返回个人中心
-                    </a>
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">我的积分</h4>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap">
+            <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回个人中心
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <!-- Total Points Card -->
+        <div class="col-12 col-xl-4 grid-margin stretch-card">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h6 class="card-title text-muted mb-2">当前积分余额</h6>
+                    <h1 class="display-3 text-primary fw-bold mb-2">{{ total_points }}</h1>
+                    <p class="text-muted">积分</p>
                 </div>
-                <!-- Total Points Card -->
-                <div class="card shadow-sm mb-4">
-                    <div class="card-body text-center py-5">
-                        <h2 class="text-muted mb-2">当前积分余额</h2>
-                        <p class="display-3 text-primary fw-bold mb-0">{{ total_points }}</p>
-                        <small class="text-muted">积分</small>
-                    </div>
+            </div>
+        </div>
+        <!-- Points Trend Chart -->
+        <div class="col-12 col-xl-8 grid-margin stretch-card">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i data-lucide="trending-up" class="icon-sm"></i> 积分变化趋势（最近30天）
+                    </h6>
+                    <canvas id="pointsTrendChart"></canvas>
                 </div>
-                <!-- Points by Tag -->
-                {% if points_by_tag %}
-                    <div class="card shadow-sm mb-4">
-                        <div class="card-header bg-white">
-                            <h5 class="mb-0">
-                                <i class="bi bi-tags"></i> 按标签分类
-                            </h5>
-                        </div>
-                        <div class="card-body">
-                            <div class="row g-3">
-                                {% for item in points_by_tag %}
-                                    <div class="col-md-6 col-lg-4">
-                                        <div class="border rounded p-3">
-                                            <div class="d-flex justify-content-between align-items-center">
-                                                <span class="badge bg-primary">{{ item.tag }}</span>
-                                                <strong class="text-primary">{{ item.points }}</strong>
-                                            </div>
+            </div>
+        </div>
+        <!-- Points by Tag -->
+        {% if points_by_tag %}
+            <div class="col-12 grid-margin stretch-card">
+                <div class="card">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            <i data-lucide="tags" class="icon-sm"></i> 按标签分类
+                        </h6>
+                        <div class="row">
+                            {% for item in points_by_tag %}
+                                <div class="col-md-6 col-lg-4 mb-3">
+                                    <div class="border rounded p-3">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <span class="badge bg-primary">{{ item.tag }}</span>
+                                            <h4 class="text-primary mb-0">{{ item.points }}</h4>
                                         </div>
                                     </div>
-                                {% endfor %}
-                            </div>
+                                </div>
+                            {% endfor %}
                         </div>
                     </div>
-                {% endif %}
-                <!-- Active Point Sources -->
-                {% if active_sources %}
-                    <div class="card shadow-sm mb-4">
-                        <div class="card-header bg-white">
-                            <h5 class="mb-0">
-                                <i class="bi bi-wallet2"></i> 积分来源
-                            </h5>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-hover">
-                                    <thead>
-                                        <tr>
-                                            <th>获得时间</th>
-                                            <th>初始积分</th>
-                                            <th>剩余积分</th>
-                                            <th>标签</th>
-                                            <th>过期时间</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for source in active_sources %}
-                                            <tr>
-                                                <td>{{ source.created_at|date:"Y-m-d H:i" }}</td>
-                                                <td>{{ source.initial_points }}</td>
-                                                <td class="text-success fw-bold">{{ source.remaining_points }}</td>
-                                                <td>
-                                                    {% for tag in source.tags.all %}<span class="badge bg-secondary me-1">{{ tag.name }}</span>
-                                                    {% endfor %}
-                                                </td>
-                                                <td>
-                                                    {% if source.expires_at %}
-                                                        {{ source.expires_at|date:"Y-m-d" }}
-                                                    {% else %}
-                                                        <span class="text-muted">永久</span>
-                                                    {% endif %}
-                                                </td>
-                                            </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                {% endif %}
-                <!-- Transaction History -->
-                <div class="card shadow-sm">
-                    <div class="card-header bg-white">
-                        <h5 class="mb-0">
-                            <i class="bi bi-clock-history"></i> 交易记录
-                        </h5>
-                    </div>
+                </div>
+            </div>
+        {% endif %}
+        <!-- Active Point Sources -->
+        {% if active_sources %}
+            <div class="col-12 grid-margin stretch-card">
+                <div class="card">
                     <div class="card-body">
-                        {% if page_obj %}
-                            <div class="table-responsive">
-                                <table class="table table-hover">
-                                    <thead>
+                        <h6 class="card-title">
+                            <i data-lucide="wallet" class="icon-sm"></i> 积分来源
+                        </h6>
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>获得时间</th>
+                                        <th>初始积分</th>
+                                        <th>剩余积分</th>
+                                        <th>标签</th>
+                                        <th>过期时间</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for source in active_sources %}
                                         <tr>
-                                            <th>时间</th>
-                                            <th>类型</th>
-                                            <th>积分变动</th>
-                                            <th>描述</th>
+                                            <td>{{ source.created_at|date:"Y-m-d H:i" }}</td>
+                                            <td>{{ source.initial_points }}</td>
+                                            <td class="text-success fw-bold">{{ source.remaining_points }}</td>
+                                            <td>
+                                                {% for tag in source.tags.all %}
+                                                    <span class="badge bg-secondary me-1">{{ tag.name }}</span>
+                                                {% endfor %}
+                                            </td>
+                                            <td>
+                                                {% if source.expires_at %}
+                                                    {{ source.expires_at|date:"Y-m-d" }}
+                                                {% else %}
+                                                    <span class="text-muted">永久</span>
+                                                {% endif %}
+                                            </td>
                                         </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for transaction in page_obj %}
-                                            <tr>
-                                                <td>{{ transaction.created_at|date:"Y-m-d H:i:s" }}</td>
-                                                <td>
-                                                    {% if transaction.transaction_type == "EARN" %}
-                                                        <span class="badge bg-success">获得</span>
-                                                    {% else %}
-                                                        <span class="badge bg-danger">消费</span>
-                                                    {% endif %}
-                                                </td>
-                                                <td>
-                                                    {% if transaction.points > 0 %}
-                                                        <span class="text-success fw-bold">+{{ transaction.points }}</span>
-                                                    {% else %}
-                                                        <span class="text-danger fw-bold">{{ transaction.points }}</span>
-                                                    {% endif %}
-                                                </td>
-                                                <td>{{ transaction.description }}</td>
-                                            </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                            <!-- Pagination -->
-                            {% if page_obj.has_other_pages %}
-                                <nav aria-label="交易记录分页">
-                                    <ul class="pagination justify-content-center mb-0">
-                                        {% if page_obj.has_previous %}
-                                            <li class="page-item">
-                                                <a class="page-link" href="?page=1">首页</a>
-                                            </li>
-                                            <li class="page-item">
-                                                <a class="page-link" href="?page={{ page_obj.previous_page_number }}">上一页</a>
-                                            </li>
-                                        {% endif %}
-                                        <li class="page-item disabled">
-                                            <span class="page-link">第 {{ page_obj.number }} 页，共 {{ page_obj.paginator.num_pages }} 页</span>
-                                        </li>
-                                        {% if page_obj.has_next %}
-                                            <li class="page-item">
-                                                <a class="page-link" href="?page={{ page_obj.next_page_number }}">下一页</a>
-                                            </li>
-                                            <li class="page-item">
-                                                <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">末页</a>
-                                            </li>
-                                        {% endif %}
-                                    </ul>
-                                </nav>
-                            {% endif %}
-                        {% else %}
-                            <p class="text-muted text-center mb-0">暂无交易记录</p>
-                        {% endif %}
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
+                </div>
+            </div>
+        {% endif %}
+        <!-- Transaction History -->
+        <div class="col-12 grid-margin stretch-card">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i data-lucide="clock" class="icon-sm"></i> 交易记录
+                    </h6>
+                    {% if page_obj %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>时间</th>
+                                        <th>类型</th>
+                                        <th>积分变动</th>
+                                        <th>描述</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for transaction in page_obj %}
+                                        <tr>
+                                            <td>{{ transaction.created_at|date:"Y-m-d H:i:s" }}</td>
+                                            <td>
+                                                {% if transaction.transaction_type == "EARN" %}
+                                                    <span class="badge bg-success">获得</span>
+                                                {% else %}
+                                                    <span class="badge bg-danger">消费</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if transaction.points > 0 %}
+                                                    <span class="text-success fw-bold">+{{ transaction.points }}</span>
+                                                {% else %}
+                                                    <span class="text-danger fw-bold">{{ transaction.points }}</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>{{ transaction.description }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <!-- Pagination -->
+                        {% if page_obj.has_other_pages %}
+                            <nav class="mt-3" aria-label="交易记录分页">
+                                <ul class="pagination justify-content-center">
+                                    {% if page_obj.has_previous %}
+                                        <li class="page-item">
+                                            <a class="page-link" href="?page=1" aria-label="首页">
+                                                <i data-lucide="chevrons-left" class="icon-sm"></i>
+                                            </a>
+                                        </li>
+                                        <li class="page-item">
+                                            <a class="page-link" href="?page={{ page_obj.previous_page_number }}" aria-label="上一页">
+                                                <i data-lucide="chevron-left" class="icon-sm"></i>
+                                            </a>
+                                        </li>
+                                    {% endif %}
+                                    <li class="page-item disabled">
+                                        <span class="page-link">第 {{ page_obj.number }} 页，共 {{ page_obj.paginator.num_pages }} 页</span>
+                                    </li>
+                                    {% if page_obj.has_next %}
+                                        <li class="page-item">
+                                            <a class="page-link" href="?page={{ page_obj.next_page_number }}" aria-label="下一页">
+                                                <i data-lucide="chevron-right" class="icon-sm"></i>
+                                            </a>
+                                        </li>
+                                        <li class="page-item">
+                                            <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}" aria-label="末页">
+                                                <i data-lucide="chevrons-right" class="icon-sm"></i>
+                                            </a>
+                                        </li>
+                                    {% endif %}
+                                </ul>
+                            </nav>
+                        {% endif %}
+                    {% else %}
+                        <p class="text-muted text-center mb-0">暂无交易记录</p>
+                    {% endif %}
                 </div>
             </div>
         </div>
     </div>
 {% endblock content %}
+
+{% block plugin_js %}
+    <script src="{% static 'nobleui/vendors/chartjs/chart.umd.js' %}"></script>
+{% endblock plugin_js %}
+
+{% block extra_js %}
+    <script>
+        'use strict';
+
+        (function () {
+            // Get colors and font from app.js
+            const colors = window.config.colors;
+            const fontFamily = window.config.fontFamily;
+
+            // Get data from Django template
+            const trendLabels = {{ trend_labels_json|safe }};
+            const trendDatasets = {{ trend_datasets_json|safe }};
+
+            // Define color palette for different tags
+            const colorPalette = [
+                colors.primary,
+                colors.danger,
+                colors.success,
+                colors.warning,
+                colors.info,
+                '#9333EA', // purple
+                '#EC4899', // pink
+                '#14B8A6', // teal
+                '#F59E0B', // amber
+                '#8B5CF6', // violet
+            ];
+
+            // Format datasets for Chart.js
+            const chartDatasets = trendDatasets.map((dataset, index) => ({
+                data: dataset.data,
+                label: dataset.label,
+                borderColor: colorPalette[index % colorPalette.length],
+                backgroundColor: "transparent",
+                fill: false,
+                pointBackgroundColor: colors.light,
+                pointBorderColor: colorPalette[index % colorPalette.length],
+                pointBorderWidth: 2,
+                pointHoverBorderWidth: 3,
+                pointRadius: 3,
+                pointHoverRadius: 5,
+                tension: 0.3
+            }));
+
+            // Initialize Points Trend Chart
+            const pointsTrendChart = document.querySelector('#pointsTrendChart');
+            if (pointsTrendChart) {
+                new Chart(pointsTrendChart, {
+                    type: 'line',
+                    data: {
+                        labels: trendLabels,
+                        datasets: chartDatasets
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                labels: {
+                                    color: colors.secondary,
+                                    font: {
+                                        size: 13,
+                                        family: fontFamily
+                                    }
+                                }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return context.dataset.label + ': ' + context.parsed.y + ' 积分';
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                grid: {
+                                    display: true,
+                                    color: colors.gridBorder,
+                                    borderColor: colors.gridBorder,
+                                },
+                                ticks: {
+                                    color: colors.secondary,
+                                    font: {
+                                        size: 12
+                                    },
+                                    maxRotation: 45,
+                                    minRotation: 0
+                                }
+                            },
+                            y: {
+                                grid: {
+                                    display: true,
+                                    color: colors.gridBorder,
+                                    borderColor: colors.gridBorder,
+                                },
+                                ticks: {
+                                    color: colors.secondary,
+                                    font: {
+                                        size: 12
+                                    },
+                                    beginAtZero: true
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        })();
+    </script>
+{% endblock extra_js %}

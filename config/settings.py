@@ -16,7 +16,7 @@ env = environ.Env(
     ),
     DATABASE_URL=(str, "sqlite:///db.sqlite3"),
     ALLOWED_HOSTS=(list, []),
-    TIME_ZONE=(str, "UTC"),
+    TIME_ZONE=(str, "Asia/Shanghai"),
     LANGUAGE_CODE=(str, "en-us"),
     USE_I18N=(bool, True),
     USE_TZ=(bool, True),
@@ -159,7 +159,7 @@ STORAGES = {
         "BACKEND": "storages.backends.s3.S3Storage",
     },
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
     },
 }
 

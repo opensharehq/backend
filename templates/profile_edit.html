@@ -1,415 +1,350 @@
-{% extends "base.html" %}
+{% extends "horizontal_base.html" %}
 
-{% block title %}编辑个人资料 - Open Share{% endblock title %}
+{% block title %}编辑个人资料{% endblock title %}
+
+{% block extra_css %}
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+{% endblock extra_css %}
 
 {% block content %}
-    <div class="container py-5">
-        {% if messages %}
-            <div class="row justify-content-center">
-                <div class="col-md-10 col-lg-8">
-                    {% for message in messages %}
-                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                            {{ message }}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">编辑个人资料</h4>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap">
+            <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12 col-xl-12">
+            <form method="post" novalidate>
+                {% csrf_token %}
+                <!-- 基本资料卡片 -->
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            <i data-lucide="user" class="icon-sm"></i> 基本资料
+                        </h6>
+                        <div class="mb-3">
+                            <label for="{{ form.bio.id_for_label }}" class="form-label">个人简介</label>
+                            {{ form.bio }}
+                            {% if form.bio.errors %}
+                                <div class="invalid-feedback d-block">{{ form.bio.errors.0 }}</div>
+                            {% endif %}
+                            <div class="form-text">最多 500 字符</div>
                         </div>
-                    {% endfor %}
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.birth_date.id_for_label }}" class="form-label">生日</label>
+                                {{ form.birth_date }}
+                                {% if form.birth_date.errors %}
+                                    <div class="invalid-feedback d-block">{{ form.birth_date.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.company.id_for_label }}" class="form-label">公司</label>
+                                {{ form.company }}
+                                {% if form.company.errors %}
+                                    <div class="invalid-feedback d-block">{{ form.company.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.location.id_for_label }}" class="form-label">位置</label>
+                            {{ form.location }}
+                            {% if form.location.errors %}
+                                <div class="invalid-feedback d-block">{{ form.location.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
                 </div>
-            </div>
-        {% endif %}
-        <div class="row justify-content-center">
-            <div class="col-md-10 col-lg-8">
-                <div class="card shadow">
-                    <div class="card-body p-4">
-                        <div class="d-flex justify-content-between align-items-center mb-4">
-                            <h1 class="card-title h3 mb-0">编辑个人资料</h1>
-                            <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary">
-                                <i class="bi bi-arrow-left"></i> 返回
-                            </a>
+                <!-- 社交链接卡片 -->
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            <i data-lucide="link" class="icon-sm"></i> 社交链接
+                        </h6>
+                        <div class="mb-3">
+                            <label for="{{ form.github_url.id_for_label }}" class="form-label">
+                                <i data-lucide="github" class="icon-sm"></i> GitHub
+                            </label>
+                            {{ form.github_url }}
+                            {% if form.github_url.errors %}
+                                <div class="invalid-feedback d-block">{{ form.github_url.errors.0 }}</div>
+                            {% endif %}
                         </div>
-                        <form method="post" novalidate>
-                            {% csrf_token %}
-                            <!-- 个人简介 -->
-                            <div class="mb-4">
-                                <h2 class="h5 mb-3 text-primary">
-                                    <i class="bi bi-person-badge"></i> 基本资料
-                                </h2>
-                                <div class="mb-3">
-                                    <label for="{{ form.bio.id_for_label }}" class="form-label">
-                                        个人简介
-                                    </label>
-                                    {{ form.bio }}
-                                    {% if form.bio.errors %}
-                                        <div class="invalid-feedback d-block">
-                                            {{ form.bio.errors.0 }}
-                                        </div>
-                                    {% endif %}
-                                    <div class="form-text">最多 500 字符</div>
+                        <div class="mb-3">
+                            <label for="{{ form.homepage_url.id_for_label }}" class="form-label">
+                                <i data-lucide="home" class="icon-sm"></i> 个人主页
+                            </label>
+                            {{ form.homepage_url }}
+                            {% if form.homepage_url.errors %}
+                                <div class="invalid-feedback d-block">{{ form.homepage_url.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.blog_url.id_for_label }}" class="form-label">
+                                <i data-lucide="book-open" class="icon-sm"></i> 博客
+                            </label>
+                            {{ form.blog_url }}
+                            {% if form.blog_url.errors %}
+                                <div class="invalid-feedback d-block">{{ form.blog_url.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.twitter_url.id_for_label }}" class="form-label">
+                                <i data-lucide="twitter" class="icon-sm"></i> Twitter
+                            </label>
+                            {{ form.twitter_url }}
+                            {% if form.twitter_url.errors %}
+                                <div class="invalid-feedback d-block">{{ form.twitter_url.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.linkedin_url.id_for_label }}" class="form-label">
+                                <i data-lucide="linkedin" class="icon-sm"></i> LinkedIn
+                            </label>
+                            {{ form.linkedin_url }}
+                            {% if form.linkedin_url.errors %}
+                                <div class="invalid-feedback d-block">{{ form.linkedin_url.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <!-- 工作经历卡片 -->
+                <div class="card mb-3" x-data="workExperienceManager({{ work_formset.total_form_count }})">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="card-title mb-0">
+                                <i data-lucide="briefcase" class="icon-sm"></i> 工作经历
+                            </h6>
+                            <button type="button" class="btn btn-sm btn-primary btn-icon-text" @click="addForm()">
+                                <i data-lucide="plus-circle" class="btn-icon-prepend"></i> 添加工作经历
+                            </button>
+                        </div>
+                        {{ work_formset.management_form }}
+                        <template id="work-form-template">
+                            <div class="border rounded p-3 mb-3 formset-form">
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">公司名称</label>
+                                        <input type="text" name="work_experiences-__prefix__-company_name" class="form-control">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">职位</label>
+                                        <input type="text" name="work_experiences-__prefix__-title" class="form-control">
+                                    </div>
                                 </div>
                                 <div class="row">
                                     <div class="col-md-6 mb-3">
-                                        <label for="{{ form.birth_date.id_for_label }}" class="form-label">
-                                            生日
-                                        </label>
-                                        {{ form.birth_date }}
-                                        {% if form.birth_date.errors %}
-                                            <div class="invalid-feedback d-block">
-                                                {{ form.birth_date.errors.0 }}
-                                            </div>
-                                        {% endif %}
+                                        <label class="form-label">开始日期</label>
+                                        <input type="date" name="work_experiences-__prefix__-start_date" class="form-control">
                                     </div>
                                     <div class="col-md-6 mb-3">
-                                        <label for="{{ form.company.id_for_label }}" class="form-label">
-                                            公司
-                                        </label>
-                                        {{ form.company }}
-                                        {% if form.company.errors %}
-                                            <div class="invalid-feedback d-block">
-                                                {{ form.company.errors.0 }}
-                                            </div>
-                                        {% endif %}
+                                        <label class="form-label">结束日期 <small class="text-muted">(留空表示至今)</small></label>
+                                        <input type="date" name="work_experiences-__prefix__-end_date" class="form-control">
                                     </div>
                                 </div>
                                 <div class="mb-3">
-                                    <label for="{{ form.location.id_for_label }}" class="form-label">
-                                        位置
-                                    </label>
-                                    {{ form.location }}
-                                    {% if form.location.errors %}
-                                        <div class="invalid-feedback d-block">
-                                            {{ form.location.errors.0 }}
-                                        </div>
-                                    {% endif %}
+                                    <label class="form-label">工作描述</label>
+                                    <textarea name="work_experiences-__prefix__-description" rows="3" class="form-control"></textarea>
                                 </div>
-                            </div>
-                            <hr class="my-4" />
-                            <!-- 社交链接 -->
-                            <div class="mb-4">
-                                <h2 class="h5 mb-3 text-primary">
-                                    <i class="bi bi-link-45deg"></i> 社交链接
-                                </h2>
-                                <div class="mb-3">
-                                    <label for="{{ form.github_url.id_for_label }}" class="form-label">
-                                        <i class="bi bi-github"></i> GitHub
-                                    </label>
-                                    {{ form.github_url }}
-                                    {% if form.github_url.errors %}
-                                        <div class="invalid-feedback d-block">
-                                            {{ form.github_url.errors.0 }}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                                <div class="mb-3">
-                                    <label for="{{ form.homepage_url.id_for_label }}" class="form-label">
-                                        <i class="bi bi-house-door"></i> 个人主页
-                                    </label>
-                                    {{ form.homepage_url }}
-                                    {% if form.homepage_url.errors %}
-                                        <div class="invalid-feedback d-block">
-                                            {{ form.homepage_url.errors.0 }}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                                <div class="mb-3">
-                                    <label for="{{ form.blog_url.id_for_label }}" class="form-label">
-                                        <i class="bi bi-journal-text"></i> 博客
-                                    </label>
-                                    {{ form.blog_url }}
-                                    {% if form.blog_url.errors %}
-                                        <div class="invalid-feedback d-block">
-                                            {{ form.blog_url.errors.0 }}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                                <div class="mb-3">
-                                    <label for="{{ form.twitter_url.id_for_label }}" class="form-label">
-                                        <i class="bi bi-twitter-x"></i> Twitter
-                                    </label>
-                                    {{ form.twitter_url }}
-                                    {% if form.twitter_url.errors %}
-                                        <div class="invalid-feedback d-block">
-                                            {{ form.twitter_url.errors.0 }}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                                <div class="mb-3">
-                                    <label for="{{ form.linkedin_url.id_for_label }}" class="form-label">
-                                        <i class="bi bi-linkedin"></i> LinkedIn
-                                    </label>
-                                    {{ form.linkedin_url }}
-                                    {% if form.linkedin_url.errors %}
-                                        <div class="invalid-feedback d-block">
-                                            {{ form.linkedin_url.errors.0 }}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            <hr class="my-4" />
-                            <!-- 工作经历 -->
-                            <div class="mb-4" x-data="workExperienceManager({{ work_formset.total_form_count }})">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <h2 class="h5 mb-0 text-primary">
-                                        <i class="bi bi-briefcase"></i> 工作经历
-                                    </h2>
-                                    <button type="button" class="btn btn-sm btn-outline-primary" @click="addForm()">
-                                        <i class="bi bi-plus-circle"></i> 添加工作经历
-                                    </button>
-                                </div>
-                                {{ work_formset.management_form }}
-                                <!-- 隐藏的模板表单 -->
-                                <template id="work-form-template">
-                                    <div class="border rounded p-3 mb-3 formset-form">
-                                        <div class="row">
-                                            <div class="col-md-6 mb-3">
-                                                <label class="form-label">公司名称</label>
-                                                <input type="text" name="work_experiences-__prefix__-company_name" class="form-control" />
-                                            </div>
-                                            <div class="col-md-6 mb-3">
-                                                <label class="form-label">职位</label>
-                                                <input type="text" name="work_experiences-__prefix__-title" class="form-control" />
-                                            </div>
-                                        </div>
-                                        <div class="row">
-                                            <div class="col-md-6 mb-3">
-                                                <label class="form-label">开始日期</label>
-                                                <input type="date" name="work_experiences-__prefix__-start_date" class="form-control" />
-                                            </div>
-                                            <div class="col-md-6 mb-3">
-                                                <label class="form-label">结束日期 <small class="text-muted">(留空表示至今)</small></label>
-                                                <input type="date" name="work_experiences-__prefix__-end_date" class="form-control" />
-                                            </div>
-                                        </div>
-                                        <div class="mb-3">
-                                            <label class="form-label">工作描述</label>
-                                            <textarea name="work_experiences-__prefix__-description" rows="3" class="form-control"></textarea>
-                                        </div>
-                                        <input type="hidden" name="work_experiences-__prefix__-id" />
-                                        <button type="button" class="btn btn-sm btn-outline-danger" x-on:click="$el.closest('.formset-form').remove(); formCount--;">
-                                            <i class="bi bi-trash"></i> 删除
-                                        </button>
-                                    </div>
-                                </template>
-                                <div id="work-formset">
-                                    {% for work_form in work_formset %}
-                                        <div class="border rounded p-3 mb-3 formset-form">
-                                            {{ work_form.id }}
-                                            {% if work_form.non_field_errors %}
-                                                <div class="alert alert-danger" role="alert">
-                                                    {{ work_form.non_field_errors.0 }}
-                                                </div>
-                                            {% endif %}
-                                            <div class="row">
-                                                <div class="col-md-6 mb-3">
-                                                    <label for="{{ work_form.company_name.id_for_label }}" class="form-label">
-                                                        公司名称 {% if work_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
-                                                    </label>
-                                                    {{ work_form.company_name }}
-                                                    {% if work_form.company_name.errors %}
-                                                        <div class="invalid-feedback d-block">
-                                                            {{ work_form.company_name.errors.0 }}
-                                                        </div>
-                                                    {% endif %}
-                                                </div>
-                                                <div class="col-md-6 mb-3">
-                                                    <label for="{{ work_form.title.id_for_label }}" class="form-label">
-                                                        职位 {% if work_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
-                                                    </label>
-                                                    {{ work_form.title }}
-                                                    {% if work_form.title.errors %}
-                                                        <div class="invalid-feedback d-block">
-                                                            {{ work_form.title.errors.0 }}
-                                                        </div>
-                                                    {% endif %}
-                                                </div>
-                                            </div>
-                                            <div class="row">
-                                                <div class="col-md-6 mb-3">
-                                                    <label for="{{ work_form.start_date.id_for_label }}" class="form-label">
-                                                        开始日期 {% if work_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
-                                                    </label>
-                                                    {{ work_form.start_date }}
-                                                    {% if work_form.start_date.errors %}
-                                                        <div class="invalid-feedback d-block">
-                                                            {{ work_form.start_date.errors.0 }}
-                                                        </div>
-                                                    {% endif %}
-                                                </div>
-                                                <div class="col-md-6 mb-3">
-                                                    <label for="{{ work_form.end_date.id_for_label }}" class="form-label">
-                                                        结束日期 <small class="text-muted">(留空表示至今)</small>
-                                                    </label>
-                                                    {{ work_form.end_date }}
-                                                    {% if work_form.end_date.errors %}
-                                                        <div class="invalid-feedback d-block">
-                                                            {{ work_form.end_date.errors.0 }}
-                                                        </div>
-                                                    {% endif %}
-                                                </div>
-                                            </div>
-                                            <div class="mb-3">
-                                                <label for="{{ work_form.description.id_for_label }}" class="form-label">
-                                                    工作描述
-                                                </label>
-                                                {{ work_form.description }}
-                                                {% if work_form.description.errors %}
-                                                    <div class="invalid-feedback d-block">
-                                                        {{ work_form.description.errors.0 }}
-                                                    </div>
-                                                {% endif %}
-                                            </div>
-                                            {% if work_form.instance.pk %}
-                                                <div class="form-check">
-                                                    {{ work_form.DELETE }}
-                                                    <label class="form-check-label text-danger" for="{{ work_form.DELETE.id_for_label }}">
-                                                        删除此工作经历
-                                                    </label>
-                                                </div>
-                                            {% endif %}
-                                        </div>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                            <hr class="my-4" />
-                            <!-- 学习经历 -->
-                            <div class="mb-4" x-data="educationManager({{ education_formset.total_form_count }})">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <h2 class="h5 mb-0 text-primary">
-                                        <i class="bi bi-mortarboard"></i> 学习经历
-                                    </h2>
-                                    <button type="button" class="btn btn-sm btn-outline-primary" @click="addForm()">
-                                        <i class="bi bi-plus-circle"></i> 添加学习经历
-                                    </button>
-                                </div>
-                                {{ education_formset.management_form }}
-                                <!-- 隐藏的模板表单 -->
-                                <template id="education-form-template">
-                                    <div class="border rounded p-3 mb-3 formset-form">
-                                        <div class="row">
-                                            <div class="col-md-6 mb-3">
-                                                <label class="form-label">学校/机构名称</label>
-                                                <input type="text" name="educations-__prefix__-institution_name" class="form-control" />
-                                            </div>
-                                            <div class="col-md-6 mb-3">
-                                                <label class="form-label">学位</label>
-                                                <input type="text" name="educations-__prefix__-degree" class="form-control" />
-                                            </div>
-                                        </div>
-                                        <div class="mb-3">
-                                            <label class="form-label">专业领域</label>
-                                            <input type="text" name="educations-__prefix__-field_of_study" class="form-control" />
-                                        </div>
-                                        <div class="row">
-                                            <div class="col-md-6 mb-3">
-                                                <label class="form-label">开始日期</label>
-                                                <input type="date" name="educations-__prefix__-start_date" class="form-control" />
-                                            </div>
-                                            <div class="col-md-6 mb-3">
-                                                <label class="form-label">结束日期 <small class="text-muted">(留空表示至今)</small></label>
-                                                <input type="date" name="educations-__prefix__-end_date" class="form-control" />
-                                            </div>
-                                        </div>
-                                        <input type="hidden" name="educations-__prefix__-id" />
-                                        <button type="button" class="btn btn-sm btn-outline-danger" x-on:click="$el.closest('.formset-form').remove(); formCount--;">
-                                            <i class="bi bi-trash"></i> 删除
-                                        </button>
-                                    </div>
-                                </template>
-                                <div id="education-formset">
-                                    {% for edu_form in education_formset %}
-                                        <div class="border rounded p-3 mb-3 formset-form">
-                                            {{ edu_form.id }}
-                                            {% if edu_form.non_field_errors %}
-                                                <div class="alert alert-danger" role="alert">
-                                                    {{ edu_form.non_field_errors.0 }}
-                                                </div>
-                                            {% endif %}
-                                            <div class="row">
-                                                <div class="col-md-6 mb-3">
-                                                    <label for="{{ edu_form.institution_name.id_for_label }}" class="form-label">
-                                                        学校/机构名称 {% if edu_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
-                                                    </label>
-                                                    {{ edu_form.institution_name }}
-                                                    {% if edu_form.institution_name.errors %}
-                                                        <div class="invalid-feedback d-block">
-                                                            {{ edu_form.institution_name.errors.0 }}
-                                                        </div>
-                                                    {% endif %}
-                                                </div>
-                                                <div class="col-md-6 mb-3">
-                                                    <label for="{{ edu_form.degree.id_for_label }}" class="form-label">
-                                                        学位
-                                                    </label>
-                                                    {{ edu_form.degree }}
-                                                    {% if edu_form.degree.errors %}
-                                                        <div class="invalid-feedback d-block">
-                                                            {{ edu_form.degree.errors.0 }}
-                                                        </div>
-                                                    {% endif %}
-                                                </div>
-                                            </div>
-                                            <div class="mb-3">
-                                                <label for="{{ edu_form.field_of_study.id_for_label }}" class="form-label">
-                                                    专业领域 {% if edu_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
-                                                </label>
-                                                {{ edu_form.field_of_study }}
-                                                {% if edu_form.field_of_study.errors %}
-                                                    <div class="invalid-feedback d-block">
-                                                        {{ edu_form.field_of_study.errors.0 }}
-                                                    </div>
-                                                {% endif %}
-                                            </div>
-                                            <div class="row">
-                                                <div class="col-md-6 mb-3">
-                                                    <label for="{{ edu_form.start_date.id_for_label }}" class="form-label">
-                                                        开始日期 {% if edu_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
-                                                    </label>
-                                                    {{ edu_form.start_date }}
-                                                    {% if edu_form.start_date.errors %}
-                                                        <div class="invalid-feedback d-block">
-                                                            {{ edu_form.start_date.errors.0 }}
-                                                        </div>
-                                                    {% endif %}
-                                                </div>
-                                                <div class="col-md-6 mb-3">
-                                                    <label for="{{ edu_form.end_date.id_for_label }}" class="form-label">
-                                                        结束日期 <small class="text-muted">(留空表示至今)</small>
-                                                    </label>
-                                                    {{ edu_form.end_date }}
-                                                    {% if edu_form.end_date.errors %}
-                                                        <div class="invalid-feedback d-block">
-                                                            {{ edu_form.end_date.errors.0 }}
-                                                        </div>
-                                                    {% endif %}
-                                                </div>
-                                            </div>
-                                            {% if edu_form.instance.pk %}
-                                                <div class="form-check">
-                                                    {{ edu_form.DELETE }}
-                                                    <label class="form-check-label text-danger" for="{{ edu_form.DELETE.id_for_label }}">
-                                                        删除此学习经历
-                                                    </label>
-                                                </div>
-                                            {% endif %}
-                                        </div>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                            <hr class="my-4" />
-                            <!-- 提交按钮 -->
-                            <div class="d-grid gap-2 d-md-flex justify-content-md-end">
-                                <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary">
-                                    <i class="bi bi-x-circle"></i> 取消
-                                </a>
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="bi bi-check-circle"></i> 保存更改
+                                <input type="hidden" name="work_experiences-__prefix__-id">
+                                <button type="button" class="btn btn-sm btn-outline-danger btn-icon-text" x-on:click="$el.closest('.formset-form').remove(); formCount--;">
+                                    <i data-lucide="trash-2" class="btn-icon-prepend"></i> 删除
                                 </button>
                             </div>
-                        </form>
+                        </template>
+                        <div id="work-formset">
+                            {% for work_form in work_formset %}
+                                <div class="border rounded p-3 mb-3 formset-form">
+                                    {{ work_form.id }}
+                                    {% if work_form.non_field_errors %}
+                                        <div class="alert alert-danger" role="alert">{{ work_form.non_field_errors.0 }}</div>
+                                    {% endif %}
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label for="{{ work_form.company_name.id_for_label }}" class="form-label">
+                                                公司名称 {% if work_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                            </label>
+                                            {{ work_form.company_name }}
+                                            {% if work_form.company_name.errors %}
+                                                <div class="invalid-feedback d-block">{{ work_form.company_name.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label for="{{ work_form.title.id_for_label }}" class="form-label">
+                                                职位 {% if work_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                            </label>
+                                            {{ work_form.title }}
+                                            {% if work_form.title.errors %}
+                                                <div class="invalid-feedback d-block">{{ work_form.title.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label for="{{ work_form.start_date.id_for_label }}" class="form-label">
+                                                开始日期 {% if work_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                            </label>
+                                            {{ work_form.start_date }}
+                                            {% if work_form.start_date.errors %}
+                                                <div class="invalid-feedback d-block">{{ work_form.start_date.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label for="{{ work_form.end_date.id_for_label }}" class="form-label">
+                                                结束日期 <small class="text-muted">(留空表示至今)</small>
+                                            </label>
+                                            {{ work_form.end_date }}
+                                            {% if work_form.end_date.errors %}
+                                                <div class="invalid-feedback d-block">{{ work_form.end_date.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="{{ work_form.description.id_for_label }}" class="form-label">工作描述</label>
+                                        {{ work_form.description }}
+                                        {% if work_form.description.errors %}
+                                            <div class="invalid-feedback d-block">{{ work_form.description.errors.0 }}</div>
+                                        {% endif %}
+                                    </div>
+                                    {% if work_form.instance.pk %}
+                                        <div class="form-check">
+                                            {{ work_form.DELETE }}
+                                            <label class="form-check-label text-danger" for="{{ work_form.DELETE.id_for_label }}">删除此工作经历</label>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        </div>
                     </div>
                 </div>
-            </div>
+                <!-- 学习经历卡片 -->
+                <div class="card mb-3" x-data="educationManager({{ education_formset.total_form_count }})">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="card-title mb-0">
+                                <i data-lucide="graduation-cap" class="icon-sm"></i> 学习经历
+                            </h6>
+                            <button type="button" class="btn btn-sm btn-primary btn-icon-text" @click="addForm()">
+                                <i data-lucide="plus-circle" class="btn-icon-prepend"></i> 添加学习经历
+                            </button>
+                        </div>
+                        {{ education_formset.management_form }}
+                        <template id="education-form-template">
+                            <div class="border rounded p-3 mb-3 formset-form">
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">学校/机构名称</label>
+                                        <input type="text" name="educations-__prefix__-institution_name" class="form-control">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">学位</label>
+                                        <input type="text" name="educations-__prefix__-degree" class="form-control">
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">专业领域</label>
+                                    <input type="text" name="educations-__prefix__-field_of_study" class="form-control">
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">开始日期</label>
+                                        <input type="date" name="educations-__prefix__-start_date" class="form-control">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">结束日期 <small class="text-muted">(留空表示至今)</small></label>
+                                        <input type="date" name="educations-__prefix__-end_date" class="form-control">
+                                    </div>
+                                </div>
+                                <input type="hidden" name="educations-__prefix__-id">
+                                <button type="button" class="btn btn-sm btn-outline-danger btn-icon-text" x-on:click="$el.closest('.formset-form').remove(); formCount--;">
+                                    <i data-lucide="trash-2" class="btn-icon-prepend"></i> 删除
+                                </button>
+                            </div>
+                        </template>
+                        <div id="education-formset">
+                            {% for edu_form in education_formset %}
+                                <div class="border rounded p-3 mb-3 formset-form">
+                                    {{ edu_form.id }}
+                                    {% if edu_form.non_field_errors %}
+                                        <div class="alert alert-danger" role="alert">{{ edu_form.non_field_errors.0 }}</div>
+                                    {% endif %}
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label for="{{ edu_form.institution_name.id_for_label }}" class="form-label">
+                                                学校/机构名称 {% if edu_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                            </label>
+                                            {{ edu_form.institution_name }}
+                                            {% if edu_form.institution_name.errors %}
+                                                <div class="invalid-feedback d-block">{{ edu_form.institution_name.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label for="{{ edu_form.degree.id_for_label }}" class="form-label">学位</label>
+                                            {{ edu_form.degree }}
+                                            {% if edu_form.degree.errors %}
+                                                <div class="invalid-feedback d-block">{{ edu_form.degree.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="{{ edu_form.field_of_study.id_for_label }}" class="form-label">
+                                            专业领域 {% if edu_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                        </label>
+                                        {{ edu_form.field_of_study }}
+                                        {% if edu_form.field_of_study.errors %}
+                                            <div class="invalid-feedback d-block">{{ edu_form.field_of_study.errors.0 }}</div>
+                                        {% endif %}
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label for="{{ edu_form.start_date.id_for_label }}" class="form-label">
+                                                开始日期 {% if edu_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                            </label>
+                                            {{ edu_form.start_date }}
+                                            {% if edu_form.start_date.errors %}
+                                                <div class="invalid-feedback d-block">{{ edu_form.start_date.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label for="{{ edu_form.end_date.id_for_label }}" class="form-label">
+                                                结束日期 <small class="text-muted">(留空表示至今)</small>
+                                            </label>
+                                            {{ edu_form.end_date }}
+                                            {% if edu_form.end_date.errors %}
+                                                <div class="invalid-feedback d-block">{{ edu_form.end_date.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    {% if edu_form.instance.pk %}
+                                        <div class="form-check">
+                                            {{ edu_form.DELETE }}
+                                            <label class="form-check-label text-danger" for="{{ edu_form.DELETE.id_for_label }}">删除此学习经历</label>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                <!-- 操作按钮 -->
+                <div class="d-flex justify-content-end gap-2">
+                    <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary btn-icon-text">
+                        <i data-lucide="x-circle" class="btn-icon-prepend"></i> 取消
+                    </a>
+                    <button type="submit" class="btn btn-primary btn-icon-text">
+                        <i data-lucide="check-circle" class="btn-icon-prepend"></i> 保存更改
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 {% endblock content %}
+
 {% block extra_js %}
     <script>
         function workExperienceManager(initialCount) {
@@ -419,13 +354,13 @@
                     const formset = document.getElementById('work-formset');
                     const template = document.getElementById('work-form-template');
                     const newForm = template.content.cloneNode(true).querySelector('.formset-form');
-
-                    // 更新表单索引，将 __prefix__ 替换为实际的索引
                     newForm.innerHTML = newForm.innerHTML.replace(/__prefix__/g, this.formCount);
-
                     formset.appendChild(newForm);
                     this.formCount++;
                     document.getElementById('id_work_experiences-TOTAL_FORMS').value = this.formCount;
+                    if (window.lucide) {
+                        lucide.createIcons();
+                    }
                 }
             }
         }
@@ -437,13 +372,13 @@
                     const formset = document.getElementById('education-formset');
                     const template = document.getElementById('education-form-template');
                     const newForm = template.content.cloneNode(true).querySelector('.formset-form');
-
-                    // 更新表单索引，将 __prefix__ 替换为实际的索引
                     newForm.innerHTML = newForm.innerHTML.replace(/__prefix__/g, this.formCount);
-
                     formset.appendChild(newForm);
                     this.formCount++;
                     document.getElementById('id_educations-TOTAL_FORMS').value = this.formCount;
+                    if (window.lucide) {
+                        lucide.createIcons();
+                    }
                 }
             }
         }

@@ -624,7 +624,7 @@ class ProfileViewTests(TestCase):
         response = self.client.get(reverse("accounts:profile"))
 
         # Check that tag breakdown is displayed
-        self.assertContains(response, "积分分类")
+        self.assertContains(response, "我的积分")
         self.assertContains(response, "reward")
         self.assertContains(response, "bonus")
 

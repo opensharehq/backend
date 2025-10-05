@@ -1,0 +1,7 @@
+// Background
+
+@each $color, $value in $social-colors {
+  .bg-#{$color} {
+    background: social-color($color);
+  }
+}

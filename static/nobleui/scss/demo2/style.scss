@@ -1,0 +1,123 @@
+/*
+* NobleUI - HTML Bootstrap 5 Admin Dashboard Template v3.0.1 (https://nobleui.com/)
+* Copyright © 2025 NobleUI
+* Licensed under ThemeForest License
+*/
+
+// Theme style for demo2 (Horizontal Menu Layout)
+
+// Bootstrap functions
+@import "bootstrap/scss/functions";
+
+// Custom variables
+@import "../common/variables";
+@import "../common/variables-dark";
+@import "./variables";
+
+// Bootstrap stylesheets
+@import "bootstrap/scss/variables";
+@import "bootstrap/scss/variables-dark";
+@import "bootstrap/scss/maps";
+@import "bootstrap/scss/mixins";
+@import "bootstrap/scss/utilities";
+
+// Bootstrap layout & components
+@import "bootstrap/scss/root";
+@import "bootstrap/scss/reboot";
+@import "bootstrap/scss/type";
+@import "bootstrap/scss/images";
+@import "bootstrap/scss/containers";
+@import "bootstrap/scss/grid";
+@import "bootstrap/scss/tables";
+@import "bootstrap/scss/forms";
+@import "bootstrap/scss/buttons";
+@import "bootstrap/scss/transitions";
+@import "bootstrap/scss/dropdown";
+@import "bootstrap/scss/button-group";
+@import "bootstrap/scss/nav";
+@import "bootstrap/scss/navbar";
+@import "bootstrap/scss/card";
+@import "bootstrap/scss/accordion";
+@import "bootstrap/scss/breadcrumb";
+@import "bootstrap/scss/pagination";
+@import "bootstrap/scss/badge";
+@import "bootstrap/scss/alert";
+@import "bootstrap/scss/progress";
+@import "bootstrap/scss/list-group";
+@import "bootstrap/scss/close";
+@import "bootstrap/scss/toasts";
+@import "bootstrap/scss/modal";
+@import "bootstrap/scss/tooltip";
+@import "bootstrap/scss/popover";
+@import "bootstrap/scss/carousel";
+@import "bootstrap/scss/spinners";
+@import "bootstrap/scss/offcanvas";
+@import "bootstrap/scss/placeholders";
+
+// Bootstrap helpers
+@import "bootstrap/scss/helpers";
+
+// Bootstrap utilities
+@import "../common/utilities";
+@import "bootstrap/scss/utilities/api";
+
+
+// Custom mixins
+@import "../common/mixins/animation";
+@import "../common/mixins/buttons";
+@import "../common/mixins/misc";
+
+// Core styles
+@import "../common/root";
+@import "../common/reboot";
+@import "../common/background";
+@import "../common/functions";
+@import "../common/misc";
+@import "../common/helpers";
+@import "../common/typography";
+@import "../common/demo";
+
+// Layout
+@import "./root";
+@import "./horizontal-wrapper";
+@import "./navbar";
+@import "./layouts";
+
+// Custom components
+@import "../common/components/alert";
+@import "../common/components/badges";
+@import "../common/components/breadcrumbs";
+@import "../common/components/buttons";
+@import "../common/components/cards";
+@import "../common/components/close";
+@import "../common/components/dashboard";
+@import "../common/components/dropdown";
+@import "../common/components/forms";
+@import "../common/components/icons";
+@import "../common/components/nav";
+@import "../common/components/pagination";
+@import "../common/components/tables";
+@import "../common/components/timeline";
+@import "../common/components/auth";
+@import "../common/components/chat";
+@import "../common/components/email";
+
+// 3rd-Party plugin overrides
+@import "../common/plugin-overrides/ace";
+@import "../common/plugin-overrides/apex-charts";
+@import "../common/plugin-overrides/data-tables";
+@import "../common/plugin-overrides/dropify";
+@import "../common/plugin-overrides/dropzone";
+@import "../common/plugin-overrides/flatpickr";
+@import "../common/plugin-overrides/full-calendar";
+@import "../common/plugin-overrides/jquery-flot";
+@import "../common/plugin-overrides/owl-carousel";
+@import "../common/plugin-overrides/peity";
+@import "../common/plugin-overrides/perfect-scrollbar";
+@import "../common/plugin-overrides/sweet-alert";
+@import "../common/plugin-overrides/select2";
+@import "../common/plugin-overrides/easymde";
+@import "../common/plugin-overrides/tags-input";
+@import "../common/plugin-overrides/tinymce";
+@import "../common/plugin-overrides/typeahead";
+@import "../common/plugin-overrides/wizard";

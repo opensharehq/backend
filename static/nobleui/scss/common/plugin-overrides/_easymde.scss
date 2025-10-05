@@ -1,0 +1,74 @@
+// npm package: easymde
+// github link: https://github.com/Ionaru/easy-markdown-editor
+
+.EasyMDEContainer .CodeMirror {
+  background: $input-bg;
+  border: 1px solid $input-border-color;
+  color: var(--#{$prefix}body-color);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  &.CodeMirror-focused {
+    border-color: $input-focus-border-color;
+  }
+}
+
+.editor-toolbar {
+  border: 1px solid $input-border-color;
+  border-bottom: 0;
+  border-radius: $input-border-radius $input-border-radius 0 0;
+  &, &:hover {
+    opacity: 1;
+  }
+  button {
+    color: $secondary;
+    &:focus-visible {
+      outline: none;
+    }
+  }
+  i.separator {
+    border-left: 1px solid $input-border-color;
+    border-right: 1px solid $input-border-color;
+  }
+  &.fullscreen {
+    background: $input-bg;
+  }
+}
+
+.CodeMirror-cursor {
+  border-color: var(--#{$prefix}body-color);
+}
+
+.CodeMirror-fullscreen,
+.editor-toolbar.fullscreen,
+.editor-preview-side,
+.EasyMDEContainer .CodeMirror-fullscreen {
+  z-index: $zindex-modal;
+}
+
+.editor-preview-side {
+  border-color: $input-border-color;
+}
+
+.editor-preview {
+  background: $input-bg;
+}
+
+.editor-toolbar button:hover {
+  background: $component-hover-bg;
+  border-color: transparent;
+}
+
+.editor-toolbar button.active {
+  background: $component-active-bg;
+  color: $component-active-color;
+  border-color: transparent;
+}
+
+.editor-statusbar {
+  padding: 0 10px;
+  color: $secondary;
+  border: 1px solid $input-border-color;
+  border-top-color: transparent;
+  border-bottom-left-radius: $input-border-radius;
+  border-bottom-right-radius: $input-border-radius;
+}

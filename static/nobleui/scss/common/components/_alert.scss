@@ -1,0 +1,73 @@
+// Alert
+
+.alert {
+  svg {
+    width: 19px;
+    height: 19px;
+    margin-right: .5rem;
+  }
+  i {
+    font-size: 19px;
+    margin-right: .5rem;
+  }
+  .alert-link {
+    text-decoration: underline;
+  }
+}
+
+@each $state, $value in $theme-colors {
+  // Basic alerts
+  .alert-#{$state} {
+    background-color: rgba($value, .1);
+    color:$value;
+    border-color: rgba($value, .5);
+    .alert-link {
+      color:$value;
+    }
+    &.alert-light {
+      border-color: rgba($value, 1);
+      color: $secondary;
+      .alert-link {
+        color: $secondary;
+      }
+    }
+    &.alert-dark {
+      border-color: rgba($dark, .2);
+    }
+  }
+
+  // Fill alerts
+  .alert-fill-#{$state} {
+    --#{$prefix}alert-color: #{$white};
+    --#{$prefix}alert-bg: var(--#{$prefix}#{$state});
+    --#{$prefix}alert-border-color: var(--#{$prefix}#{$state}-border-subtle);
+    --#{$prefix}alert-link-color: var(--#{$prefix}#{$state}-text-emphasis);
+    &.alert-fill-light {
+      --#{$prefix}alert-color: #{$dark};
+    }
+    &.alert-fill-dark {
+      --#{$prefix}alert-color: #{$light};
+    }
+  }
+}
+
+
+@if $enable-dark-mode {
+  @include color-mode(dark) {
+    @each $state, $value in $theme-colors {
+      .alert-#{$state} {
+        &.alert-light {
+          border-color: rgba($value, .2);
+        }
+        &.alert-dark {
+          border-color: rgba($light, .3);
+          color: $secondary;
+          .alert-link {
+            color: $secondary;
+          }
+        }
+      }
+    }
+  }
+}
+

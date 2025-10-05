@@ -1,0 +1,77 @@
+// npm package: sweetalert2
+// github link: https://github.com/sweetalert2/sweetalert2
+
+.swal2-popup {
+  font-size: $font-size-base;
+
+  .swal2-title {
+    font-size: 25px;
+    line-height: 1;
+    font-weight: 500;
+    color: var(--#{$prefix}body-color);
+    margin-bottom: 0;
+  }
+
+  .swal2-html-container {
+    font-size: $font-size-base;
+    color: $secondary;
+    font-weight: initial;
+    margin-top: 11px;
+    text-decoration: none;
+  }
+
+  .swal2-actions {
+    button {
+      // @extend .btn;
+      // &.swal2-confirm {
+      //   @extend .btn-primary;
+      // }
+      // &.swal2-cancel {
+      //   @extend .btn-danger;
+      //   @extend .border-danger;
+      // }
+      // svg {
+      //   width: 16px;
+      //   height: 16px;
+      // }
+    }
+  }
+
+  .swal2-close {
+    font-size: 22px;
+    &:focus {
+      box-shadow: none;
+    }
+    &:hover {
+      color: $secondary;
+    }
+  }
+
+  .swal2-timer-progress-bar {
+    background: $secondary;
+  }
+
+  .swal2-footer {
+    border-color: var(--#{$prefix}border-color);
+  }
+
+}
+
+div:where(.swal2-container).swal2-backdrop-show, 
+div:where(.swal2-container).swal2-noanimation {
+  background: rgba($modal-backdrop-bg, $modal-backdrop-opacity);
+}
+
+div:where(.swal2-container) div:where(.swal2-popup) {
+  background: var(--#{$prefix}body-bg);
+  color: var(--#{$prefix}body-color);
+}
+
+.swal2-popup.swal2-toast {
+  background: var(--#{$prefix}body-bg);
+  box-shadow: var(--#{$prefix}box-shadow);
+}
+
+div:where(.swal2-container) button:where(.swal2-styled).swal2-confirm:focus {
+  box-shadow: none;
+}

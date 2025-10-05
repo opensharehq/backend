@@ -1,0 +1,57 @@
+// npm package: datatables.net-bs5
+// github link: https://github.com/DataTables/Dist-DataTables-Bootstrap5
+
+.dt-container {
+  &.dt-bootstrap5 {
+    .dt-length {
+      @media(max-width: 767px) {
+        text-align: left;
+      }
+      select {
+        margin-left: 0;
+        margin-right: 10px;
+      }
+    }
+    .dt-search {
+      @media(max-width: 767px) {
+        text-align: left;
+        input {
+          margin-left: 0 #{'/*rtl:ignore*/'};
+          margin-right: 0;
+        }
+      }
+      @media(min-width: 768px) {
+        input {
+          /*rtl:raw:
+            margin-left: 0;
+          */
+        }
+      }
+    }
+  }
+  div {
+    &.dt-paging {
+      ul { 
+        &.pagination {
+          @extend .justify-content-center;
+          @extend .justify-content-md-end;
+          @extend .mt-3;
+          @extend .mt-md-0;
+        }
+      }
+    }
+  }
+}
+
+div.table-responsive>div.dt-container>div.row>div[class^=col-]:first-child {
+  /*rtl:raw:
+    padding-right: 0;
+  */
+}
+
+div.table-responsive>div.dt-container>div.row>div[class^=col-]:last-child {
+  padding-left: 0;
+  /*rtl:raw:
+    padding-left: 0;
+  */
+}

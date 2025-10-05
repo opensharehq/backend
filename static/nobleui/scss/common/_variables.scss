@@ -1,0 +1,459 @@
+// Light theme variables
+
+
+
+// Bootstrap base colors
+$white:        #fff !default;
+$gray-100:     #f8f9fa !default;
+$gray-200:     #e9ecef !default;
+$gray-300:     #dee2e6 !default;
+$gray-400:     #cbd1db !default;
+$gray-500:     #aeb7c5 !default;
+$gray-600:     #7987a1 !default;
+$gray-700:     #41516c !default;
+$gray-800:     #212a3a !default;
+$gray-900:     #060c17 !default;
+$black:        #000 !default;
+$text-muted:   $gray-600 !default;
+
+
+// Bootstrap custom colors
+$blue:    #0d6efd !default;
+$indigo:  #6610f2 !default;
+$purple:  #6f42c1 !default;
+$pink:    #d63384 !default;
+$red:     #dc3545 !default;
+$orange:  #fd7e14 !default;
+$yellow:  #ffc107 !default;
+$green:   #198754 !default;
+$teal:    #20c997 !default;
+$cyan:    #0dcaf0 !default;
+
+
+
+// --- Bootstrap Theme Colors --- //
+//
+$primary:         #6571ff !default;
+$secondary:       $gray-600 !default;
+$success:         #05a34a !default;
+$info:            #66d1d1 !default;
+$warning:         #fbbc06 !default;
+$danger:          #ff3366 !default;
+$light:           $gray-200 !default;
+$dark:            $gray-900 !default;
+//
+// --- Bootstrap Theme Colors --- //
+
+
+
+// Social colors
+$social-colors: (
+  "facebook":        #3b5998,
+  "twitter":         #1da1f2,
+  "google":          #dc4e41,
+  "youtube":         #f00,
+  "vimeo":           #1ab7ea,
+  "dribbble":        #ea4c89,
+  "github":          #181717,
+  "instagram":       #e4405f,
+  "pinterest":       #bd081c,
+  "flickr":          #0063dc,
+  "bitbucket":       #0052cc,
+  "linkedin":        #0077b5
+) !default;
+
+
+// The contrast ratio to reach against white, to determine if color changes from "light" to "dark". Acceptable values for WCAG 2.0 are 3, 4.5 and 7.
+// See https://www.w3.org/TR/WCAG20/#visual-audio-contrast-contrast
+$min-contrast-ratio:   3 !default;
+
+
+// Options
+//
+// Quickly modify global styling by enabling or disabling optional features.
+$enable-gradients:            false !default;
+$enable-negative-margins:     true !default;
+$enable-shadows:              true !default;
+
+
+// Spacing
+//
+// Control the default styling of most Bootstrap elements by modifying these
+// variables. Mostly focused on spacing.
+// You can add more entries to the $spacers map, should you need more variation.
+$spacer: 1rem !default;
+$spacers: (
+  0: 0,
+  1: $spacer * .25,
+  2: $spacer * .5,
+  3: $spacer,
+  4: $spacer * 1.5,
+  5: $spacer * 3,
+  6: ($spacer * 4.5),
+  7: ($spacer * 6)
+) !default;
+
+
+//  Custom sizes for height and width
+$custom-sizes: (
+  25: 25%,
+  50: 50%,
+  75: 75%,
+  100: 100%,
+  auto: auto,
+  1px: 1px,
+  2px: 2px,
+  3px: 3px,
+  4px: 4px,
+  5px: 5px,
+  6px: 6px,
+  7px: 7px,
+  8px: 8px,
+  9px: 9px,
+  10px: 10px,
+  12px: 12px,
+  14px: 14px,
+  15px: 15px,
+  16px: 16px,
+  18px: 18px,
+  20px: 20px,
+  25px: 25px,
+  30px: 30px,
+  35px: 35px,
+  40px: 40px,
+  45px: 45px,
+  50px: 50px,
+  55px: 55px,
+  60px: 60px,
+  65px: 65px,
+  70px: 70px,
+  75px: 75px,
+  80px: 80px,
+  85px: 85px,
+  90px: 90px,
+  95px: 95px,
+  100px: 100px,
+  125px: 125px,
+  150px: 150px,
+  175px: 175px,
+  200px: 200px,
+  250px: 250px,
+  500px: 500px,
+  750px: 750px,
+  1000px: 1000px
+) !default; // custom variable
+
+
+// Position
+//
+// Define the edge positioning anchors of the position utilities.
+$position-values: (
+  0: 0,
+  10: 10%,
+  20: 20%,
+  25: 25%,
+  30: 30%,
+  40: 40%,
+  50: 50%,
+  60: 60%,
+  70: 70%,
+  75: 75%,
+  80: 80%,
+  90: 90%,
+  100: 100%
+) !default;
+
+
+// Prefix for :root CSS variables
+
+$prefix:                      bs- !default;
+
+
+// Body
+//
+// Settings for the `<body>` element.
+$body-bg:                      #fff !default;
+$body-color:                   $black !default;
+
+$body-secondary-color:      rgba($body-color, .75) !default;
+$body-secondary-bg:         $gray-200 !default;
+
+$body-tertiary-color:       rgba($body-color, .5) !default;
+$body-tertiary-bg:          $gray-200 !default;
+
+$body-emphasis-color:       $black !default;
+
+
+// Links
+//
+// Style anchor elements.
+$link-color:                   $primary !default;
+$link-decoration:              none !default;
+// $link-hover-decoration:        underline !default;
+
+
+// Paragraphs
+//
+// Style p element.
+$paragraph-margin-bottom:      0 !default;
+
+
+// Grid columns
+$grid-gutter-width:           1.5rem !default;
+
+
+// Components
+//
+// Define common padding and border radius sizes and more.
+
+// Border
+// $border-color:                #f2f4f9 !default;
+$border-color:                $gray-200 !default;
+
+// Border Radiues
+$border-radius:					.25rem !default;
+
+
+// Box-shadow-variables
+$box-shadow:                  0 .5rem 1rem rgba(183,192,206,.2) !default;
+$box-shadow-sm:               0 .125rem .25rem rgba(183,192,206,.2) !default;
+$box-shadow-lg:               0 1rem 2rem rgba(183,192,206,.6) !default;
+$box-shadow-inset:            inset 0 1px 2px rgba($black, .075) !default;
+
+
+$component-active-color:      $white !default;
+$component-active-color:      $white !default;
+$component-active-bg:         $primary !default;
+$component-hover-color:       var(--#{$prefix}body-color);  // custom variable
+$component-hover-bg:          rgba($secondary, .2);         // custom variable
+
+
+// Typography
+//
+// Font, line-height, and color for body text, headings, and more.
+
+// Font family
+$font-family-sans-serif:           "Roboto", Helvetica, sans-serif !default;
+
+$font-size-base:              		 0.875rem !default;   // 14px
+$font-size-lg:               	 		 1rem !default;       // 16px
+$font-size-sm:                		 0.812rem !default;   // 13px
+
+$font-weight-lighter:              lighter !default;
+$font-weight-light:                300 !default;
+$font-weight-normal:               400 !default;
+$font-weight-bold:                 500 !default;
+$font-weight-bolder:               700 !default;
+$font-weight-boldest:              900 !default;
+
+$font-weight-base:                 $font-weight-normal !default;
+
+
+// Heading sizes
+$h1-font-size:                     2.5rem !default;  
+$h2-font-size:                     2rem !default;   
+$h3-font-size:                     1.5rem !default;  
+$h4-font-size:                     1.25rem !default;  
+$h5-font-size:                     1rem !default;  
+$h6-font-size:                     $font-size-base !default; 
+
+// Font sizes
+$font-sizes: (
+  1: $h1-font-size,
+  2: $h2-font-size,
+  3: $h3-font-size,
+  4: $h4-font-size,
+  5: $h5-font-size,
+  6: $h6-font-size,
+
+  10px: 10px,
+  11px: 11px,
+  12px: 12px,
+  13px: 13px,
+  14px: 14px,
+  15px: 15px,
+  16px: 16px,
+  50px: 50px,
+  70px: 70px,
+  80px: 80px,
+  90px: 90px,
+  100px: 100px
+) !default;
+
+
+// Heading variables
+$headings-margin-bottom:      0 !default;
+$headings-font-weight:        500 !default;
+
+
+$hr-opacity:                  .1 !default;
+
+
+// Tables
+//
+// Customizes the `.table` component with basic values, each used across all table variations.
+
+$table-cell-padding-y:                 .85rem !default;
+$table-cell-padding-x:                 .85rem !default;
+$table-cell-padding-y-sm:              .55rem !default;
+$table-cell-padding-x-sm:              .55rem !default;
+
+$table-group-separator-color:          var(--#{$prefix}border-color) !default;
+
+
+// Buttons + Forms
+//
+// Shared variables that are reassigned to `$input-` and `$btn-` specific variables.
+
+$input-btn-padding-y:                   .469rem !default;
+$input-btn-padding-x:                   .8rem !default;
+
+$input-btn-focus-box-shadow:            null !default;
+$input-btn-focus-width:                 0 !default;
+
+$input-placeholder-color:               $gray-500 !default;
+
+$input-btn-padding-y-xs:                .313rem !default;
+$input-btn-padding-x-xs:                .8rem !default;
+$input-btn-font-size-xs:                .75rem !default;
+
+$input-btn-padding-y-sm:                .391rem !default;
+$input-btn-padding-x-sm:                .8rem !default;
+$input-btn-font-size-sm:                $font-size-sm !default;
+
+$input-btn-padding-y-lg:                .5rem !default;
+$input-btn-padding-x-lg:                .8rem !default;
+$input-btn-font-size-lg:                $font-size-lg !default;
+
+
+// Buttons
+//
+// For each of Bootstrap's buttons, define text, background, and border color.
+
+$btn-font-weight:           $font-weight-normal !default;
+
+$btn-padding-y-xs:          $input-btn-padding-y-xs !default;
+$btn-padding-x-xs:          $input-btn-padding-x-xs !default;
+$btn-font-size-xs:          $input-btn-font-size-xs !default;
+
+$btn-box-shadow: null !default;
+$btn-focus-box-shadow: null !default;
+$btn-active-box-shadow: null !default;
+
+// Allows for customizing button radius independently from global border radius
+$btn-border-radius:                     $border-radius !default;
+$btn-border-radius-sm:                  $border-radius !default;
+$btn-border-radius-lg:                  $border-radius !default;
+
+
+// Forms
+
+$input-padding-y-xs:                    $input-btn-padding-y-xs !default;
+$input-padding-x-xs:                    $input-btn-padding-x-xs !default;
+$input-font-size-xs:                    $input-btn-font-size-xs !default;
+
+// $input-bg:                              $white !default;
+// $input-bg:                              var(--#{$prefix}body-bg) !default;
+$input-bg:                              var(--#{$prefix}body-bg) !default;
+$input-border-color:                    var(--#{$prefix}border-color) !default;
+$input-focus-border-color:              rgba($secondary, .4) !default;
+
+$input-border-radius:                   $btn-border-radius !default;
+$input-border-radius-sm:                $btn-border-radius-sm !default;
+$input-border-radius-lg:                $btn-border-radius-lg !default;
+
+$input-box-shadow:                      false !default;
+$input-focus-box-shadow:                false !default;
+
+// form-check
+$form-check-input-width:                  1.3em !default;
+$form-check-input-border-radius:          .15em !default;
+$form-check-input-focus-box-shadow:       false !default;
+
+// form-select
+$form-select-box-shadow: null !default;
+$form-select-focus-box-shadow: null !default;
+
+// Input-group
+$input-group-addon-padding-x:           .563rem !default;
+
+
+
+// Navs
+$nav-tabs-link-bg:                    var(--#{$prefix}body-bg); // custom variable
+$nav-tabs-link-border-color:          var(--#{$prefix}border-color) var(--#{$prefix}border-color); // custom variable
+$nav-tabs-link-active-bg:             var(--#{$prefix}body-bg) !default;
+
+
+// Dropdowns
+$dropdown-bg:                      var(--#{$prefix}body-bg) !default;
+$dropdown-border-color:            var(--#{$prefix}border-color) !default;
+
+
+// Pagination
+$pagination-padding-y:              .469rem !default;
+$pagination-padding-x:              1rem !default;
+$pagination-padding-y-sm:           .391rem !default;
+$pagination-padding-x-sm:           .75rem !default;
+$pagination-padding-y-lg:           .5rem !default;
+$pagination-padding-x-lg:           1.1rem !default;
+$pagination-color:                  $primary !default;
+$pagination-focus-box-shadow:       false !default;
+$pagination-active-bg:              $primary !default;
+$pagination-active-border-color:    $primary !default;
+
+
+// Cards
+$card-spacer-y:                     1.5rem !default;
+$card-spacer-x:                     1.5rem !default;
+$card-title-spacer-y:               .875rem !default;
+// $card-border-color:                 var(--#{$prefix}border-color) !default;
+$card-border-color:                 #f2f4f9 !default;
+$card-box-shadow:                   0 0 10px 0 rgba(183,192,206,.2) !default;
+$card-cap-padding-y:                .875rem !default;
+$card-cap-padding-x:                $card-spacer-x !default;
+$card-cap-bg:                       rgba($black, .01) !default;
+$card-bg:                           var(--#{$prefix}body-bg) !default;
+
+
+// Accordion
+$accordion-bg:                            var(--#{$prefix}body-bg) !default;
+$accordion-border-color:                  var(--#{$prefix}border-color) !default;
+$accordion-icon-width:                    .875rem !default;
+
+$accordion-button-focus-box-shadow:       false !default;
+
+
+// Popovers
+$popover-border-color:              var(--#{$prefix}border-color) !default;
+$popover-header-bg:                 $component-hover-bg !default;
+
+
+
+// Badges
+$badge-font-size:           .8em !default;
+$badge-font-weight:         $font-weight-bold !default;
+
+
+// Modals
+$modal-content-border-color:    var(--#{$prefix}border-color) !default;
+$modal-fade-transform:          scale(.8) !default;
+$modal-transition:              transform .4s ease !default;
+
+$modal-backdrop-bg:                 $black !default;
+$modal-backdrop-opacity:            .5 !default;
+// Modals
+
+
+// List group
+$list-group-item-padding-y:         .75rem !default;
+$list-group-item-padding-x:         1.25rem !default;
+
+
+// Spinners
+$spinner-vertical-align:  -.25em !default;
+
+
+// Close
+$btn-close-width:            .8em !default;
+$btn-close-color:            $black !default;

@@ -1,0 +1,11 @@
+// npm package: Owl Carousel 2
+// github link: https://github.com/OwlCarousel2/OwlCarousel2
+
+.owl-theme .owl-dots .owl-dot span {
+    background: var(--#{$prefix}tertiary-bg);
+}
+
+.owl-theme .owl-dots .owl-dot.active span, 
+.owl-theme .owl-dots .owl-dot:hover span {
+    background: $secondary;
+}

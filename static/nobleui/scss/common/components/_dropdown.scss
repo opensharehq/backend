@@ -1,0 +1,110 @@
+// Dropdowns 
+
+// .dropdown,
+// .btn-group:not(.dropstart):not(.dropend):not(.dropup) {
+  .dropdown-toggle {
+    &::after {
+      border: solid;
+      border-width: 0 1px 1px 0;
+      display: inline-block;
+      padding: 2px;
+      transform: rotate(45deg) scale(1.2);
+      margin-left: 6px;
+    }
+    &.dropdown-toggle-split::after {
+      margin-left: 0;
+    }
+  }
+// }
+
+.dropup {
+  .dropdown-toggle {
+    &::after {
+      border: solid;
+      border-width: 0 1px 1px 0;
+      display: inline-block;
+      padding: 2px;
+      transform: rotate(225deg) scale(1.2);
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    &.dropdown-toggle-split::after {
+      margin-left: 0;
+    }
+  }
+}
+
+.dropstart {
+  .dropdown-toggle {
+    &::before {
+      border: solid;
+      border-width: 0 1px 1px 0;
+      display: inline-block;
+      padding: 2px;
+      transform: rotate(130deg) scale(1.2);
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    &.dropdown-toggle-split::before {
+      margin-right: 0;
+    }
+  }
+}
+
+.dropend {
+  .dropdown-toggle {
+    &::after {
+      border: solid;
+      border-width: 0 1px 1px 0;
+      display: inline-block;
+      padding: 2px;
+      transform: rotate(315deg) scale(1.2);
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    &.dropdown-toggle-split::after {
+      margin-left: 0;
+    }
+  }
+}
+
+// .dropdown,
+// .btn-group, 
+// .dropstart, 
+// .dropend, 
+// .dropup {
+  .dropdown-toggle {
+    &.no-toggle-icon {
+      &::after {
+        display: none;
+      }
+    }
+  }
+// }
+
+.dropdown-menu {
+  padding: .35rem;
+  margin-top: 0;
+  box-shadow: $dropdown-box-shadow; 
+}
+
+.dropdown-item {
+  font-size: .812rem;
+  padding: .25rem .875rem;
+  border-radius: 2px;
+  i, svg {
+    color: $secondary;
+  }
+  &:not(&:active, &.active):hover {
+    background-color: $component-hover-bg;
+    &, i, svg {
+      color: $component-hover-color;
+    }        
+  }
+  &:active,
+  &.active {
+    i, svg {
+      color: $component-active-color;
+    }
+  }
+}

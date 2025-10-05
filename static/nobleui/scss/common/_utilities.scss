@@ -1,0 +1,51 @@
+// Custom utilities
+
+$utilities: map-merge(
+  $utilities, 
+  (
+    "border": map-merge(
+      map-get($utilities, "border"),
+      ( responsive: true ),
+    ),
+    "border-top": map-merge(
+      map-get($utilities, "border-top"),
+      ( responsive: true ),
+    ),
+    "border-end": map-merge(
+      map-get($utilities, "border-end"),
+      ( responsive: true ),
+    ),
+    "border-bottom": map-merge(
+      map-get($utilities, "border-bottom"),
+      ( responsive: true ),
+    ),
+    "border-start": map-merge(
+      map-get($utilities, "border-start"),
+      ( responsive: true ),
+    ),
+    "background-gray": (
+      property: background-color,
+      class: bg-gray,
+      values: $grays
+    ),
+    "font-size": (
+      rfs: true,
+      responsive: true,
+      property: font-size,
+      class: fs,
+      values: $font-sizes
+    ),
+    "width": (
+      responsive: true,
+      property: width,
+      class: w,
+      values: $custom-sizes
+    ),
+    "height": (
+      responsive: true,
+      property: height,
+      class: h,
+      values: $custom-sizes
+    )
+  )
+);

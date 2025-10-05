@@ -1,0 +1,30 @@
+// Cards 
+
+.card {
+  .card-body {
+    + .card-body {
+      padding-top: 1rem;
+    }
+  }
+  .card-title {
+    text-transform: uppercase;
+    font-size: .875rem;
+    font-weight: 500;
+  }
+}
+
+.card-group {
+  box-shadow: $card-box-shadow;
+  .card {
+    box-shadow: none;
+  }
+}
+
+@if $enable-dark-mode {
+  @include color-mode(dark) {
+      .card {
+        --#{$prefix}card-border-color: #{$card-border-color-dark};
+        --#{$prefix}card-box-shadow: #{$card-box-shadow-dark};
+      }
+  }
+}

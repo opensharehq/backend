@@ -1,0 +1,23 @@
+//
+// Root
+//
+
+// Note: Custom variable values only support SassScript inside `#{}`.
+
+// Light mode
+@include color-mode(light) {
+    --#{$prefix}app-bg: #{$app-bg};
+
+    --#{$prefix}box-shadow: #{$box-shadow};
+    --#{$prefix}box-shadow-sm: #{$box-shadow-sm};
+    --#{$prefix}box-shadow-lg: #{$box-shadow-lg};
+}
+
+// Dark mode
+@include color-mode(dark) {
+    --#{$prefix}app-bg: #{$app-bg-dark};
+
+    --#{$prefix}box-shadow: #{$box-shadow-dark};
+    --#{$prefix}box-shadow-sm: #{$box-shadow-sm-dark};
+    --#{$prefix}box-shadow-lg: #{$box-shadow-lg-dark};
+}

@@ -1,0 +1,34 @@
+// Demo1 Variables
+
+// App
+$app-bg:                #f9fafb;
+$app-bg-dark:           #070d19;
+
+// Sidebar
+$sidebar-width-lg:      240px;
+$sidebar-folded-width:  70px;
+
+$sidebar-color:         $body-color;
+$sidebar-color-dark:    $secondary;
+
+$sidebar-box-shadow-color:          rgba(183,192,206,.2);
+$sidebar-box-shadow-color-dark:     #08101e;
+
+$sidebar-nav-link-active-color:     $primary;
+$sidebar-nav-link-hover-color:      $primary;
+
+// sidebar-dark in light theme
+$sidebar-dark-bg:               #0c1427;
+$sidebar-dark-color:            $secondary;
+
+// Navbar
+$navbar-height:                 60px;
+
+$navbar-item-color:             $body-color;
+$navbar-item-color-dark:        $secondary;
+
+$navbar-box-shadow-color:       rgba(183,192,206,.2);
+$navbar-box-shadow-color-dark:  #08101e;
+
+$zindex-sidebar:        999;
+$zindex-navbar:         978;

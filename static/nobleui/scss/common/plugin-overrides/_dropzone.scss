@@ -1,0 +1,78 @@
+// npm package: dropzone
+// github link: https://github.com/dropzone/dropzone
+
+.dropzone {
+  background: $input-bg;
+  overflow: auto;
+  border: 1px solid $input-border-color;
+  border-radius: $input-border-radius;
+  max-height: 200px;
+  padding: 0;
+  @media (min-width: 1400px) {
+    min-height: 200px;
+  }
+  &.dz-clickable {
+    .dz-message {
+      margin-top: 65px;
+      * {
+        color: $secondary;
+      }
+    }
+  }
+  .dz-preview {
+    background: $input-bg;
+    border: 1px solid var(--#{$prefix}border-color);
+    padding: 6px;
+    padding-bottom: 4px;
+    border-radius: $input-border-radius;
+    &.dz-image-preview {
+      background: $input-bg;
+    }
+    
+    &.dz-file-preview .dz-image,
+    .dz-image {
+      border-radius: $input-border-radius;
+    }
+
+    &.dz-file-preview {
+      .dz-image {
+        background: $secondary;
+      }
+    }
+
+    .dz-details {
+      color: var(--#{$prefix}body-color);
+      .dz-size {
+        margin-bottom: 0;
+      }
+
+      .dz-size span,
+      .dz-filename span {
+        background-color: $input-bg;
+      }
+
+      .dz-filename:hover span {
+        background-color: $tooltip-bg;
+        color: $tooltip-color;
+        border-color: var(--#{$prefix}border-color);
+        padding: 2px 4px;
+      }
+    }
+
+    .dz-error-message {
+      top: 162px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .dz-remove {
+      margin-top: 4px;
+      font-size: 13px;
+      &:hover {
+        text-decoration: none;
+      }
+    }
+
+  }
+
+}

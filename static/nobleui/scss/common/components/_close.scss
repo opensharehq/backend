@@ -1,0 +1,7 @@
+// Close button
+
+.btn-close {
+    &:focus {
+        box-shadow: none;
+    }
+}

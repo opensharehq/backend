@@ -1,0 +1,35 @@
+// npm package: dropify
+// github link: https://github.com/JeremyFagis/dropify
+
+.dropify-wrapper {
+  background: $input-bg;
+  border: 1px solid $input-border-color;
+  border-radius: $input-border-radius;
+
+  .dropify-message {
+    span {
+      &.file-icon {
+        font-size: .875rem;
+        color: $secondary;
+        &::before {
+          content: '+';
+          font-size: 24px;
+        }
+      }
+    }
+  }
+  .dropify-preview {
+    background-color: $input-bg;
+  }
+
+  &:hover {
+    background-image: linear-gradient(-45deg, $secondary 25%, transparent 25%, transparent 50%, $secondary 50%, $secondary 75%, transparent 75%, transparent);
+    .dropify-message {
+      span {
+        &.file-icon {
+          color: var(--#{$prefix}body-color);
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,129 @@
+// Email page
+
+.email-aside-nav {
+  &.collapse {
+    display: block;
+    @media(max-width: 991px) {
+      display: none;
+    }
+    &.show {
+      @media(max-width: 991px) {
+        display: block;
+      }
+    }
+  }
+  .nav-item {
+    border-radius: .2rem;
+    .nav-link {
+      color: var(--#{$prefix}body-color);
+      svg {
+        color: $secondary;
+      }
+    }
+    &:hover {
+      background: $component-hover-bg;
+      .nav-link {
+        &, svg {
+          color: $component-hover-color;
+        }
+      }
+    }
+    &.active {
+      background: $component-hover-bg;
+      .nav-link {
+        &, svg {
+          color: $component-hover-color;
+        }
+      }
+    }
+  }
+}
+
+.email-list-item {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--#{$prefix}border-color);
+  padding: 10px 20px;
+  cursor: pointer;
+  &:hover {
+    background: $component-hover-bg;
+  }
+  &:last-child {
+    margin-bottom: 5px;
+  }
+  .email-list-actions {
+    width: 40px;
+    vertical-align: top;
+    display: table-cell;
+    .form-check {
+      margin-bottom: 0;
+    }
+    .favorite {
+      display: block;
+      padding-left: 1px;
+      line-height: 15px;
+      span {
+        svg {
+          width: 14px;
+          color: $secondary;
+        }
+      }
+      &:hover span  svg {
+        color: var(--#{$prefix}body-color);
+      }
+      &.active {
+        span {
+          svg {
+            color: $warning;
+          }
+        }
+      }
+    }
+  }
+  .email-list-detail {
+    width: calc(100% - 40px);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-grow: 1;
+    .content {
+      overflow: hidden;
+      .from {
+        display: block;
+        margin: 0 0 1px 0;
+        color: var(--#{$prefix}body-color);
+      }
+      .msg {
+        width: 97%;
+        color: $secondary;
+        font-size: .8rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+    .date {
+      color: var(--#{$prefix}body-color);
+      white-space: nowrap;
+      .icon {
+        svg {
+          width: 14px;
+          margin-right: 7px;
+          color: $secondary;
+        }
+      }
+    }
+  }
+  &.email-list-item--unread {
+    background-color: var(--#{$prefix}primary-bg-subtle);
+    // background-color: $primary-bg-subtle;
+    .content {
+      .from {
+        font-weight: 500;
+      }
+      .msg {
+        font-weight: 700;
+      }
+    }
+  }
+}

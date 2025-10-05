@@ -1,0 +1,112 @@
+// npm package: fullcalendar
+// github link: https://github.com/fullcalendar/fullcalendar
+
+.fc {
+  --fc-button-active-bg-color: #{$primary};
+  --fc-button-active-border-color: #{$primary};
+  .fc-button-primary {
+    @extend .btn;
+    @extend .btn-outline-primary;
+    @extend .btn-sm;
+  }
+  .fc-button-primary:not(:disabled).fc-button-active, 
+  .fc-button-primary:not(:disabled):active {
+    @extend .btn-primary;
+  }
+  .fc-button .fc-icon {
+    font-size: 1.2 em;
+  }
+  .fc-button-primary:focus, 
+  .fc-button-primary:not(:disabled).fc-button-active:focus, 
+  .fc-button-primary:not(:disabled):active:focus {
+    box-shadow: none;
+  }
+
+  .fc-button-primary:disabled {
+    border-color: $primary;
+  }
+
+  .fc-toolbar {
+    @media(max-width: 767px) {
+      flex-direction: column;
+      .fc-toolbar-chunk {
+        margin-bottom: 12px;
+      }
+    }
+    @media(max-width: 1199px) {
+      .fc-toolbar-title {
+        font-size: 18px;
+        text-align: center;
+      }
+    }
+  }
+
+  .fc-daygrid-day-number,
+  .fc-col-header-cell-cushion {
+    color: var(--#{$prefix}body-color);
+  }
+
+  .fc-daygrid-event {
+    padding: 4px;
+  }
+
+  .fc-daygrid-day.fc-day-today {
+    background-color: rgba($primary, .2);
+  }
+
+  .fc-list-event:hover td {
+    background-color: rgba($primary, .2);
+  }
+
+  .fc-list-day-text,
+  .fc-list-day-side-text {
+    color: var(--#{$prefix}body-color);
+  }
+}
+
+.fc-theme-standard td, 
+.fc-theme-standard th,
+.fc-theme-standard .fc-scrollgrid {
+  border-color: var(--#{$prefix}border-color);
+}
+
+.fc-timegrid-event-harness-inset .fc-timegrid-event, 
+.fc-timegrid-event.fc-event-mirror, 
+.fc-timegrid-more-link {
+  box-shadow: none;
+}
+
+.fc-theme-standard .fc-popover {
+  background-color: $dropdown-bg;
+  border-color: $dropdown-border-color;
+  box-shadow: $dropdown-box-shadow;
+  .fc-popover-header {
+    background-color: $secondary;
+  }
+}
+
+.fc-theme-standard .fc-list-day-cushion {
+  background-color: var(--#{$prefix}body-bg);
+}
+
+.fc-theme-standard .fc-list {
+  border-color: var(--#{$prefix}border-color);
+}
+
+.fc-event {
+  margin-bottom: 6px;
+  margin-right: 6px;
+  padding: 8px 10px 8px 8px;
+  border-radius: 2px;
+  // background: rgba($primary, .2);
+  border: 0;
+  border-left: 3px solid transparent;
+  color: var(--#{$prefix}body-color);
+  font-weight: 500;
+  font-size: 13px;
+  cursor: move;
+}
+
+.fc-h-event .fc-event-main {
+  color: var(--#{$prefix}body-color);
+}

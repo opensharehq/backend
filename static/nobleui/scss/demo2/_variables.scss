@@ -1,0 +1,20 @@
+// Demo2 Variables
+
+// App
+$app-bg:                #f9fafb;
+$app-bg-dark:           #070d19;
+
+// Navbar
+$navbar-height: 60px;
+
+$navbar-item-color:             $body-color;
+$navbar-item-color-dark:        $secondary;
+
+$navbar-box-shadow-color:       rgba(183,192,206,.2);
+$navbar-box-shadow-color-dark:  #08101e;
+
+// navbar-dark in light theme
+$navbar-dark-bg:      #0c1427;
+$navbar-dark-color:     $secondary;
+
+$zindex-navbar:         978;

@@ -240,4 +240,4 @@ SERVER_EMAIL = "server@openshare.cn"
 
 
 # tasks
-TASKS = {"default": {"BACKEND": "django_tasks.backends.immediate.ImmediateBackend"}}
+TASKS = {"default": {"BACKEND": "django_tasks.backends.database.DatabaseBackend"}}

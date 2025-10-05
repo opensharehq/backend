@@ -1,14 +1,26 @@
 """Tests for accounts app."""
 
 from datetime import date
+from unittest.mock import patch
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.core import mail
 from django.test import TestCase
 from django.urls import reverse
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from social_django.models import UserSocialAuth
 
-from accounts.forms import EducationForm, ProfileForm, SignUpForm, WorkExperienceForm
+from accounts.forms import (
+    EducationForm,
+    PasswordResetConfirmForm,
+    PasswordResetRequestForm,
+    ProfileForm,
+    SignUpForm,
+    WorkExperienceForm,
+)
 from accounts.models import Education, UserProfile, WorkExperience
 
 
@@ -1862,3 +1874,371 @@ class ChangeEmailFormTests(TestCase):
         )
         assert not form.is_valid()
         assert "password" in form.errors
+
+
+class PasswordResetRequestFormTests(TestCase):
+    """Test cases for PasswordResetRequestForm."""
+
+    def test_password_reset_request_form_valid_email(self):
+        """Test form with valid email."""
+        form = PasswordResetRequestForm(data={"email": "test@example.com"})
+        assert form.is_valid()
+
+    def test_password_reset_request_form_invalid_email(self):
+        """Test form with invalid email."""
+        form = PasswordResetRequestForm(data={"email": "invalid-email"})
+        assert not form.is_valid()
+        assert "email" in form.errors
+
+    def test_password_reset_request_form_empty_email(self):
+        """Test form with empty email."""
+        form = PasswordResetRequestForm(data={"email": ""})
+        assert not form.is_valid()
+        assert "email" in form.errors
+
+
+class PasswordResetConfirmFormTests(TestCase):
+    """Test cases for PasswordResetConfirmForm."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="oldpass123",
+        )
+
+    def test_password_reset_confirm_form_valid_data(self):
+        """Test form with valid password data."""
+        form = PasswordResetConfirmForm(
+            user=self.user,
+            data={
+                "new_password1": "newpass123",
+                "new_password2": "newpass123",
+            },
+        )
+        assert form.is_valid()
+
+    def test_password_reset_confirm_form_passwords_dont_match(self):
+        """Test form with mismatched passwords."""
+        form = PasswordResetConfirmForm(
+            user=self.user,
+            data={
+                "new_password1": "newpass123",
+                "new_password2": "differentpass123",
+            },
+        )
+        assert not form.is_valid()
+        assert "new_password2" in form.errors
+
+    def test_password_reset_confirm_form_weak_password(self):
+        """Test form with weak password."""
+        form = PasswordResetConfirmForm(
+            user=self.user,
+            data={
+                "new_password1": "123",
+                "new_password2": "123",
+            },
+        )
+        assert not form.is_valid()
+
+
+class PasswordResetRequestViewTests(TestCase):
+    """Test cases for password reset request view."""
+
+    def test_password_reset_request_view_get_status_code(self):
+        """Test that password reset request page returns 200 status code."""
+        response = self.client.get(reverse("accounts:password_reset_request"))
+        assert response.status_code == 200
+
+    def test_password_reset_request_view_template(self):
+        """Test that password reset request view uses correct template."""
+        response = self.client.get(reverse("accounts:password_reset_request"))
+        self.assertTemplateUsed(response, "password_reset_request.html")
+
+    def test_password_reset_request_view_contains_form(self):
+        """Test that password reset request form contains email field."""
+        response = self.client.get(reverse("accounts:password_reset_request"))
+        self.assertContains(response, "email")
+
+    @patch("accounts.views.send_password_reset_email")
+    def test_password_reset_request_with_valid_email(self, mock_task):
+        """Test password reset request with valid email sends task."""
+        get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+
+        response = self.client.post(
+            reverse("accounts:password_reset_request"),
+            {"email": "test@example.com"},
+        )
+
+        self.assertRedirects(response, reverse("accounts:password_reset_done"))
+        mock_task.enqueue.assert_called_once()
+
+    @patch("accounts.views.send_password_reset_email")
+    def test_password_reset_request_with_nonexistent_email(self, mock_task):
+        """Test password reset request with non-existent email."""
+        response = self.client.post(
+            reverse("accounts:password_reset_request"),
+            {"email": "nonexistent@example.com"},
+        )
+
+        self.assertRedirects(response, reverse("accounts:password_reset_done"))
+        mock_task.enqueue.assert_not_called()
+
+    @patch("accounts.views.send_password_reset_email")
+    def test_password_reset_request_user_without_password(self, mock_task):
+        """Test password reset for user without usable password."""
+        user = get_user_model().objects.create_user(
+            username="socialuser",
+            email="social@example.com",
+        )
+        user.set_unusable_password()
+        user.save()
+
+        # Create social auth
+        UserSocialAuth.objects.create(
+            user=user,
+            provider="github",
+            uid="12345",
+        )
+
+        response = self.client.post(
+            reverse("accounts:password_reset_request"),
+            {"email": "social@example.com"},
+        )
+
+        self.assertRedirects(response, reverse("accounts:password_reset_request"))
+        messages = list(response.wsgi_request._messages)
+        assert len(messages) == 1
+        assert "社交账号登录" in str(messages[0])
+        mock_task.enqueue.assert_not_called()
+
+    def test_password_reset_request_user_without_password_no_social(self):
+        """Test password reset for user without password and no social accounts."""
+        user = get_user_model().objects.create_user(
+            username="nopassuser",
+            email="nopass@example.com",
+        )
+        user.set_unusable_password()
+        user.save()
+
+        response = self.client.post(
+            reverse("accounts:password_reset_request"),
+            {"email": "nopass@example.com"},
+        )
+
+        self.assertRedirects(response, reverse("accounts:password_reset_request"))
+        messages = list(response.wsgi_request._messages)
+        assert len(messages) == 1
+        assert "联系管理员" in str(messages[0])
+
+
+class PasswordResetDoneViewTests(TestCase):
+    """Test cases for password reset done view."""
+
+    def test_password_reset_done_view_status_code(self):
+        """Test that password reset done page returns 200 status code."""
+        response = self.client.get(reverse("accounts:password_reset_done"))
+        assert response.status_code == 200
+
+    def test_password_reset_done_view_template(self):
+        """Test that password reset done view uses correct template."""
+        response = self.client.get(reverse("accounts:password_reset_done"))
+        self.assertTemplateUsed(response, "password_reset_done.html")
+
+    def test_password_reset_done_view_contains_message(self):
+        """Test that password reset done page contains confirmation message."""
+        response = self.client.get(reverse("accounts:password_reset_done"))
+        self.assertContains(response, "邮件已发送")
+
+
+class PasswordResetConfirmViewTests(TestCase):
+    """Test cases for password reset confirm view."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="oldpass123",
+        )
+        self.token = default_token_generator.make_token(self.user)
+        self.uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
+
+    def test_password_reset_confirm_view_get_with_valid_token(self):
+        """Test GET request with valid token shows reset form."""
+        url = reverse(
+            "accounts:password_reset_confirm",
+            kwargs={"uidb64": self.uidb64, "token": self.token},
+        )
+        response = self.client.get(url)
+
+        assert response.status_code == 200
+        self.assertTemplateUsed(response, "password_reset_confirm.html")
+        self.assertContains(response, "设置新密码")
+
+    def test_password_reset_confirm_view_get_with_invalid_token(self):
+        """Test GET request with invalid token shows error."""
+        url = reverse(
+            "accounts:password_reset_confirm",
+            kwargs={"uidb64": self.uidb64, "token": "invalid-token"},
+        )
+        response = self.client.get(url)
+
+        assert response.status_code == 200
+        self.assertTemplateUsed(response, "password_reset_confirm.html")
+        self.assertContains(response, "链接无效或已过期")
+
+    def test_password_reset_confirm_view_get_with_invalid_uidb64(self):
+        """Test GET request with invalid uidb64 shows error."""
+        url = reverse(
+            "accounts:password_reset_confirm",
+            kwargs={"uidb64": "invalid", "token": self.token},
+        )
+        response = self.client.get(url)
+
+        assert response.status_code == 200
+        self.assertContains(response, "链接无效或已过期")
+
+    def test_password_reset_confirm_view_post_with_valid_data(self):
+        """Test POST request with valid data resets password."""
+        url = reverse(
+            "accounts:password_reset_confirm",
+            kwargs={"uidb64": self.uidb64, "token": self.token},
+        )
+        response = self.client.post(
+            url,
+            {
+                "new_password1": "newpass123",
+                "new_password2": "newpass123",
+            },
+        )
+
+        self.assertRedirects(response, reverse("accounts:sign_in"))
+
+        # Verify password was changed
+        self.user.refresh_from_db()
+        assert self.user.check_password("newpass123")
+
+        # Verify success message
+        messages = list(response.wsgi_request._messages)
+        assert len(messages) == 1
+        assert "密码重置成功" in str(messages[0])
+
+    def test_password_reset_confirm_view_post_with_mismatched_passwords(self):
+        """Test POST request with mismatched passwords shows error."""
+        url = reverse(
+            "accounts:password_reset_confirm",
+            kwargs={"uidb64": self.uidb64, "token": self.token},
+        )
+        response = self.client.post(
+            url,
+            {
+                "new_password1": "newpass123",
+                "new_password2": "differentpass",
+            },
+        )
+
+        assert response.status_code == 200
+        self.assertTemplateUsed(response, "password_reset_confirm.html")
+
+        # Verify password was not changed
+        self.user.refresh_from_db()
+        assert self.user.check_password("oldpass123")
+
+    def test_password_reset_confirm_view_post_with_invalid_token(self):
+        """Test POST request with invalid token shows error."""
+        url = reverse(
+            "accounts:password_reset_confirm",
+            kwargs={"uidb64": self.uidb64, "token": "invalid-token"},
+        )
+        response = self.client.post(
+            url,
+            {
+                "new_password1": "newpass123",
+                "new_password2": "newpass123",
+            },
+        )
+
+        assert response.status_code == 200
+        self.assertContains(response, "链接无效或已过期")
+
+        # Verify password was not changed
+        self.user.refresh_from_db()
+        assert self.user.check_password("oldpass123")
+
+
+class PasswordResetTaskTests(TestCase):
+    """Test cases for password reset email task."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+
+    def test_send_password_reset_email_task(self):
+        """Test that password reset email task sends email."""
+        from accounts.tasks import send_password_reset_email
+
+        # Call the underlying function directly for testing
+        send_password_reset_email.func(
+            user_id=self.user.id,
+            domain="testserver",
+            use_https=False,
+        )
+
+        assert len(mail.outbox) == 1
+        email = mail.outbox[0]
+        assert email.to == ["test@example.com"]
+        assert "重置您的 Open Share 密码" in email.subject
+        assert "testuser" in email.body
+        assert "testserver" in email.body
+
+    def test_send_password_reset_email_task_with_nonexistent_user(self):
+        """Test that task handles non-existent user gracefully."""
+        from accounts.tasks import send_password_reset_email
+
+        # Call the underlying function directly for testing
+        send_password_reset_email.func(
+            user_id=99999,
+            domain="testserver",
+            use_https=False,
+        )
+
+        assert len(mail.outbox) == 0
+
+    def test_send_password_reset_email_task_with_https(self):
+        """Test that task uses HTTPS when requested."""
+        from accounts.tasks import send_password_reset_email
+
+        # Call the underlying function directly for testing
+        send_password_reset_email.func(
+            user_id=self.user.id,
+            domain="testserver",
+            use_https=True,
+        )
+
+        assert len(mail.outbox) == 1
+        email = mail.outbox[0]
+        assert "https://" in email.body
+
+    def test_send_password_reset_email_contains_reset_link(self):
+        """Test that email contains password reset link."""
+        from accounts.tasks import send_password_reset_email
+
+        # Call the underlying function directly for testing
+        send_password_reset_email.func(
+            user_id=self.user.id,
+            domain="testserver",
+            use_https=False,
+        )
+
+        email = mail.outbox[0]
+        assert "/accounts/password-reset-confirm/" in email.body

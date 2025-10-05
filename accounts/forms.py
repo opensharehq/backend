@@ -2,7 +2,11 @@
 
 from django import forms
 from django.contrib.auth import get_user_model
-from django.contrib.auth.forms import PasswordChangeForm, UserCreationForm
+from django.contrib.auth.forms import (
+    PasswordChangeForm,
+    SetPasswordForm,
+    UserCreationForm,
+)
 
 from .models import Education, UserProfile, WorkExperience
 
@@ -269,3 +273,43 @@ class ChangeEmailForm(forms.Form):
             raise forms.ValidationError(msg)
 
         return password
+
+
+class PasswordResetRequestForm(forms.Form):
+    """Password reset request form."""
+
+    email = forms.EmailField(
+        label="邮箱地址",
+        max_length=254,
+        widget=forms.EmailInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "请输入注册时使用的邮箱",
+            },
+        ),
+        help_text="我们将向此邮箱发送密码重置链接",
+    )
+
+
+class PasswordResetConfirmForm(SetPasswordForm):
+    """Password reset confirmation form."""
+
+    new_password1 = forms.CharField(
+        label="新密码",
+        widget=forms.PasswordInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "请输入新密码",
+            },
+        ),
+        help_text="密码至少8位，不能全是数字",
+    )
+    new_password2 = forms.CharField(
+        label="确认新密码",
+        widget=forms.PasswordInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "请再次输入新密码",
+            },
+        ),
+    )

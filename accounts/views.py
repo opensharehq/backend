@@ -1,21 +1,27 @@
 """Views for user authentication and profile management."""
 
 from django.contrib import messages
-from django.contrib.auth import login, logout, update_session_auth_hash
+from django.contrib.auth import get_user_model, login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.tokens import default_token_generator
 from django.forms import inlineformset_factory
 from django.shortcuts import redirect, render
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 from social_django.models import UserSocialAuth
 
 from .forms import (
     ChangeEmailForm,
     CustomPasswordChangeForm,
     EducationForm,
+    PasswordResetConfirmForm,
+    PasswordResetRequestForm,
     ProfileForm,
     SignUpForm,
     WorkExperienceForm,
 )
 from .models import Education, UserProfile, WorkExperience
+from .tasks import send_password_reset_email
 
 
 def accounts_index(request):
@@ -309,3 +315,95 @@ def change_email_view(request):
         "change_email.html",
         {"form": form, "current_email": request.user.email},
     )
+
+
+def password_reset_request_view(request):
+    """Handle password reset request."""
+    if request.method == "POST":
+        form = PasswordResetRequestForm(request.POST)
+        if form.is_valid():
+            email = form.cleaned_data["email"]
+            User = get_user_model()
+
+            try:
+                user = User.objects.get(email=email)
+
+                # 检查用户是否有可用密码（即是否通过邮箱/用户名注册的）
+                if not user.has_usable_password():
+                    # 用户没有设置密码，检查是否有社交账号绑定
+                    social_auths = UserSocialAuth.objects.filter(user=user)
+                    if social_auths.exists():
+                        providers = ", ".join(
+                            auth.provider for auth in social_auths[:3]
+                        )
+                        messages.warning(
+                            request,
+                            f"该账号未设置密码，请使用社交账号登录（{providers}）",
+                        )
+                    else:
+                        messages.error(
+                            request,
+                            "该账号未设置密码且没有绑定社交账号，请联系管理员",
+                        )
+                    return redirect("accounts:password_reset_request")
+
+                # 发送密码重置邮件（异步任务）
+                domain = request.get_host()
+                use_https = request.is_secure()
+                send_password_reset_email.enqueue(user.id, domain, use_https)
+
+                messages.success(
+                    request,
+                    "密码重置链接已发送到您的邮箱，请检查收件箱（包括垃圾邮件文件夹）",
+                )
+                return redirect("accounts:password_reset_done")
+
+            except User.DoesNotExist:
+                # 为了安全，不透露邮箱是否存在
+                messages.success(
+                    request,
+                    "如果该邮箱已注册，密码重置链接将发送到您的邮箱",
+                )
+                return redirect("accounts:password_reset_done")
+    else:
+        form = PasswordResetRequestForm()
+
+    return render(request, "password_reset_request.html", {"form": form})
+
+
+def password_reset_done_view(request):
+    """Display password reset email sent confirmation."""
+    return render(request, "password_reset_done.html")
+
+
+def password_reset_confirm_view(request, uidb64, token):
+    """Handle password reset confirmation with token."""
+    User = get_user_model()
+
+    try:
+        uid = force_str(urlsafe_base64_decode(uidb64))
+        user = User.objects.get(pk=uid)
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        user = None
+
+    if user is not None and default_token_generator.check_token(user, token):
+        if request.method == "POST":
+            form = PasswordResetConfirmForm(user, request.POST)
+            if form.is_valid():
+                form.save()
+                messages.success(request, "密码重置成功，请使用新密码登录")
+                return redirect("accounts:sign_in")
+        else:
+            form = PasswordResetConfirmForm(user)
+
+        return render(
+            request,
+            "password_reset_confirm.html",
+            {"form": form, "validlink": True},
+        )
+    else:
+        return render(
+            request,
+            "password_reset_confirm.html",
+            {"validlink": False},
+        )

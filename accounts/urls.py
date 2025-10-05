@@ -8,6 +8,9 @@ from .views import (
     change_password_view,
     disconnect_social_account,
     logout_view,
+    password_reset_confirm_view,
+    password_reset_done_view,
+    password_reset_request_view,
     profile_edit_view,
     profile_view,
     sign_in_view,
@@ -36,4 +39,15 @@ urlpatterns = [
     ),
     path("change-password/", change_password_view, name="change_password"),
     path("change-email/", change_email_view, name="change_email"),
+    path(
+        "password-reset/",
+        password_reset_request_view,
+        name="password_reset_request",
+    ),
+    path("password-reset/done/", password_reset_done_view, name="password_reset_done"),
+    path(
+        "password-reset-confirm/<uidb64>/<token>/",
+        password_reset_confirm_view,
+        name="password_reset_confirm",
+    ),
 ]

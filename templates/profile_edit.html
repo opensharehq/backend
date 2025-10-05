@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+
+{% block title %}编辑个人资料 - Open Share{% endblock title %}
+
+{% block content %}
+    <div class="container py-5">
+        {% if messages %}
+            <div class="row justify-content-center">
+                <div class="col-md-10 col-lg-8">
+                    {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+        <div class="row justify-content-center">
+            <div class="col-md-10 col-lg-8">
+                <div class="card shadow">
+                    <div class="card-body p-4">
+                        <div class="d-flex justify-content-between align-items-center mb-4">
+                            <h1 class="card-title h3 mb-0">编辑个人资料</h1>
+                            <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary">
+                                <i class="bi bi-arrow-left"></i> 返回
+                            </a>
+                        </div>
+                        <form method="post" novalidate>
+                            {% csrf_token %}
+                            <!-- 个人简介 -->
+                            <div class="mb-4">
+                                <h2 class="h5 mb-3 text-primary">
+                                    <i class="bi bi-person-badge"></i> 基本资料
+                                </h2>
+                                <div class="mb-3">
+                                    <label for="{{ form.bio.id_for_label }}" class="form-label">
+                                        个人简介
+                                    </label>
+                                    {{ form.bio }}
+                                    {% if form.bio.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.bio.errors.0 }}
+                                        </div>
+                                    {% endif %}
+                                    <div class="form-text">最多 500 字符</div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label for="{{ form.birth_date.id_for_label }}" class="form-label">
+                                            生日
+                                        </label>
+                                        {{ form.birth_date }}
+                                        {% if form.birth_date.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.birth_date.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label for="{{ form.company.id_for_label }}" class="form-label">
+                                            公司
+                                        </label>
+                                        {{ form.company }}
+                                        {% if form.company.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.company.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="{{ form.location.id_for_label }}" class="form-label">
+                                        位置
+                                    </label>
+                                    {{ form.location }}
+                                    {% if form.location.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.location.errors.0 }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <hr class="my-4" />
+                            <!-- 社交链接 -->
+                            <div class="mb-4">
+                                <h2 class="h5 mb-3 text-primary">
+                                    <i class="bi bi-link-45deg"></i> 社交链接
+                                </h2>
+                                <div class="mb-3">
+                                    <label for="{{ form.github_url.id_for_label }}" class="form-label">
+                                        <i class="bi bi-github"></i> GitHub
+                                    </label>
+                                    {{ form.github_url }}
+                                    {% if form.github_url.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.github_url.errors.0 }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                                <div class="mb-3">
+                                    <label for="{{ form.homepage_url.id_for_label }}" class="form-label">
+                                        <i class="bi bi-house-door"></i> 个人主页
+                                    </label>
+                                    {{ form.homepage_url }}
+                                    {% if form.homepage_url.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.homepage_url.errors.0 }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                                <div class="mb-3">
+                                    <label for="{{ form.blog_url.id_for_label }}" class="form-label">
+                                        <i class="bi bi-journal-text"></i> 博客
+                                    </label>
+                                    {{ form.blog_url }}
+                                    {% if form.blog_url.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.blog_url.errors.0 }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                                <div class="mb-3">
+                                    <label for="{{ form.twitter_url.id_for_label }}" class="form-label">
+                                        <i class="bi bi-twitter-x"></i> Twitter
+                                    </label>
+                                    {{ form.twitter_url }}
+                                    {% if form.twitter_url.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.twitter_url.errors.0 }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                                <div class="mb-3">
+                                    <label for="{{ form.linkedin_url.id_for_label }}" class="form-label">
+                                        <i class="bi bi-linkedin"></i> LinkedIn
+                                    </label>
+                                    {{ form.linkedin_url }}
+                                    {% if form.linkedin_url.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.linkedin_url.errors.0 }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <hr class="my-4" />
+                            <!-- 工作经历 -->
+                            <div class="mb-4">
+                                <h2 class="h5 mb-3 text-primary">
+                                    <i class="bi bi-briefcase"></i> 工作经历
+                                </h2>
+                                {{ work_formset.management_form }}
+                                <div id="work-formset">
+                                    {% for work_form in work_formset %}
+                                        <div class="border rounded p-3 mb-3 formset-form">
+                                            {{ work_form.id }}
+                                            {% if work_form.non_field_errors %}
+                                                <div class="alert alert-danger" role="alert">
+                                                    {{ work_form.non_field_errors.0 }}
+                                                </div>
+                                            {% endif %}
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label for="{{ work_form.company_name.id_for_label }}" class="form-label">
+                                                        公司名称 {% if work_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                                    </label>
+                                                    {{ work_form.company_name }}
+                                                    {% if work_form.company_name.errors %}
+                                                        <div class="invalid-feedback d-block">
+                                                            {{ work_form.company_name.errors.0 }}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                                <div class="col-md-6 mb-3">
+                                                    <label for="{{ work_form.title.id_for_label }}" class="form-label">
+                                                        职位 {% if work_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                                    </label>
+                                                    {{ work_form.title }}
+                                                    {% if work_form.title.errors %}
+                                                        <div class="invalid-feedback d-block">
+                                                            {{ work_form.title.errors.0 }}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label for="{{ work_form.start_date.id_for_label }}" class="form-label">
+                                                        开始日期 {% if work_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                                    </label>
+                                                    {{ work_form.start_date }}
+                                                    {% if work_form.start_date.errors %}
+                                                        <div class="invalid-feedback d-block">
+                                                            {{ work_form.start_date.errors.0 }}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                                <div class="col-md-6 mb-3">
+                                                    <label for="{{ work_form.end_date.id_for_label }}" class="form-label">
+                                                        结束日期 <small class="text-muted">(留空表示至今)</small>
+                                                    </label>
+                                                    {{ work_form.end_date }}
+                                                    {% if work_form.end_date.errors %}
+                                                        <div class="invalid-feedback d-block">
+                                                            {{ work_form.end_date.errors.0 }}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="{{ work_form.description.id_for_label }}" class="form-label">
+                                                    工作描述
+                                                </label>
+                                                {{ work_form.description }}
+                                                {% if work_form.description.errors %}
+                                                    <div class="invalid-feedback d-block">
+                                                        {{ work_form.description.errors.0 }}
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                            {% if work_form.instance.pk %}
+                                                <div class="form-check">
+                                                    {{ work_form.DELETE }}
+                                                    <label class="form-check-label text-danger" for="{{ work_form.DELETE.id_for_label }}">
+                                                        删除此工作经历
+                                                    </label>
+                                                </div>
+                                            {% endif %}
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <hr class="my-4" />
+                            <!-- 学习经历 -->
+                            <div class="mb-4">
+                                <h2 class="h5 mb-3 text-primary">
+                                    <i class="bi bi-mortarboard"></i> 学习经历
+                                </h2>
+                                {{ education_formset.management_form }}
+                                <div id="education-formset">
+                                    {% for edu_form in education_formset %}
+                                        <div class="border rounded p-3 mb-3 formset-form">
+                                            {{ edu_form.id }}
+                                            {% if edu_form.non_field_errors %}
+                                                <div class="alert alert-danger" role="alert">
+                                                    {{ edu_form.non_field_errors.0 }}
+                                                </div>
+                                            {% endif %}
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label for="{{ edu_form.institution_name.id_for_label }}" class="form-label">
+                                                        学校/机构名称 {% if edu_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                                    </label>
+                                                    {{ edu_form.institution_name }}
+                                                    {% if edu_form.institution_name.errors %}
+                                                        <div class="invalid-feedback d-block">
+                                                            {{ edu_form.institution_name.errors.0 }}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                                <div class="col-md-6 mb-3">
+                                                    <label for="{{ edu_form.degree.id_for_label }}" class="form-label">
+                                                        学位
+                                                    </label>
+                                                    {{ edu_form.degree }}
+                                                    {% if edu_form.degree.errors %}
+                                                        <div class="invalid-feedback d-block">
+                                                            {{ edu_form.degree.errors.0 }}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="{{ edu_form.field_of_study.id_for_label }}" class="form-label">
+                                                    专业领域 {% if edu_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                                </label>
+                                                {{ edu_form.field_of_study }}
+                                                {% if edu_form.field_of_study.errors %}
+                                                    <div class="invalid-feedback d-block">
+                                                        {{ edu_form.field_of_study.errors.0 }}
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label for="{{ edu_form.start_date.id_for_label }}" class="form-label">
+                                                        开始日期 {% if edu_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                                    </label>
+                                                    {{ edu_form.start_date }}
+                                                    {% if edu_form.start_date.errors %}
+                                                        <div class="invalid-feedback d-block">
+                                                            {{ edu_form.start_date.errors.0 }}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                                <div class="col-md-6 mb-3">
+                                                    <label for="{{ edu_form.end_date.id_for_label }}" class="form-label">
+                                                        结束日期 <small class="text-muted">(留空表示至今)</small>
+                                                    </label>
+                                                    {{ edu_form.end_date }}
+                                                    {% if edu_form.end_date.errors %}
+                                                        <div class="invalid-feedback d-block">
+                                                            {{ edu_form.end_date.errors.0 }}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            {% if edu_form.instance.pk %}
+                                                <div class="form-check">
+                                                    {{ edu_form.DELETE }}
+                                                    <label class="form-check-label text-danger" for="{{ edu_form.DELETE.id_for_label }}">
+                                                        删除此学习经历
+                                                    </label>
+                                                </div>
+                                            {% endif %}
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <hr class="my-4" />
+                            <!-- 提交按钮 -->
+                            <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                                <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary">
+                                    <i class="bi bi-x-circle"></i> 取消
+                                </a>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-check-circle"></i> 保存更改
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

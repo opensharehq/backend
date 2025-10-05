@@ -3,47 +3,190 @@
 {% block title %}个人中心 - Open Share{% endblock title %}
 
 {% block content %}
-    <div class="container">
-        <div class="row justify-content-center mt-5">
+    <div class="container py-5">
+        {% if messages %}
+            <div class="row justify-content-center">
+                <div class="col-md-10 col-lg-8">
+                    {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+        <div class="row justify-content-center">
             <div class="col-md-10 col-lg-8">
                 <div class="card shadow">
-                    <div class="card-body p-5">
+                    <div class="card-body p-4">
                         <div class="d-flex justify-content-between align-items-center mb-4">
-                            <h1 class="card-title h3">个人中心</h1>
-                            <a href="{% url 'homepage:index' %}" class="btn btn-outline-secondary">
-                                <i class="bi bi-house"></i> 返回首页
-                            </a>
+                            <h1 class="card-title h3 mb-0">个人中心</h1>
+                            <div>
+                                <a href="{% url 'homepage:index' %}" class="btn btn-outline-secondary me-2">
+                                    <i class="bi bi-house"></i> 返回首页
+                                </a>
+                                <a href="{% url 'accounts:profile_edit' %}" class="btn btn-primary">
+                                    <i class="bi bi-pencil"></i> 编辑资料
+                                </a>
+                            </div>
                         </div>
-                        <!-- 用户信息 -->
+                        <!-- 基本信息 -->
                         <div class="mb-4">
-                            <h2 class="h5 mb-3">
+                            <h2 class="h5 mb-3 text-primary">
                                 <i class="bi bi-person-circle"></i> 基本信息
                             </h2>
                             <div class="row">
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label text-muted">用户名</label>
-                                    <p class="fw-bold">{{ user.username }}</p>
+                                    <label class="form-label text-muted small">用户名</label>
+                                    <p class="fw-bold mb-0">{{ user.username }}</p>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label text-muted">邮箱</label>
-                                    <p class="fw-bold">{{ user.email|default:"未设置" }}</p>
+                                    <label class="form-label text-muted small">邮箱</label>
+                                    <p class="fw-bold mb-0">{{ user.email|default:"未设置" }}</p>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label text-muted">注册时间</label>
-                                    <p class="fw-bold">{{ user.date_joined|date:"Y年m月d日" }}</p>
+                                    <label class="form-label text-muted small">注册时间</label>
+                                    <p class="fw-bold mb-0">{{ user.date_joined|date:"Y年m月d日" }}</p>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label text-muted">最后登录</label>
-                                    <p class="fw-bold">{{ user.last_login|date:"Y年m月d日 H:i"|default:"首次登录" }}</p>
+                                    <label class="form-label text-muted small">最后登录</label>
+                                    <p class="fw-bold mb-0">{{ user.last_login|date:"Y年m月d日 H:i"|default:"首次登录" }}</p>
                                 </div>
                             </div>
                         </div>
                         <hr class="my-4" />
+                        <!-- 个人资料 -->
+                        <div class="mb-4">
+                            <h2 class="h5 mb-3 text-primary">
+                                <i class="bi bi-person-badge"></i> 个人资料
+                            </h2>
+                            <div class="row">
+                                {% if profile.bio %}
+                                    <div class="col-12 mb-3">
+                                        <label class="form-label text-muted small">个人简介</label>
+                                        <p class="mb-0">{{ profile.bio }}</p>
+                                    </div>
+                                {% endif %}
+                                {% if profile.birth_date %}
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label text-muted small">生日</label>
+                                        <p class="mb-0">{{ profile.birth_date|date:"Y年m月d日" }}</p>
+                                    </div>
+                                {% endif %}
+                                {% if profile.company %}
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label text-muted small">公司</label>
+                                        <p class="mb-0">{{ profile.company }}</p>
+                                    </div>
+                                {% endif %}
+                                {% if profile.location %}
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label text-muted small">位置</label>
+                                        <p class="mb-0">
+                                            <i class="bi bi-geo-alt"></i> {{ profile.location }}
+                                        </p>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <!-- 社交链接 -->
+                        {% if profile.github_url or profile.homepage_url or profile.blog_url or profile.twitter_url or profile.linkedin_url %}
+                            <hr class="my-4" />
+                            <div class="mb-4">
+                                <h2 class="h5 mb-3 text-primary">
+                                    <i class="bi bi-link-45deg"></i> 社交链接
+                                </h2>
+                                <div class="d-flex flex-wrap gap-2">
+                                    {% if profile.github_url %}
+                                        <a href="{{ profile.github_url }}" target="_blank" class="btn btn-outline-dark btn-sm">
+                                            <i class="bi bi-github"></i> GitHub
+                                        </a>
+                                    {% endif %}
+                                    {% if profile.homepage_url %}
+                                        <a href="{{ profile.homepage_url }}" target="_blank" class="btn btn-outline-primary btn-sm">
+                                            <i class="bi bi-house-door"></i> 个人主页
+                                        </a>
+                                    {% endif %}
+                                    {% if profile.blog_url %}
+                                        <a href="{{ profile.blog_url }}" target="_blank" class="btn btn-outline-success btn-sm">
+                                            <i class="bi bi-journal-text"></i> 博客
+                                        </a>
+                                    {% endif %}
+                                    {% if profile.twitter_url %}
+                                        <a href="{{ profile.twitter_url }}" target="_blank" class="btn btn-outline-info btn-sm">
+                                            <i class="bi bi-twitter-x"></i> Twitter
+                                        </a>
+                                    {% endif %}
+                                    {% if profile.linkedin_url %}
+                                        <a href="{{ profile.linkedin_url }}" target="_blank" class="btn btn-outline-primary btn-sm">
+                                            <i class="bi bi-linkedin"></i> LinkedIn
+                                        </a>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endif %}
+                        <!-- 工作经历 -->
+                        {% if profile.work_experiences.all %}
+                            <hr class="my-4" />
+                            <div class="mb-4">
+                                <h2 class="h5 mb-3 text-primary">
+                                    <i class="bi bi-briefcase"></i> 工作经历
+                                </h2>
+                                {% for work in profile.work_experiences.all %}
+                                    <div class="mb-3 {% if not forloop.last %}pb-3 border-bottom{% endif %}">
+                                        <div class="d-flex justify-content-between align-items-start mb-1">
+                                            <h3 class="h6 mb-0 fw-bold">{{ work.title }}</h3>
+                                            <small class="text-muted">
+                                                {{ work.start_date|date:"Y年m月" }} -
+                                                {% if work.end_date %}
+                                                    {{ work.end_date|date:"Y年m月" }}
+                                                {% else %}
+                                                    至今
+                                                {% endif %}
+                                            </small>
+                                        </div>
+                                        <p class="mb-1 text-muted">{{ work.company_name }}</p>
+                                        {% if work.description %}
+                                            <p class="mb-0 small">{{ work.description }}</p>
+                                        {% endif %}
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        <!-- 学习经历 -->
+                        {% if profile.educations.all %}
+                            <hr class="my-4" />
+                            <div class="mb-4">
+                                <h2 class="h5 mb-3 text-primary">
+                                    <i class="bi bi-mortarboard"></i> 学习经历
+                                </h2>
+                                {% for edu in profile.educations.all %}
+                                    <div class="mb-3 {% if not forloop.last %}pb-3 border-bottom{% endif %}">
+                                        <div class="d-flex justify-content-between align-items-start mb-1">
+                                            <h3 class="h6 mb-0 fw-bold">{{ edu.institution_name }}</h3>
+                                            <small class="text-muted">
+                                                {{ edu.start_date|date:"Y年m月" }} -
+                                                {% if edu.end_date %}
+                                                    {{ edu.end_date|date:"Y年m月" }}
+                                                {% else %}
+                                                    至今
+                                                {% endif %}
+                                            </small>
+                                        </div>
+                                        <p class="mb-0">
+                                            <span class="text-muted">{{ edu.field_of_study }}</span>
+                                            {% if edu.degree %}
+                                                <span class="badge bg-secondary">{{ edu.degree }}</span>
+                                            {% endif %}
+                                        </p>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        <hr class="my-4" />
                         <!-- 操作按钮 -->
                         <div class="d-grid gap-2 d-md-flex justify-content-md-end">
-                            <a href="#" class="btn btn-primary">
-                                <i class="bi bi-pencil"></i> 编辑资料
-                            </a>
                             <a href="{% url 'accounts:logout' %}" class="btn btn-outline-danger">
                                 <i class="bi bi-box-arrow-right"></i> 退出登录
                             </a>

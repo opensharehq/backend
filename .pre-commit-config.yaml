@@ -14,10 +14,10 @@ repos:
     rev: 25.9.0
     hooks:
       - id: black
-  - repo: https://github.com/pycqa/isort
-    rev: 6.0.1
-    hooks:
-      - id: isort
+  # - repo: https://github.com/pycqa/isort
+  #   rev: 6.0.1
+  #   hooks:
+  #     - id: isort
   - repo: https://github.com/Riverside-Healthcare/djLint
     rev: v1.36.4
     hooks:

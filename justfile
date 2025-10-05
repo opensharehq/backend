@@ -4,6 +4,8 @@ run:
 sh:
     @uv run manage.py shell_plus
 
+manage *args:
+    @uv run manage.py {{args}}
 
 db_update:
     @uv run manage.py makemigrations

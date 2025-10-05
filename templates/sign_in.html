@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}登录 - Open Share{% endblock title %}
+
+{% block content %}
+    <div class="container">
+        <div class="row justify-content-center mt-5">
+            <div class="col-md-6 col-lg-5">
+                <div class="card shadow">
+                    <div class="card-body p-5">
+                        <h1 class="card-title text-center mb-4 h3">登录到 Open Share</h1>
+                        {% if messages %}
+                            {% for message in messages %}
+                                <div class="alert alert-{{ message.tags }} alert-dismissible fade show"
+                                     role="alert">
+                                    {{ message }}
+                                    <button type="button"
+                                            class="btn-close"
+                                            data-bs-dismiss="alert"
+                                            aria-label="Close"></button>
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                        <!-- 邮箱登录 -->
+                        <div class="mb-4">
+                            <h2 class="h5 mb-3">
+                                <i class="bi bi-envelope"></i> 使用邮箱登录
+                            </h2>
+                            <form method="post" action="{% url 'social:begin' 'email' %}">
+                                {% csrf_token %}
+                                <div class="mb-3">
+                                    <label for="email" class="form-label">邮箱地址</label>
+                                    <input type="email"
+                                           class="form-control"
+                                           id="email"
+                                           name="email"
+                                           placeholder="your@email.com"
+                                           required />
+                                </div>
+                                <div class="mb-3">
+                                    <label for="password-email" class="form-label">密码</label>
+                                    <input type="password"
+                                           class="form-control"
+                                           id="password-email"
+                                           name="password"
+                                           placeholder="请输入密码"
+                                           required />
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100">
+                                    <i class="bi bi-envelope"></i> 邮箱登录
+                                </button>
+                            </form>
+                        </div>
+                        <hr class="my-4" />
+                        <!-- 用户名登录 -->
+                        <div class="mb-4">
+                            <h2 class="h5 mb-3">
+                                <i class="bi bi-person"></i> 使用用户名登录
+                            </h2>
+                            <form method="post" action="{% url 'social:begin' 'username' %}">
+                                {% csrf_token %}
+                                <div class="mb-3">
+                                    <label for="username" class="form-label">用户名</label>
+                                    <input type="text"
+                                           class="form-control"
+                                           id="username"
+                                           name="username"
+                                           placeholder="请输入用户名"
+                                           required />
+                                </div>
+                                <div class="mb-3">
+                                    <label for="password-username" class="form-label">密码</label>
+                                    <input type="password"
+                                           class="form-control"
+                                           id="password-username"
+                                           name="password"
+                                           placeholder="请输入密码"
+                                           required />
+                                </div>
+                                <button type="submit" class="btn btn-success w-100">
+                                    <i class="bi bi-person"></i> 用户名登录
+                                </button>
+                            </form>
+                        </div>
+                        <hr class="my-4" />
+                        <!-- GitHub 登录 -->
+                        <div class="mb-4">
+                            <h2 class="h5 mb-3">
+                                <i class="bi bi-github"></i> 使用 GitHub 登录
+                            </h2>
+                            <a href="{% url 'social:begin' 'github' %}"
+                               class="btn btn-dark w-100">
+                                <i class="bi bi-github"></i> GitHub 登录
+                            </a>
+                        </div>
+                        <!-- 注册链接 -->
+                        <div class="text-center mt-4">
+                            <p class="text-muted">
+                                还没有账号？
+                                <a href="{% url 'accounts:sign_up' %}" class="text-decoration-none">立即注册</a>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

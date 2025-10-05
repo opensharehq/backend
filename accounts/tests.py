@@ -3,7 +3,9 @@ from datetime import date
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 
+from accounts.forms import SignUpForm
 from accounts.models import Education, UserProfile, WorkExperience
 
 
@@ -189,3 +191,193 @@ class UserAdminRegistrationTests(TestCase):
             admin.site._registry[user_model],
             accounts_admin.UserAdmin,
         )
+
+
+class AccountsIndexViewTests(TestCase):
+    def test_accounts_index_redirects_to_signin_when_not_authenticated(self):
+        response = self.client.get(reverse("accounts:index"))
+        self.assertRedirects(response, reverse("accounts:sign_in"))
+
+    def test_accounts_index_redirects_to_profile_when_authenticated(self):
+        user = get_user_model().objects.create_user(
+            username="testuser", email="test@example.com", password="testpass123"
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse("accounts:index"))
+        self.assertRedirects(response, reverse("accounts:profile"))
+
+
+class SignInViewTests(TestCase):
+    def test_sign_in_view_status_code(self):
+        response = self.client.get(reverse("accounts:sign_in"))
+        self.assertEqual(response.status_code, 200)
+
+    def test_sign_in_view_template(self):
+        response = self.client.get(reverse("accounts:sign_in"))
+        self.assertTemplateUsed(response, "sign_in.html")
+
+    def test_sign_in_view_contains_email_form(self):
+        response = self.client.get(reverse("accounts:sign_in"))
+        self.assertContains(response, "email")
+        self.assertContains(response, "password")
+
+    def test_sign_in_view_contains_username_form(self):
+        response = self.client.get(reverse("accounts:sign_in"))
+        self.assertContains(response, "username")
+
+    def test_sign_in_view_contains_signup_link(self):
+        response = self.client.get(reverse("accounts:sign_in"))
+        self.assertContains(response, reverse("accounts:sign_up"))
+
+
+class SignUpViewTests(TestCase):
+    def test_sign_up_view_get_status_code(self):
+        response = self.client.get(reverse("accounts:sign_up"))
+        self.assertEqual(response.status_code, 200)
+
+    def test_sign_up_view_template(self):
+        response = self.client.get(reverse("accounts:sign_up"))
+        self.assertTemplateUsed(response, "sign_up.html")
+
+    def test_sign_up_view_contains_form_fields(self):
+        response = self.client.get(reverse("accounts:sign_up"))
+        self.assertContains(response, "username")
+        self.assertContains(response, "email")
+        self.assertContains(response, "password1")
+        self.assertContains(response, "password2")
+
+    def test_sign_up_view_post_valid_data(self):
+        data = {
+            "username": "newuser",
+            "email": "newuser@example.com",
+            "password1": "testpass123",
+            "password2": "testpass123",
+        }
+        response = self.client.post(reverse("accounts:sign_up"), data)
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(get_user_model().objects.filter(username="newuser").exists())
+
+    def test_sign_up_view_post_invalid_password_mismatch(self):
+        data = {
+            "username": "newuser",
+            "email": "newuser@example.com",
+            "password1": "testpass123",
+            "password2": "wrongpass123",
+        }
+        response = self.client.post(reverse("accounts:sign_up"), data)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(get_user_model().objects.filter(username="newuser").exists())
+
+    def test_sign_up_view_contains_signin_link(self):
+        response = self.client.get(reverse("accounts:sign_up"))
+        self.assertContains(response, reverse("accounts:sign_in"))
+
+
+class ProfileViewTests(TestCase):
+    def test_profile_view_requires_login(self):
+        response = self.client.get(reverse("accounts:profile"))
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith("/accounts/login/"))
+
+    def test_profile_view_authenticated_user(self):
+        user = get_user_model().objects.create_user(
+            username="testuser", email="test@example.com", password="testpass123"
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse("accounts:profile"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "profile.html")
+
+    def test_profile_view_displays_user_info(self):
+        user = get_user_model().objects.create_user(
+            username="testuser", email="test@example.com", password="testpass123"
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse("accounts:profile"))
+        self.assertContains(response, "testuser")
+        self.assertContains(response, "test@example.com")
+
+
+class LogoutViewTests(TestCase):
+    def test_logout_view_requires_login(self):
+        response = self.client.get(reverse("accounts:logout"))
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith("/accounts/login/"))
+
+    def test_logout_view_logs_out_user(self):
+        user = get_user_model().objects.create_user(
+            username="testuser", email="test@example.com", password="testpass123"
+        )
+        self.client.force_login(user)
+        self.assertTrue(self.client.session.get("_auth_user_id"))
+
+        response = self.client.get(reverse("accounts:logout"))
+
+        self.assertRedirects(response, reverse("homepage:index"))
+        self.assertFalse(self.client.session.get("_auth_user_id"))
+
+    def test_logout_view_displays_success_message(self):
+        user = get_user_model().objects.create_user(
+            username="testuser", email="test@example.com", password="testpass123"
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse("accounts:logout"), follow=True)
+        messages = list(response.context["messages"])
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(str(messages[0]), "您已成功退出登录")
+
+
+class SignUpFormTests(TestCase):
+    def test_signup_form_valid_data(self):
+        form = SignUpForm(
+            data={
+                "username": "testuser",
+                "email": "test@example.com",
+                "password1": "testpass123",
+                "password2": "testpass123",
+            }
+        )
+        self.assertTrue(form.is_valid())
+
+    def test_signup_form_duplicate_email(self):
+        get_user_model().objects.create_user(
+            username="existing",
+            email="test@example.com",
+            password="pass123",
+        )
+        form = SignUpForm(
+            data={
+                "username": "newuser",
+                "email": "test@example.com",
+                "password1": "testpass123",
+                "password2": "testpass123",
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("email", form.errors)
+
+    def test_signup_form_password_mismatch(self):
+        form = SignUpForm(
+            data={
+                "username": "testuser",
+                "email": "test@example.com",
+                "password1": "testpass123",
+                "password2": "wrongpass123",
+            }
+        )
+        self.assertFalse(form.is_valid())
+
+    def test_signup_form_creates_user(self):
+        form = SignUpForm(
+            data={
+                "username": "testuser",
+                "email": "test@example.com",
+                "password1": "testpass123",
+                "password2": "testpass123",
+            }
+        )
+        self.assertTrue(form.is_valid())
+        user = form.save()
+        self.assertEqual(user.username, "testuser")
+        self.assertEqual(user.email, "test@example.com")
+        self.assertTrue(user.check_password("testpass123"))

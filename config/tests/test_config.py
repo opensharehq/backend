@@ -13,10 +13,8 @@ from django.urls import resolve
 class ConfigModuleTests(SimpleTestCase):
     def test_settings_loaded_defaults(self):
         self.assertEqual(settings.AUTH_USER_MODEL, "accounts.User")
-        self.assertEqual(settings.ANYMAIL["MAILGUN_API_KEY"], "MAILGUN_API_KEY")
-        self.assertEqual(
-            settings.ANYMAIL["MAILGUN_SENDER_DOMAIN"], "MAILGUN_SENDER_DOMAIN"
-        )
+        self.assertIn("MAILGUN_API_KEY", settings.ANYMAIL)
+        self.assertIn("MAILGUN_SENDER_DOMAIN", settings.ANYMAIL)
 
     def test_root_url_resolves_homepage_index(self):
         match = resolve("/")

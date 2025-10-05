@@ -2,7 +2,7 @@
 
 from django import forms
 from django.contrib.auth import get_user_model
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.forms import PasswordChangeForm, UserCreationForm
 
 from .models import Education, UserProfile, WorkExperience
 
@@ -182,3 +182,90 @@ class EducationForm(forms.ModelForm):
             raise forms.ValidationError(msg)
 
         return cleaned_data
+
+
+class CustomPasswordChangeForm(PasswordChangeForm):
+    """Custom password change form with Bootstrap styling."""
+
+    old_password = forms.CharField(
+        label="当前密码",
+        widget=forms.PasswordInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "请输入当前密码",
+            },
+        ),
+    )
+    new_password1 = forms.CharField(
+        label="新密码",
+        widget=forms.PasswordInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "请输入新密码",
+            },
+        ),
+        help_text="密码至少8位，不能全是数字",
+    )
+    new_password2 = forms.CharField(
+        label="确认新密码",
+        widget=forms.PasswordInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "请再次输入新密码",
+            },
+        ),
+    )
+
+
+class ChangeEmailForm(forms.Form):
+    """Email change form."""
+
+    email = forms.EmailField(
+        label="新邮箱",
+        max_length=254,
+        widget=forms.EmailInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "请输入新邮箱地址",
+            },
+        ),
+    )
+    password = forms.CharField(
+        label="当前密码",
+        widget=forms.PasswordInput(
+            attrs={
+                "class": "form-control",
+                "placeholder": "请输入当前密码以确认",
+            },
+        ),
+        help_text="为了安全，需要验证您的当前密码",
+    )
+
+    def __init__(self, user, *args, **kwargs):
+        """Initialize form with user instance."""
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+    def clean_email(self):
+        """Validate email is unique and different from current."""
+        email = self.cleaned_data.get("email")
+
+        if email == self.user.email:
+            msg = "新邮箱不能与当前邮箱相同"
+            raise forms.ValidationError(msg)
+
+        if get_user_model().objects.filter(email=email).exists():
+            msg = "该邮箱已被其他用户使用"
+            raise forms.ValidationError(msg)
+
+        return email
+
+    def clean_password(self):
+        """Validate password is correct."""
+        password = self.cleaned_data.get("password")
+
+        if not self.user.check_password(password):
+            msg = "密码不正确"
+            raise forms.ValidationError(msg)
+
+        return password

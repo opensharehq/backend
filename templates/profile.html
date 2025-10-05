@@ -185,11 +185,44 @@
                             </div>
                         {% endif %}
                         <hr class="my-4" />
+                        <!-- 账号安全 -->
+                        <div class="mb-4">
+                            <h2 class="h5 mb-3 text-primary">
+                                <i class="bi bi-shield-check"></i> 账号安全
+                            </h2>
+                            <div class="list-group">
+                                <a href="{% url 'accounts:change_password' %}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="bi bi-key"></i>
+                                        <strong>修改密码</strong>
+                                        <br>
+                                        <small class="text-muted">定期更换密码，保护账号安全</small>
+                                    </div>
+                                    <i class="bi bi-chevron-right"></i>
+                                </a>
+                                <a href="{% url 'accounts:change_email' %}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="bi bi-envelope"></i>
+                                        <strong>修改邮箱</strong>
+                                        <br>
+                                        <small class="text-muted">当前邮箱：{{ user.email|default:"未设置" }}</small>
+                                    </div>
+                                    <i class="bi bi-chevron-right"></i>
+                                </a>
+                                <a href="{% url 'accounts:social_connections' %}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="bi bi-link-45deg"></i>
+                                        <strong>社交账号管理</strong>
+                                        <br>
+                                        <small class="text-muted">绑定或解绑第三方登录</small>
+                                    </div>
+                                    <i class="bi bi-chevron-right"></i>
+                                </a>
+                            </div>
+                        </div>
+                        <hr class="my-4" />
                         <!-- 操作按钮 -->
                         <div class="d-grid gap-2 d-md-flex justify-content-md-end">
-                            <a href="{% url 'accounts:social_connections' %}" class="btn btn-outline-primary">
-                                <i class="bi bi-link-45deg"></i> 社交账号管理
-                            </a>
                             <a href="{% url 'accounts:logout' %}" class="btn btn-outline-danger">
                                 <i class="bi bi-box-arrow-right"></i> 退出登录
                             </a>

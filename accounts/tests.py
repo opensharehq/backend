@@ -1557,3 +1557,308 @@ class DisconnectSocialAccountViewTests(TestCase):
         assert len(messages) == 1
         assert "未找到该社交账号绑定" in str(messages[0])
         assert UserSocialAuth.objects.filter(id=social_auth.id).exists()
+
+
+class ChangePasswordViewTests(TestCase):
+    """Test cases for change password view."""
+
+    def test_change_password_view_requires_login(self):
+        """Test that change password view requires user authentication."""
+        response = self.client.get(reverse("accounts:change_password"))
+        assert response.status_code == 302
+        assert response.url.startswith("/accounts/login/")
+
+    def test_change_password_view_get_authenticated(self):
+        """Test that authenticated users can access change password page."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse("accounts:change_password"))
+        assert response.status_code == 200
+        self.assertTemplateUsed(response, "change_password.html")
+
+    def test_change_password_view_post_valid_data(self):
+        """Test that posting valid data changes user password."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="oldpass123",
+        )
+        self.client.force_login(user)
+        data = {
+            "old_password": "oldpass123",
+            "new_password1": "newpass123",
+            "new_password2": "newpass123",
+        }
+        response = self.client.post(reverse("accounts:change_password"), data)
+        self.assertRedirects(response, reverse("accounts:profile"))
+
+        # Verify password was changed
+        user.refresh_from_db()
+        assert user.check_password("newpass123")
+
+    def test_change_password_view_post_wrong_old_password(self):
+        """Test that wrong old password prevents password change."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="oldpass123",
+        )
+        self.client.force_login(user)
+        data = {
+            "old_password": "wrongpass",
+            "new_password1": "newpass123",
+            "new_password2": "newpass123",
+        }
+        response = self.client.post(reverse("accounts:change_password"), data)
+        assert response.status_code == 200
+        # Password should not be changed
+        user.refresh_from_db()
+        assert user.check_password("oldpass123")
+
+    def test_change_password_view_post_password_mismatch(self):
+        """Test that password mismatch prevents password change."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="oldpass123",
+        )
+        self.client.force_login(user)
+        data = {
+            "old_password": "oldpass123",
+            "new_password1": "newpass123",
+            "new_password2": "differentpass",
+        }
+        response = self.client.post(reverse("accounts:change_password"), data)
+        assert response.status_code == 200
+        # Password should not be changed
+        user.refresh_from_db()
+        assert user.check_password("oldpass123")
+
+
+class ChangeEmailViewTests(TestCase):
+    """Test cases for change email view."""
+
+    def test_change_email_view_requires_login(self):
+        """Test that change email view requires user authentication."""
+        response = self.client.get(reverse("accounts:change_email"))
+        assert response.status_code == 302
+        assert response.url.startswith("/accounts/login/")
+
+    def test_change_email_view_get_authenticated(self):
+        """Test that authenticated users can access change email page."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="old@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse("accounts:change_email"))
+        assert response.status_code == 200
+        self.assertTemplateUsed(response, "change_email.html")
+        self.assertContains(response, "old@example.com")
+
+    def test_change_email_view_post_valid_data(self):
+        """Test that posting valid data changes user email."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="old@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        data = {
+            "email": "new@example.com",
+            "password": "testpass123",
+        }
+        response = self.client.post(reverse("accounts:change_email"), data)
+        self.assertRedirects(response, reverse("accounts:profile"))
+
+        # Verify email was changed
+        user.refresh_from_db()
+        assert user.email == "new@example.com"
+
+    def test_change_email_view_post_wrong_password(self):
+        """Test that wrong password prevents email change."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="old@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        data = {
+            "email": "new@example.com",
+            "password": "wrongpass",
+        }
+        response = self.client.post(reverse("accounts:change_email"), data)
+        assert response.status_code == 200
+        # Email should not be changed
+        user.refresh_from_db()
+        assert user.email == "old@example.com"
+
+    def test_change_email_view_post_same_email(self):
+        """Test that same email is rejected."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        data = {
+            "email": "test@example.com",
+            "password": "testpass123",
+        }
+        response = self.client.post(reverse("accounts:change_email"), data)
+        assert response.status_code == 200
+        self.assertContains(response, "新邮箱不能与当前邮箱相同")
+
+    def test_change_email_view_post_existing_email(self):
+        """Test that email already in use is rejected."""
+        # Create first user
+        get_user_model().objects.create_user(
+            username="user1",
+            email="existing@example.com",
+            password="pass123",
+        )
+        # Create second user
+        user2 = get_user_model().objects.create_user(
+            username="user2",
+            email="user2@example.com",
+            password="pass123",
+        )
+        self.client.force_login(user2)
+        data = {
+            "email": "existing@example.com",
+            "password": "pass123",
+        }
+        response = self.client.post(reverse("accounts:change_email"), data)
+        assert response.status_code == 200
+        self.assertContains(response, "该邮箱已被其他用户使用")
+
+
+class CustomPasswordChangeFormTests(TestCase):
+    """Test cases for CustomPasswordChangeForm."""
+
+    def test_form_valid_data(self):
+        """Test that form is valid with correct data."""
+        from accounts.forms import CustomPasswordChangeForm
+
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="oldpass123",
+        )
+        form = CustomPasswordChangeForm(
+            user=user,
+            data={
+                "old_password": "oldpass123",
+                "new_password1": "newpass123",
+                "new_password2": "newpass123",
+            },
+        )
+        assert form.is_valid()
+
+    def test_form_wrong_old_password(self):
+        """Test that form is invalid with wrong old password."""
+        from accounts.forms import CustomPasswordChangeForm
+
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="oldpass123",
+        )
+        form = CustomPasswordChangeForm(
+            user=user,
+            data={
+                "old_password": "wrongpass",
+                "new_password1": "newpass123",
+                "new_password2": "newpass123",
+            },
+        )
+        assert not form.is_valid()
+
+
+class ChangeEmailFormTests(TestCase):
+    """Test cases for ChangeEmailForm."""
+
+    def test_form_valid_data(self):
+        """Test that form is valid with correct data."""
+        from accounts.forms import ChangeEmailForm
+
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="old@example.com",
+            password="testpass123",
+        )
+        form = ChangeEmailForm(
+            user=user,
+            data={
+                "email": "new@example.com",
+                "password": "testpass123",
+            },
+        )
+        assert form.is_valid()
+
+    def test_form_same_email(self):
+        """Test that form is invalid with same email."""
+        from accounts.forms import ChangeEmailForm
+
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        form = ChangeEmailForm(
+            user=user,
+            data={
+                "email": "test@example.com",
+                "password": "testpass123",
+            },
+        )
+        assert not form.is_valid()
+        assert "email" in form.errors
+
+    def test_form_existing_email(self):
+        """Test that form is invalid with email already in use."""
+        from accounts.forms import ChangeEmailForm
+
+        get_user_model().objects.create_user(
+            username="user1",
+            email="existing@example.com",
+            password="pass123",
+        )
+        user2 = get_user_model().objects.create_user(
+            username="user2",
+            email="user2@example.com",
+            password="pass123",
+        )
+        form = ChangeEmailForm(
+            user=user2,
+            data={
+                "email": "existing@example.com",
+                "password": "pass123",
+            },
+        )
+        assert not form.is_valid()
+        assert "email" in form.errors
+
+    def test_form_wrong_password(self):
+        """Test that form is invalid with wrong password."""
+        from accounts.forms import ChangeEmailForm
+
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        form = ChangeEmailForm(
+            user=user,
+            data={
+                "email": "new@example.com",
+                "password": "wrongpass",
+            },
+        )
+        assert not form.is_valid()
+        assert "password" in form.errors

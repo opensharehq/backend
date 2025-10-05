@@ -1,13 +1,20 @@
 """Views for user authentication and profile management."""
 
 from django.contrib import messages
-from django.contrib.auth import login, logout
+from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.forms import inlineformset_factory
 from django.shortcuts import redirect, render
 from social_django.models import UserSocialAuth
 
-from .forms import EducationForm, ProfileForm, SignUpForm, WorkExperienceForm
+from .forms import (
+    ChangeEmailForm,
+    CustomPasswordChangeForm,
+    EducationForm,
+    ProfileForm,
+    SignUpForm,
+    WorkExperienceForm,
+)
 from .models import Education, UserProfile, WorkExperience
 
 
@@ -264,3 +271,41 @@ def disconnect_social_account(request, provider, association_id):
         messages.error(request, "未找到该社交账号绑定")
 
     return redirect("accounts:social_connections")
+
+
+@login_required
+def change_password_view(request):
+    """Change user password."""
+    if request.method == "POST":
+        form = CustomPasswordChangeForm(user=request.user, data=request.POST)
+        if form.is_valid():
+            user = form.save()
+            # 更新session，避免用户修改密码后被登出
+            update_session_auth_hash(request, user)
+            messages.success(request, "密码修改成功")
+            return redirect("accounts:profile")
+    else:
+        form = CustomPasswordChangeForm(user=request.user)
+
+    return render(request, "change_password.html", {"form": form})
+
+
+@login_required
+def change_email_view(request):
+    """Change user email address."""
+    if request.method == "POST":
+        form = ChangeEmailForm(user=request.user, data=request.POST)
+        if form.is_valid():
+            new_email = form.cleaned_data["email"]
+            request.user.email = new_email
+            request.user.save()
+            messages.success(request, "邮箱修改成功")
+            return redirect("accounts:profile")
+    else:
+        form = ChangeEmailForm(user=request.user)
+
+    return render(
+        request,
+        "change_email.html",
+        {"form": form, "current_email": request.user.email},
+    )

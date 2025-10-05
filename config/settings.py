@@ -177,7 +177,7 @@ AUTHENTICATION_BACKENDS = (
     "social_core.backends.gitlab.GitLabOAuth2",
     "social_core.backends.gitea.GiteaOAuth2",
     "social_core.backends.linkedin.LinkedinOAuth2",
-    "social_core.backends.twitter.TwitterOAuth2",
+    "social_core.backends.twitter.TwitterOAuth",
     "social_core.backends.email.EmailAuth",
     "social_core.backends.username.UsernameAuth",
     "django.contrib.auth.backends.ModelBackend",

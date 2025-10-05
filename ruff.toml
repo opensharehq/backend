@@ -26,6 +26,7 @@ exclude = [
     "node_modules",
     "site-packages",
     "venv",
+    "*/migrations/*",  # Django migration files
 ]
 
 # Same as Black.
@@ -54,9 +55,21 @@ select = [
    "TID",
    "TD",
    "RUF",
-   "DOC"
+   "DOC",
+   "COM",
+   "C90"
 ]
-ignore = []
+ignore = [
+    "RUF012",    # Django Meta classes with mutable fields/widgets are normal
+    "PLC0415",   # Django manage.py imports in try-except are standard
+    "S101",      # Use of assert in tests is expected
+    "PLR2004",   # Magic values in tests are acceptable (e.g., status codes)
+    "RUF001",    # Chinese characters in strings are intentional
+    "RUF003",    # Chinese characters in comments are intentional
+    "S106",      # Hardcoded passwords in tests are acceptable
+    "DJ008",     # Django models don't always need __str__ methods
+    "E501",      # Long lines are sometimes necessary for readability
+]
 
 fixable = ["ALL"]
 unfixable = []
@@ -69,3 +82,6 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 docstring-code-format = true
 docstring-code-line-length = "dynamic"
+
+[lint.mccabe]
+max-complexity = 20

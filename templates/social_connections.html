@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}社交账号管理 - Open Share{% endblock title %}
+
+{% block content %}
+    <div class="container py-5">
+        {% if messages %}
+            <div class="row justify-content-center">
+                <div class="col-md-10 col-lg-8">
+                    {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+        <div class="row justify-content-center">
+            <div class="col-md-10 col-lg-8">
+                <div class="card shadow">
+                    <div class="card-body p-4">
+                        <div class="d-flex justify-content-between align-items-center mb-4">
+                            <h1 class="card-title h3 mb-0">社交账号管理</h1>
+                            <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary">
+                                <i class="bi bi-arrow-left"></i> 返回
+                            </a>
+                        </div>
+                        <p class="text-muted mb-4">管理您的社交账号绑定，绑定后可以使用这些平台快速登录</p>
+                        <div class="list-group">
+                            {% for connection in connections %}
+                                <div class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div class="d-flex align-items-center">
+                                        <i class="bi {{ connection.icon }} fs-3 me-3"></i>
+                                        <div>
+                                            <h5 class="mb-0">{{ connection.name }}</h5>
+                                            {% if connection.is_connected %}
+                                                <small class="text-success">
+                                                    <i class="bi bi-check-circle-fill"></i> 已绑定
+                                                    {% if connection.uid %}
+                                                        ({{ connection.uid }})
+                                                    {% endif %}
+                                                </small>
+                                            {% else %}
+                                                <small class="text-muted">
+                                                    <i class="bi bi-x-circle"></i> 未绑定
+                                                </small>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        {% if connection.is_connected %}
+                                            {% if can_disconnect %}
+                                                <form method="post" action="{% url 'accounts:disconnect_social' connection.provider connection.social_auth_id %}" class="d-inline">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('确定要解绑此账号吗？')">
+                                                        <i class="bi bi-x-circle"></i> 解绑
+                                                    </button>
+                                                </form>
+                                            {% else %}
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="这是您唯一的登录方式，无法解绑">
+                                                    <i class="bi bi-lock"></i> 无法解绑
+                                                </button>
+                                            {% endif %}
+                                        {% else %}
+                                            <a href="{% url 'social:begin' connection.provider %}" class="btn btn-sm btn-primary">
+                                                <i class="bi bi-link-45deg"></i> 绑定
+                                            </a>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                        <div class="alert alert-info mt-4" role="alert">
+                            <i class="bi bi-info-circle"></i>
+                            <strong>提示：</strong>
+                            {% if has_password %}
+                                您已设置密码，可以安全地解绑社交账号。
+                            {% else %}
+                                您尚未设置密码，为了账号安全，请至少保留一个社交账号绑定，或先设置密码后再解绑。
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

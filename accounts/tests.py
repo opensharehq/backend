@@ -6,6 +6,7 @@ from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from social_django.models import UserSocialAuth
 
 from accounts.forms import EducationForm, ProfileForm, SignUpForm, WorkExperienceForm
 from accounts.models import Education, UserProfile, WorkExperience
@@ -1209,3 +1210,350 @@ class EducationFormTests(TestCase):
         )
         assert not form.is_valid()
         assert "开始日期必须早于结束日期" in str(form.errors)
+
+
+class SocialConnectionsViewTests(TestCase):
+    """Test cases for social connections view."""
+
+    def test_social_connections_view_requires_login(self):
+        """Test that social connections view requires user authentication."""
+        response = self.client.get(reverse("accounts:social_connections"))
+        assert response.status_code == 302
+        assert response.url.startswith("/accounts/login/")
+
+    def test_social_connections_view_authenticated(self):
+        """Test that authenticated users can access social connections page."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse("accounts:social_connections"))
+        assert response.status_code == 200
+        self.assertTemplateUsed(response, "social_connections.html")
+
+    def test_social_connections_view_displays_configured_providers(self):
+        """Test that social connections view only displays configured providers."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+
+        # 设置 GitHub 配置（默认在测试环境已配置）
+        with self.settings(
+            SOCIAL_AUTH_GITHUB_KEY="test_key",
+            SOCIAL_AUTH_GITHUB_SECRET="test_secret",
+        ):
+            response = self.client.get(reverse("accounts:social_connections"))
+            self.assertContains(response, "GitHub")
+
+    def test_social_connections_view_hides_unconfigured_providers(self):
+        """Test that unconfigured providers are not displayed."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+
+        # 清空所有社交认证配置
+        with self.settings(
+            SOCIAL_AUTH_GITHUB_KEY="",
+            SOCIAL_AUTH_GITHUB_SECRET="",
+            SOCIAL_AUTH_GOOGLE_OAUTH2_KEY="",
+            SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET="",
+            SOCIAL_AUTH_FACEBOOK_KEY="",
+            SOCIAL_AUTH_FACEBOOK_SECRET="",
+            SOCIAL_AUTH_TWITTER_OAUTH2_KEY="",
+            SOCIAL_AUTH_TWITTER_OAUTH2_SECRET="",
+            SOCIAL_AUTH_LINKEDIN_OAUTH2_KEY="",
+            SOCIAL_AUTH_LINKEDIN_OAUTH2_SECRET="",
+            SOCIAL_AUTH_BITBUCKET_OAUTH2_KEY="",
+            SOCIAL_AUTH_BITBUCKET_OAUTH2_SECRET="",
+            SOCIAL_AUTH_DOCKER_KEY="",
+            SOCIAL_AUTH_DOCKER_SECRET="",
+            SOCIAL_AUTH_GITLAB_KEY="",
+            SOCIAL_AUTH_GITLAB_SECRET="",
+            SOCIAL_AUTH_GITEA_KEY="",
+            SOCIAL_AUTH_GITEA_SECRET="",
+        ):
+            response = self.client.get(reverse("accounts:social_connections"))
+            # 不应该显示任何社交平台
+            self.assertNotContains(response, "GitHub")
+            self.assertNotContains(response, "Google")
+            self.assertNotContains(response, "Facebook")
+
+    def test_social_connections_view_shows_connected_accounts(self):
+        """Test that connected social accounts are displayed correctly."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        UserSocialAuth.objects.create(
+            user=user,
+            provider="github",
+            uid="github123",
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse("accounts:social_connections"))
+        self.assertContains(response, "已绑定")
+        self.assertContains(response, "github123")
+
+    def test_social_connections_view_shows_unconnected_accounts(self):
+        """Test that unconnected social accounts are displayed correctly."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse("accounts:social_connections"))
+        self.assertContains(response, "未绑定")
+        self.assertContains(response, "绑定")
+
+    def test_social_connections_view_hides_disconnect_for_only_auth_method(self):
+        """Test that disconnect button is hidden when user has only one auth method."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+        )
+        user.set_unusable_password()
+        user.save()
+        UserSocialAuth.objects.create(
+            user=user,
+            provider="github",
+            uid="github123",
+        )
+        self.client.force_login(user)
+
+        with self.settings(
+            SOCIAL_AUTH_GITHUB_KEY="test_key",
+            SOCIAL_AUTH_GITHUB_SECRET="test_secret",
+        ):
+            response = self.client.get(reverse("accounts:social_connections"))
+            # 应该显示"无法解绑"而不是"解绑"
+            self.assertContains(response, "无法解绑")
+            self.assertNotContains(response, "解绑</button>")
+
+    def test_social_connections_view_shows_disconnect_with_password(self):
+        """Test that disconnect button is shown when user has password."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        UserSocialAuth.objects.create(
+            user=user,
+            provider="github",
+            uid="github123",
+        )
+        self.client.force_login(user)
+
+        with self.settings(
+            SOCIAL_AUTH_GITHUB_KEY="test_key",
+            SOCIAL_AUTH_GITHUB_SECRET="test_secret",
+        ):
+            response = self.client.get(reverse("accounts:social_connections"))
+            # 有密码，应该可以解绑
+            self.assertContains(response, "btn-outline-danger")
+            self.assertContains(response, "解绑")
+            self.assertNotContains(response, "无法解绑")
+
+    def test_social_connections_view_shows_disconnect_with_multiple_social(self):
+        """Test that disconnect button is shown when user has multiple social accounts."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+        )
+        user.set_unusable_password()
+        user.save()
+        UserSocialAuth.objects.create(
+            user=user,
+            provider="github",
+            uid="github123",
+        )
+        UserSocialAuth.objects.create(
+            user=user,
+            provider="google-oauth2",
+            uid="google123",
+        )
+        self.client.force_login(user)
+
+        with self.settings(
+            SOCIAL_AUTH_GITHUB_KEY="test_key",
+            SOCIAL_AUTH_GITHUB_SECRET="test_secret",
+            SOCIAL_AUTH_GOOGLE_OAUTH2_KEY="test_key",
+            SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET="test_secret",
+        ):
+            response = self.client.get(reverse("accounts:social_connections"))
+            # 有多个社交账号，应该可以解绑
+            self.assertContains(response, "btn-outline-danger")
+            self.assertContains(response, "解绑")
+            self.assertNotContains(response, "无法解绑")
+
+
+class DisconnectSocialAccountViewTests(TestCase):
+    """Test cases for disconnect social account view."""
+
+    def test_disconnect_social_account_requires_login(self):
+        """Test that disconnect view requires user authentication."""
+        response = self.client.post(
+            reverse("accounts:disconnect_social", args=["github", 1]),
+        )
+        assert response.status_code == 302
+        assert response.url.startswith("/accounts/login/")
+
+    def test_disconnect_social_account_success(self):
+        """Test that disconnecting social account works correctly."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        user.set_password("testpass123")
+        user.save()
+        social_auth = UserSocialAuth.objects.create(
+            user=user,
+            provider="github",
+            uid="github123",
+        )
+        self.client.force_login(user)
+        response = self.client.post(
+            reverse(
+                "accounts:disconnect_social",
+                args=["github", social_auth.id],
+            ),
+        )
+        self.assertRedirects(response, reverse("accounts:social_connections"))
+        assert not UserSocialAuth.objects.filter(id=social_auth.id).exists()
+
+    def test_disconnect_social_account_with_password(self):
+        """Test that user can disconnect social account if they have a password."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        social_auth = UserSocialAuth.objects.create(
+            user=user,
+            provider="github",
+            uid="github123",
+        )
+        self.client.force_login(user)
+        response = self.client.post(
+            reverse(
+                "accounts:disconnect_social",
+                args=["github", social_auth.id],
+            ),
+            follow=True,
+        )
+        messages = list(response.context["messages"])
+        assert len(messages) == 1
+        assert "已成功解绑" in str(messages[0])
+
+    def test_disconnect_social_account_prevents_last_auth_method(self):
+        """Test that user cannot disconnect their only authentication method."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+        )
+        user.set_unusable_password()
+        user.save()
+        social_auth = UserSocialAuth.objects.create(
+            user=user,
+            provider="github",
+            uid="github123",
+        )
+        self.client.force_login(user)
+        response = self.client.post(
+            reverse(
+                "accounts:disconnect_social",
+                args=["github", social_auth.id],
+            ),
+            follow=True,
+        )
+        messages = list(response.context["messages"])
+        assert len(messages) == 1
+        assert "无法解绑该账号" in str(messages[0])
+        assert UserSocialAuth.objects.filter(id=social_auth.id).exists()
+
+    def test_disconnect_social_account_with_other_social_accounts(self):
+        """Test that user can disconnect social account if they have other social accounts."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+        )
+        user.set_unusable_password()
+        user.save()
+        github_auth = UserSocialAuth.objects.create(
+            user=user,
+            provider="github",
+            uid="github123",
+        )
+        UserSocialAuth.objects.create(
+            user=user,
+            provider="google-oauth2",
+            uid="google123",
+        )
+        self.client.force_login(user)
+        response = self.client.post(
+            reverse(
+                "accounts:disconnect_social",
+                args=["github", github_auth.id],
+            ),
+            follow=True,
+        )
+        messages = list(response.context["messages"])
+        assert len(messages) == 1
+        assert "已成功解绑" in str(messages[0])
+        assert not UserSocialAuth.objects.filter(id=github_auth.id).exists()
+
+    def test_disconnect_social_account_not_found(self):
+        """Test that disconnecting non-existent social account shows error."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        response = self.client.post(
+            reverse("accounts:disconnect_social", args=["github", 99999]),
+            follow=True,
+        )
+        messages = list(response.context["messages"])
+        assert len(messages) == 1
+        assert "未找到该社交账号绑定" in str(messages[0])
+
+    def test_disconnect_social_account_wrong_user(self):
+        """Test that user cannot disconnect another user's social account."""
+        user1 = get_user_model().objects.create_user(
+            username="testuser1",
+            email="test1@example.com",
+            password="testpass123",
+        )
+        user2 = get_user_model().objects.create_user(
+            username="testuser2",
+            email="test2@example.com",
+            password="testpass123",
+        )
+        social_auth = UserSocialAuth.objects.create(
+            user=user2,
+            provider="github",
+            uid="github123",
+        )
+        self.client.force_login(user1)
+        response = self.client.post(
+            reverse(
+                "accounts:disconnect_social",
+                args=["github", social_auth.id],
+            ),
+            follow=True,
+        )
+        messages = list(response.context["messages"])
+        assert len(messages) == 1
+        assert "未找到该社交账号绑定" in str(messages[0])
+        assert UserSocialAuth.objects.filter(id=social_auth.id).exists()

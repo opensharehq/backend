@@ -4,11 +4,13 @@ from django.urls import path
 
 from .views import (
     accounts_index,
+    disconnect_social_account,
     logout_view,
     profile_edit_view,
     profile_view,
     sign_in_view,
     sign_up_view,
+    social_connections_view,
 )
 
 app_name = "accounts"
@@ -20,4 +22,14 @@ urlpatterns = [
     path("profile/", profile_view, name="profile"),
     path("profile/edit/", profile_edit_view, name="profile_edit"),
     path("logout/", logout_view, name="logout"),
+    path(
+        "social-connections/",
+        social_connections_view,
+        name="social_connections",
+    ),
+    path(
+        "social-connections/disconnect/<str:provider>/<int:association_id>/",
+        disconnect_social_account,
+        name="disconnect_social",
+    ),
 ]

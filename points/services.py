@@ -1,7 +1,8 @@
 """积分系统的业务逻辑服务层, 提供积分发放和消费功能."""
 
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
+from django.utils.text import slugify
 
 from accounts.models import UserProfile
 
@@ -47,9 +48,22 @@ def grant_points(
         raise ValueError(msg)
 
     # 1. 处理标签：获取或创建（Get or Create）
+    # 支持使用 name 或 slug 来查找标签
     tags_to_add = []
-    for name in tag_names:
-        tag, _ = Tag.objects.get_or_create(name=name)
+    for name_or_slug in tag_names:
+        # 先尝试通过 slug 或 name 查找
+        tag = Tag.objects.filter(Q(slug=name_or_slug) | Q(name=name_or_slug)).first()
+
+        if tag is None:
+            # 如果不存在，创建新标签（使用输入作为 name，生成 slug）
+            tag_slug = slugify(name_or_slug)
+            # 如果 slug 为空（如纯中文），使用原值
+            if not tag_slug:
+                tag_slug = name_or_slug
+            tag, _ = Tag.objects.get_or_create(
+                name=name_or_slug, defaults={"slug": tag_slug}
+            )
+
         tags_to_add.append(tag)
 
     # 2. 创建积分来源（积分桶）

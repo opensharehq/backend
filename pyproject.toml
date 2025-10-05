@@ -28,9 +28,11 @@ profile="django"
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = "tests.py test_*.py *_tests.py"
-addopts = "--cov=accounts --cov=homepage --cov=config --cov-report=term-missing --cov-fail-under=100"
+addopts = "--cov=accounts --cov=homepage --cov=config --cov=points --cov-report=term-missing --cov-fail-under=100"
 
 [tool.coverage.run]
 omit = [
     "manage.py",
+    "*/migrations/*",
+    "*/admin.py",
 ]

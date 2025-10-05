@@ -8,12 +8,23 @@ class Tag(models.Model):
     """积分标签模型, 用于分类和标识积分来源."""
 
     name = models.CharField(max_length=50, unique=True, verbose_name="标签名称")
+    slug = models.SlugField(
+        max_length=50, unique=True, blank=True, verbose_name="URL别名"
+    )
     description = models.TextField(blank=True, verbose_name="描述")
     is_default = models.BooleanField(default=False, verbose_name="是否为默认标签")
 
     def __str__(self):
         """返回标签名称作为字符串表示."""
         return self.name
+
+    def save(self, *args, **kwargs):
+        """保存时自动生成 slug."""
+        if not self.slug:
+            from django.utils.text import slugify
+
+            self.slug = slugify(self.name) or self.name
+        super().save(*args, **kwargs)
 
 
 class PointSource(models.Model):

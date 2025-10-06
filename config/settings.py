@@ -230,13 +230,24 @@ SOCIAL_AUTH_TWITTER_OAUTH2_KEY = env("SOCIAL_AUTH_TWITTER_OAUTH2_KEY")
 SOCIAL_AUTH_TWITTER_OAUTH2_SECRET = env("SOCIAL_AUTH_TWITTER_OAUTH2_SECRET")
 
 
-# anymail config
+# Email Configuration
+# For production: Set MAILGUN_API_KEY and MAILGUN_SENDER_DOMAIN in .env
+# For local development: Email will be printed to console if Mailgun is not configured
 
-ANYMAIL = {
-    "MAILGUN_API_KEY": env("MAILGUN_API_KEY"),
-    "MAILGUN_SENDER_DOMAIN": env("MAILGUN_SENDER_DOMAIN"),
-}
-EMAIL_BACKEND = "anymail.backends.mailgun.EmailBackend"
+MAILGUN_API_KEY = env("MAILGUN_API_KEY")
+MAILGUN_SENDER_DOMAIN = env("MAILGUN_SENDER_DOMAIN")
+
+if MAILGUN_API_KEY and MAILGUN_SENDER_DOMAIN:
+    # Production: Use Mailgun for email delivery
+    ANYMAIL = {
+        "MAILGUN_API_KEY": MAILGUN_API_KEY,
+        "MAILGUN_SENDER_DOMAIN": MAILGUN_SENDER_DOMAIN,
+    }
+    EMAIL_BACKEND = "anymail.backends.mailgun.EmailBackend"
+else:
+    # Development: Print emails to console
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
 DEFAULT_FROM_EMAIL = "no-reply@openshare.cn"
 SERVER_EMAIL = "server@openshare.cn"
 

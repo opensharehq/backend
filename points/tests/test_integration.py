@@ -1,6 +1,5 @@
 """Integration tests for points app workflows."""
 
-import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -9,7 +8,6 @@ from points.models import PointTransaction, Tag
 from points.services import InsufficientPointsError, grant_points, spend_points
 
 
-@pytest.mark.integration
 class PointsGrantingFlowTests(TestCase):
     """Test complete points granting workflow."""
 
@@ -34,21 +32,21 @@ class PointsGrantingFlowTests(TestCase):
         )
 
         # Verify PointSource was created
-        assert source.user_profile == self.user
-        assert source.initial_points == 100
-        assert source.remaining_points == 100
-        assert self.tag in source.tags.all()
+        self.assertEqual(source.user_profile, self.user)
+        self.assertEqual(source.initial_points, 100)
+        self.assertEqual(source.remaining_points, 100)
+        self.assertIn(self.tag, source.tags.all())
 
         # Verify PointTransaction was created
         transaction = PointTransaction.objects.filter(
             user_profile=self.user, transaction_type="EARN"
         ).first()
-        assert transaction is not None
-        assert transaction.points == 100
-        assert transaction.description == "用户注册奖励"
+        self.assertIsNotNone(transaction)
+        self.assertEqual(transaction.points, 100)
+        self.assertEqual(transaction.description, "用户注册奖励")
 
         # Verify user's total points
-        assert self.user.total_points == 100
+        self.assertEqual(self.user.total_points, 100)
 
     def test_grant_multiple_points_from_different_sources(self):
         """Test user can receive points from multiple sources."""
@@ -72,16 +70,17 @@ class PointsGrantingFlowTests(TestCase):
         )
 
         # Verify total points
-        assert self.user.total_points == 80
+        self.assertEqual(self.user.total_points, 80)
 
         # Verify two sources exist
-        assert self.user.point_sources.count() == 2
+        self.assertEqual(self.user.point_sources.count(), 2)
 
         # Verify transactions
-        assert PointTransaction.objects.filter(user_profile=self.user).count() == 2
+        self.assertEqual(
+            PointTransaction.objects.filter(user_profile=self.user).count(), 2
+        )
 
 
-@pytest.mark.integration
 class PointsSpendingFlowTests(TestCase):
     """Test complete points spending workflow."""
 
@@ -127,7 +126,7 @@ class PointsSpendingFlowTests(TestCase):
         )
 
         # User should have 350 total (200 from setUp + 100 + 50)
-        assert self.user.total_points == 350
+        self.assertEqual(self.user.total_points, 350)
 
         # Spend 120 points (should consume from oldest first)
         transaction = spend_points(
@@ -137,10 +136,10 @@ class PointsSpendingFlowTests(TestCase):
         )
 
         # Verify transaction was created
-        assert transaction is not None
+        self.assertIsNotNone(transaction)
 
         # Verify remaining points: 350 - 120 = 230
-        assert self.user.total_points == 230
+        self.assertEqual(self.user.total_points, 230)
 
         # Verify FIFO consumption - oldest source should be consumed first
         sources = self.user.point_sources.order_by("created_at")
@@ -151,25 +150,25 @@ class PointsSpendingFlowTests(TestCase):
         # setUp source: 200 - 120 = 80 remaining
 
         oldest_source = sources.first()
-        assert oldest_source.remaining_points == 80
+        self.assertEqual(oldest_source.remaining_points, 80)
 
     def test_spend_points_with_insufficient_balance_raises_error(self):
         """Test spending more points than available raises error."""
         # User has 200 points from setUp
-        with pytest.raises(InsufficientPointsError) as exc_info:
+        with self.assertRaises(InsufficientPointsError) as exc_info:
             spend_points(
                 user_profile=self.user,
                 amount=300,  # More than available
                 description="尝试超支",
             )
 
-        assert (
-            "积分不足" in str(exc_info.value)
-            or "Insufficient" in str(exc_info.value).lower()
+        self.assertTrue(
+            "积分不足" in str(exc_info.exception)
+            or "Insufficient" in str(exc_info.exception).lower()
         )
 
         # Points should remain unchanged
-        assert self.user.total_points == 200
+        self.assertEqual(self.user.total_points, 200)
 
     def test_spend_points_with_tag_filter(self):
         """Test spending points with priority tag."""
@@ -186,7 +185,7 @@ class PointsSpendingFlowTests(TestCase):
         )
 
         # User now has 200 (general from setUp) + 50 (event) = 250 total
-        assert self.user.total_points == 250
+        self.assertEqual(self.user.total_points, 250)
 
         # Spend with priority on event tag
         # This will consume 50 from event tag first, then 50 from default tag
@@ -197,17 +196,16 @@ class PointsSpendingFlowTests(TestCase):
             priority_tag_name=event_tag.name,
         )
 
-        assert transaction is not None
+        self.assertIsNotNone(transaction)
         # Total should be 150 (250 - 100)
-        assert self.user.total_points == 150
+        self.assertEqual(self.user.total_points, 150)
 
         # Verify event points are fully consumed
         event_sources = self.user.point_sources.filter(tags__name=event_tag.name)
         total_event_points = sum(s.remaining_points for s in event_sources)
-        assert total_event_points == 0
+        self.assertEqual(total_event_points, 0)
 
 
-@pytest.mark.integration
 class PointsViewFlowTests(TestCase):
     """Test points viewing workflow through web interface."""
 
@@ -246,15 +244,15 @@ class PointsViewFlowTests(TestCase):
         my_points_url = reverse("points:my_points")
         response = self.client.get(my_points_url)
 
-        assert response.status_code == 200
+        self.assertEqual(response.status_code, 200)
         content = response.content.decode()
 
         # Should show current balance (100 - 30 = 70)
-        assert "70" in content
+        self.assertIn("70", content)
 
         # Should show transaction history
-        assert "欢迎奖励" in content
-        assert "兑换商品" in content
+        self.assertIn("欢迎奖励", content)
+        self.assertIn("兑换商品", content)
 
     def test_unauthorized_access_to_points_page_redirects(self):
         """Test non-logged-in user cannot access points page."""
@@ -264,11 +262,10 @@ class PointsViewFlowTests(TestCase):
         response = self.client.get(my_points_url)
 
         # Should redirect to login
-        assert response.status_code == 302
-        assert "sign_in" in response.url or "login" in response.url
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue("sign_in" in response.url or "login" in response.url)
 
 
-@pytest.mark.integration
 class PointsManagementCommandFlowTests(TestCase):
     """Test points management command workflow."""
 
@@ -300,11 +297,11 @@ class PointsManagementCommandFlowTests(TestCase):
 
         # Verify points were granted
         user.refresh_from_db()
-        assert user.total_points == 500
+        self.assertEqual(user.total_points, 500)
 
         # Verify output message
         output = out.getvalue()
-        assert "成功" in output or "Successfully" in output
+        self.assertTrue("成功" in output or "Successfully" in output)
 
     def test_grant_points_to_nonexistent_user_shows_error(self):
         """Test granting points to non-existent user shows error."""
@@ -318,7 +315,7 @@ class PointsManagementCommandFlowTests(TestCase):
         out = StringIO()
 
         # Should raise error for non-existent user
-        with pytest.raises(CommandError) as exc_info:
+        with self.assertRaises(CommandError) as exc_info:
             call_command(
                 "grant_points",
                 "nonexistentuser",
@@ -328,7 +325,7 @@ class PointsManagementCommandFlowTests(TestCase):
                 stdout=out,
             )
 
-        assert (
-            "不存在" in str(exc_info.value).lower()
-            or "not found" in str(exc_info.value).lower()
+        self.assertTrue(
+            "不存在" in str(exc_info.exception).lower()
+            or "not found" in str(exc_info.exception).lower()
         )

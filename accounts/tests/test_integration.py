@@ -2,7 +2,6 @@
 
 from datetime import date
 
-import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
@@ -14,7 +13,6 @@ from django.utils.http import urlsafe_base64_encode
 from accounts.models import Education, UserProfile, WorkExperience
 
 
-@pytest.mark.integration
 class UserRegistrationFlowTests(TestCase):
     """Test complete user registration workflow."""
 
@@ -36,28 +34,28 @@ class UserRegistrationFlowTests(TestCase):
         response = self.client.post(signup_url, signup_data)
 
         # Verify redirect to homepage after registration
-        assert response.status_code == 302
-        assert response.url == reverse("homepage:index")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("homepage:index"))
 
         # Verify user was created
         User = get_user_model()
         user = User.objects.get(username="newuser")
-        assert user.email == "newuser@example.com"
-        assert user.is_active is True
+        self.assertEqual(user.email, "newuser@example.com")
+        self.assertTrue(user.is_active)
 
         # Step 2: Login with new credentials
         # Use Django's test client login method for integration testing
         login_successful = self.client.login(
             username="newuser", password="SecurePass123!"
         )
-        assert login_successful is True
+        self.assertTrue(login_successful)
 
         # Step 3: Access protected profile page
         profile_url = reverse("accounts:profile")
         response = self.client.get(profile_url)
 
-        assert response.status_code == 200
-        assert "newuser" in response.content.decode()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("newuser", response.content.decode())
 
     def test_user_registration_with_invalid_data_shows_errors(self):
         """Test registration with mismatched passwords shows errors."""
@@ -73,11 +71,11 @@ class UserRegistrationFlowTests(TestCase):
 
         # Should not create user
         User = get_user_model()
-        assert not User.objects.filter(username="testuser").exists()
+        self.assertFalse(User.objects.filter(username="testuser").exists())
 
         # Should show form errors
-        assert response.status_code == 200
-        assert (
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
             "密码" in response.content.decode()
             or "password" in response.content.decode()
         )
@@ -102,13 +100,12 @@ class UserRegistrationFlowTests(TestCase):
         response = self.client.post(signup_url, signup_data)
 
         # Should not create duplicate user
-        assert User.objects.filter(username="existinguser").count() == 1
+        self.assertEqual(User.objects.filter(username="existinguser").count(), 1)
 
         # Should show error
-        assert response.status_code == 200
+        self.assertEqual(response.status_code, 200)
 
 
-@pytest.mark.integration
 class ProfileManagementFlowTests(TestCase):
     """Test complete profile management workflow."""
 
@@ -129,8 +126,8 @@ class ProfileManagementFlowTests(TestCase):
         profile_url = reverse("accounts:profile")
         response = self.client.get(profile_url)
 
-        assert response.status_code == 200
-        assert "testuser" in response.content.decode()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("testuser", response.content.decode())
 
         # Step 2: Edit profile with complete information
         edit_url = reverse("accounts:profile_edit")
@@ -159,26 +156,26 @@ class ProfileManagementFlowTests(TestCase):
         response = self.client.post(edit_url, profile_data)
 
         # Verify redirect to profile
-        assert response.status_code == 302
-        assert response.url == reverse("accounts:profile")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("accounts:profile"))
 
         # Step 3: Verify profile was updated
         self.user.refresh_from_db()
         profile = self.user.profile
 
-        assert profile.bio == "Software developer passionate about open source"
-        assert profile.birth_date == date(1990, 1, 15)
-        assert profile.github_url == "https://github.com/testuser"
-        assert profile.company == "Tech Corp"
-        assert profile.location == "Beijing, China"
+        self.assertEqual(profile.bio, "Software developer passionate about open source")
+        self.assertEqual(profile.birth_date, date(1990, 1, 15))
+        self.assertEqual(profile.github_url, "https://github.com/testuser")
+        self.assertEqual(profile.company, "Tech Corp")
+        self.assertEqual(profile.location, "Beijing, China")
 
         # Step 4: View updated profile
         response = self.client.get(profile_url)
         content = response.content.decode()
 
-        assert "Software developer" in content
-        assert "Tech Corp" in content
-        assert "Beijing" in content
+        self.assertIn("Software developer", content)
+        self.assertIn("Tech Corp", content)
+        self.assertIn("Beijing", content)
 
     def test_add_work_experience_and_education(self):
         """Test user can add work experience and education to profile."""
@@ -206,21 +203,20 @@ class ProfileManagementFlowTests(TestCase):
         )
 
         # Verify work experience was added
-        assert self.user.profile.work_experiences.count() == 1
+        self.assertEqual(self.user.profile.work_experiences.count(), 1)
         work = self.user.profile.work_experiences.first()
-        assert work.company_name == "Awesome Tech Inc"
-        assert work.title == "Senior Developer"
-        assert work.end_date is None  # Still working
+        self.assertEqual(work.company_name, "Awesome Tech Inc")
+        self.assertEqual(work.title, "Senior Developer")
+        self.assertTrue(work.end_date is None)  # Still working
 
         # Verify education was added
-        assert self.user.profile.educations.count() == 1
+        self.assertEqual(self.user.profile.educations.count(), 1)
         edu = self.user.profile.educations.first()
-        assert edu.institution_name == "Tech University"
-        assert edu.degree == "本科"
-        assert edu.field_of_study == "计算机科学"
+        self.assertEqual(edu.institution_name, "Tech University")
+        self.assertEqual(edu.degree, "本科")
+        self.assertEqual(edu.field_of_study, "计算机科学")
 
 
-@pytest.mark.integration
 class PasswordResetFlowTests(TestCase):
     """Test complete password reset workflow."""
 
@@ -241,8 +237,8 @@ class PasswordResetFlowTests(TestCase):
         response = self.client.post(reset_request_url, {"email": "test@example.com"})
 
         # Verify redirect to done page
-        assert response.status_code == 302
-        assert response.url == reverse("accounts:password_reset_done")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("accounts:password_reset_done"))
 
         # Note: Email is sent via async task, so we don't check mail.outbox here
         # In a real integration test environment, we would need to run the worker
@@ -260,7 +256,7 @@ class PasswordResetFlowTests(TestCase):
         )
         response = self.client.get(reset_confirm_url)
 
-        assert response.status_code == 200
+        self.assertEqual(response.status_code, 200)
 
         # Step 4: Submit new password
         new_password_data = {
@@ -271,14 +267,14 @@ class PasswordResetFlowTests(TestCase):
         response = self.client.post(reset_confirm_url, new_password_data)
 
         # Should redirect after successful reset
-        assert response.status_code == 302
+        self.assertEqual(response.status_code, 302)
 
         # Step 5: Verify can login with new password
         self.user.refresh_from_db()
         login_successful = self.client.login(
             username="testuser", password="NewSecurePass123!"
         )
-        assert login_successful is True
+        self.assertTrue(login_successful)
 
     def test_password_reset_with_invalid_email(self):
         """Test password reset request with non-existent email."""
@@ -289,14 +285,13 @@ class PasswordResetFlowTests(TestCase):
         )
 
         # Still redirects to done page (security: don't reveal if email exists)
-        assert response.status_code == 302
-        assert response.url == reverse("accounts:password_reset_done")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("accounts:password_reset_done"))
 
         # No email should be sent
-        assert len(mail.outbox) == 0
+        self.assertEqual(len(mail.outbox), 0)
 
 
-@pytest.mark.integration
 class PasswordChangeFlowTests(TestCase):
     """Test password change workflow for logged-in users."""
 
@@ -317,7 +312,7 @@ class PasswordChangeFlowTests(TestCase):
         change_url = reverse("accounts:change_password")
         response = self.client.get(change_url)
 
-        assert response.status_code == 200
+        self.assertEqual(response.status_code, 200)
 
         # Step 2: Submit password change with correct old password
         change_data = {
@@ -329,8 +324,8 @@ class PasswordChangeFlowTests(TestCase):
         response = self.client.post(change_url, change_data)
 
         # Should redirect to profile
-        assert response.status_code == 302
-        assert response.url == reverse("accounts:profile")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("accounts:profile"))
 
         # Step 3: Logout
         self.client.logout()
@@ -339,17 +334,16 @@ class PasswordChangeFlowTests(TestCase):
         login_successful = self.client.login(
             username="testuser", password="NewSecurePass456!"
         )
-        assert login_successful is True
+        self.assertTrue(login_successful)
 
         # Step 5: Verify old password no longer works
         self.client.logout()
         old_login_successful = self.client.login(
             username="testuser", password="oldpassword123"
         )
-        assert old_login_successful is False
+        self.assertFalse(old_login_successful)
 
 
-@pytest.mark.integration
 class EmailChangeFlowTests(TestCase):
     """Test email change workflow for logged-in users."""
 
@@ -370,7 +364,7 @@ class EmailChangeFlowTests(TestCase):
         change_url = reverse("accounts:change_email")
         response = self.client.get(change_url)
 
-        assert response.status_code == 200
+        self.assertEqual(response.status_code, 200)
 
         # Step 2: Submit new email with password
         change_data = {
@@ -381,11 +375,11 @@ class EmailChangeFlowTests(TestCase):
         response = self.client.post(change_url, change_data)
 
         # Should redirect to profile
-        assert response.status_code == 302
+        self.assertEqual(response.status_code, 302)
 
         # Step 3: Verify email was changed
         self.user.refresh_from_db()
-        assert self.user.email == "new@example.com"
+        self.assertEqual(self.user.email, "new@example.com")
 
     def test_email_change_to_existing_email_fails(self):
         """Test cannot change to an email already in use."""
@@ -406,8 +400,8 @@ class EmailChangeFlowTests(TestCase):
         response = self.client.post(change_url, change_data)
 
         # Should show error (status 200 = form with errors)
-        assert response.status_code == 200
+        self.assertEqual(response.status_code, 200)
 
         # Email should not change
         self.user.refresh_from_db()
-        assert self.user.email == "old@example.com"
+        self.assertEqual(self.user.email, "old@example.com")

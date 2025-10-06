@@ -1,6 +1,5 @@
 """Integration tests for shop app workflows."""
 
-import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -11,7 +10,6 @@ from shop.models import Redemption, ShopItem
 from shop.services import RedemptionError, redeem_item
 
 
-@pytest.mark.integration
 class ShopRedemptionFlowTests(TestCase):
     """Test complete shop item redemption workflow."""
 
@@ -50,7 +48,7 @@ class ShopRedemptionFlowTests(TestCase):
         )
 
         # User should have 500 points
-        assert self.user.total_points == 500
+        self.assertEqual(self.user.total_points, 500)
 
         # Redeem item
         redemption = redeem_item(
@@ -59,26 +57,26 @@ class ShopRedemptionFlowTests(TestCase):
         )
 
         # Verify redemption was created
-        assert redemption.user_profile == self.user
-        assert redemption.item == item
-        assert redemption.points_cost_at_redemption == 100
-        assert redemption.status == "COMPLETED"
+        self.assertEqual(redemption.user_profile, self.user)
+        self.assertEqual(redemption.item, item)
+        self.assertEqual(redemption.points_cost_at_redemption, 100)
+        self.assertEqual(redemption.status, "COMPLETED")
 
         # Verify points were deducted
-        assert self.user.total_points == 400  # 500 - 100
+        self.assertEqual(self.user.total_points, 400)  # 500 - 100
 
         # Verify stock was decremented
         item.refresh_from_db()
-        assert item.stock == 9
+        self.assertEqual(item.stock, 9)
 
         # Verify spend transaction was created
         spend_transaction = PointTransaction.objects.filter(
             user_profile=self.user,
             transaction_type="SPEND",
         ).first()
-        assert spend_transaction is not None
-        assert spend_transaction.points == -100  # Negative for SPEND
-        assert spend_transaction.description == f"兑换商品: {item.name}"
+        self.assertIsNotNone(spend_transaction)
+        self.assertEqual(spend_transaction.points, -100)  # Negative for SPEND
+        self.assertEqual(spend_transaction.description, f"兑换商品: {item.name}")
 
     def test_redemption_with_insufficient_points_fails(self):
         """Test redemption fails when user doesn't have enough points."""
@@ -94,23 +92,23 @@ class ShopRedemptionFlowTests(TestCase):
         # Attempt to redeem should fail with InsufficientPointsError
         from points.services import InsufficientPointsError
 
-        with pytest.raises(InsufficientPointsError) as exc_info:
+        with self.assertRaises(InsufficientPointsError) as exc_info:
             redeem_item(user_profile=self.user, item_id=item.id)
 
-        assert (
-            "积分不足" in str(exc_info.value)
-            or "insufficient" in str(exc_info.value).lower()
+        self.assertTrue(
+            "积分不足" in str(exc_info.exception)
+            or "insufficient" in str(exc_info.exception).lower()
         )
 
         # Points should remain unchanged
-        assert self.user.total_points == 500
+        self.assertEqual(self.user.total_points, 500)
 
         # No redemption should be created
-        assert Redemption.objects.filter(user_profile=self.user).count() == 0
+        self.assertEqual(Redemption.objects.filter(user_profile=self.user).count(), 0)
 
         # Stock should remain unchanged
         item.refresh_from_db()
-        assert item.stock == 5
+        self.assertEqual(item.stock, 5)
 
     def test_redemption_with_tag_restrictions(self):
         """Test redemption with priority tag preference."""
@@ -129,11 +127,11 @@ class ShopRedemptionFlowTests(TestCase):
         # Since user has enough default points, redemption succeeds
         redemption = redeem_item(user_profile=self.user, item_id=item.id)
 
-        assert redemption is not None
-        assert redemption.points_cost_at_redemption == 50
+        self.assertIsNotNone(redemption)
+        self.assertEqual(redemption.points_cost_at_redemption, 50)
 
         # Verify points deducted from default tag (general)
-        assert self.user.total_points == 450  # 500 - 50
+        self.assertEqual(self.user.total_points, 450)  # 500 - 50
 
         # Grant user some event points
         grant_points(
@@ -156,11 +154,11 @@ class ShopRedemptionFlowTests(TestCase):
         # Now redemption will prefer event points
         redemption2 = redeem_item(user_profile=self.user, item_id=item2.id)
 
-        assert redemption2 is not None
-        assert redemption2.points_cost_at_redemption == 60
+        self.assertIsNotNone(redemption2)
+        self.assertEqual(redemption2.points_cost_at_redemption, 60)
 
         # Total points should be 490 (450 + 100 event - 60 spent)
-        assert self.user.total_points == 490
+        self.assertEqual(self.user.total_points, 490)
 
     def test_redemption_when_out_of_stock_fails(self):
         """Test redemption fails when item is out of stock."""
@@ -173,17 +171,17 @@ class ShopRedemptionFlowTests(TestCase):
             is_active=True,
         )
 
-        with pytest.raises(RedemptionError) as exc_info:
+        with self.assertRaises(RedemptionError) as exc_info:
             redeem_item(user_profile=self.user, item_id=item.id)
 
-        assert (
-            "库存不足" in str(exc_info.value).lower()
-            or "out of stock" in str(exc_info.value).lower()
-            or "售罄" in str(exc_info.value)
+        self.assertTrue(
+            "库存不足" in str(exc_info.exception).lower()
+            or "out of stock" in str(exc_info.exception).lower()
+            or "售罄" in str(exc_info.exception)
         )
 
         # Points should remain unchanged
-        assert self.user.total_points == 500
+        self.assertEqual(self.user.total_points, 500)
 
     def test_redemption_when_item_inactive_fails(self):
         """Test redemption fails when item is not active."""
@@ -196,13 +194,13 @@ class ShopRedemptionFlowTests(TestCase):
             is_active=False,  # Inactive
         )
 
-        with pytest.raises(RedemptionError) as exc_info:
+        with self.assertRaises(RedemptionError) as exc_info:
             redeem_item(user_profile=self.user, item_id=item.id)
 
-        assert (
-            "商品已下架" in str(exc_info.value)
-            or "下架" in str(exc_info.value)
-            or "not available" in str(exc_info.value).lower()
+        self.assertTrue(
+            "商品已下架" in str(exc_info.exception)
+            or "下架" in str(exc_info.exception)
+            or "not available" in str(exc_info.exception).lower()
         )
 
     def test_multiple_redemptions_from_same_user(self):
@@ -226,21 +224,20 @@ class ShopRedemptionFlowTests(TestCase):
 
         # Redeem first item
         redemption1 = redeem_item(user_profile=self.user, item_id=item1.id)
-        assert self.user.total_points == 400  # 500 - 100
+        self.assertEqual(self.user.total_points, 400)  # 500 - 100
 
         # Redeem second item
         redemption2 = redeem_item(user_profile=self.user, item_id=item2.id)
-        assert self.user.total_points == 250  # 400 - 150
+        self.assertEqual(self.user.total_points, 250)  # 400 - 150
 
         # Verify both redemptions exist
-        assert Redemption.objects.filter(user_profile=self.user).count() == 2
+        self.assertEqual(Redemption.objects.filter(user_profile=self.user).count(), 2)
 
         # Verify different redemptions
-        assert redemption1.item == item1
-        assert redemption2.item == item2
+        self.assertEqual(redemption1.item, item1)
+        self.assertEqual(redemption2.item, item2)
 
 
-@pytest.mark.integration
 class ShopViewFlowTests(TestCase):
     """Test shop browsing and redemption through web interface."""
 
@@ -290,14 +287,14 @@ class ShopViewFlowTests(TestCase):
         shop_url = reverse("accounts:shop_list")
         response = self.client.get(shop_url)
 
-        assert response.status_code == 200
+        self.assertEqual(response.status_code, 200)
         content = response.content.decode()
 
         # Should show both items
-        assert "T-Shirt" in content
-        assert "Stickers" in content
-        assert "200" in content  # T-shirt cost
-        assert "50" in content  # Stickers cost
+        self.assertIn("T-Shirt", content)
+        self.assertIn("Stickers", content)
+        self.assertIn("200", content)  # T-shirt cost
+        self.assertIn("50", content)  # Stickers cost
 
         # Step 2: Access redeem confirmation page
         redeem_confirm_url = reverse(
@@ -305,38 +302,38 @@ class ShopViewFlowTests(TestCase):
         )
         response = self.client.get(redeem_confirm_url)
 
-        assert response.status_code == 200
+        self.assertEqual(response.status_code, 200)
         content = response.content.decode()
-        assert "Stickers" in content
-        assert "50" in content
+        self.assertIn("Stickers", content)
+        self.assertIn("50", content)
 
         # Step 3: Confirm redemption
         response = self.client.post(redeem_confirm_url)
 
         # Should redirect to redemption list
-        assert response.status_code == 302
-        assert response.url == reverse("accounts:redemption_list")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("accounts:redemption_list"))
 
         # Verify redemption was created
         redemption = Redemption.objects.filter(
             user_profile=self.user,
             item=item2,
         ).first()
-        assert redemption is not None
+        self.assertIsNotNone(redemption)
 
         # Verify points were deducted
-        assert self.user.total_points == 450  # 500 - 50
+        self.assertEqual(self.user.total_points, 450)  # 500 - 50
 
         # Step 4: View redemption list
         redemption_list_url = reverse("accounts:redemption_list")
         response = self.client.get(redemption_list_url)
 
-        assert response.status_code == 200
+        self.assertEqual(response.status_code, 200)
         content = response.content.decode()
 
         # Should show the redemption
-        assert "Stickers" in content
-        assert "50" in content
+        self.assertIn("Stickers", content)
+        self.assertIn("50", content)
 
     def test_unauthorized_user_cannot_access_shop(self):
         """Test non-logged-in user cannot access shop pages."""
@@ -347,7 +344,7 @@ class ShopViewFlowTests(TestCase):
         response = self.client.get(shop_url)
 
         # Should redirect to login
-        assert response.status_code == 302
+        self.assertEqual(response.status_code, 302)
 
     def test_redeem_inactive_item_through_web_shows_error(self):
         """Test attempting to redeem inactive item shows error."""
@@ -368,10 +365,9 @@ class ShopViewFlowTests(TestCase):
 
         # Should show error or redirect
         # The actual behavior depends on the view implementation
-        assert response.status_code in [200, 302, 404]
+        self.assertIn(response.status_code, [200, 302, 404])
 
 
-@pytest.mark.integration
 class FullUserJourneyTests(TestCase):
     """Test complete user journey from registration to redemption."""
 
@@ -389,7 +385,7 @@ class FullUserJourneyTests(TestCase):
         }
 
         response = client.post(signup_url, signup_data)
-        assert response.status_code == 302
+        self.assertEqual(response.status_code, 302)
 
         User = get_user_model()
         user = User.objects.get(username="newuser")
@@ -410,8 +406,8 @@ class FullUserJourneyTests(TestCase):
         my_points_url = reverse("points:my_points")
         response = client.get(my_points_url)
 
-        assert response.status_code == 200
-        assert "300" in response.content.decode()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("300", response.content.decode())
 
         # Step 4: User browses shop
         item = ShopItem.objects.create(
@@ -425,8 +421,8 @@ class FullUserJourneyTests(TestCase):
         shop_url = reverse("accounts:shop_list")
         response = client.get(shop_url)
 
-        assert response.status_code == 200
-        assert "Welcome Gift" in response.content.decode()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Welcome Gift", response.content.decode())
 
         # Step 5: User redeems item
         redeem_confirm_url = reverse(
@@ -434,25 +430,25 @@ class FullUserJourneyTests(TestCase):
         )
         response = client.post(redeem_confirm_url)
 
-        assert response.status_code == 302
+        self.assertEqual(response.status_code, 302)
 
         # Step 6: Verify redemption success
-        assert user.total_points == 200  # 300 - 100
-        assert Redemption.objects.filter(user_profile=user).count() == 1
+        self.assertEqual(user.total_points, 200)  # 300 - 100
+        self.assertEqual(Redemption.objects.filter(user_profile=user).count(), 1)
 
         redemption = Redemption.objects.get(user_profile=user)
-        assert redemption.item == item
-        assert redemption.points_cost_at_redemption == 100
-        assert redemption.status == "COMPLETED"
+        self.assertEqual(redemption.item, item)
+        self.assertEqual(redemption.points_cost_at_redemption, 100)
+        self.assertEqual(redemption.status, "COMPLETED")
 
         # Step 7: User views redemption history
         redemption_list_url = reverse("accounts:redemption_list")
         response = client.get(redemption_list_url)
 
-        assert response.status_code == 200
+        self.assertEqual(response.status_code, 200)
         content = response.content.decode()
-        assert "Welcome Gift" in content
-        assert "100" in content
+        self.assertIn("Welcome Gift", content)
+        self.assertIn("100", content)
 
     def test_user_journey_with_profile_completion(self):
         """Test user journey including profile completion."""
@@ -487,12 +483,12 @@ class FullUserJourneyTests(TestCase):
         }
 
         response = client.post(edit_url, profile_data)
-        assert response.status_code == 302
+        self.assertEqual(response.status_code, 302)
 
         # Verify profile was updated
         user.refresh_from_db()
-        assert user.profile.bio == "I love open source!"
-        assert user.profile.github_url == "https://github.com/profileuser"
+        self.assertEqual(user.profile.bio, "I love open source!")
+        self.assertEqual(user.profile.github_url, "https://github.com/profileuser")
 
         # Admin grants points for profile completion
         tag = Tag.objects.create(
@@ -506,7 +502,7 @@ class FullUserJourneyTests(TestCase):
         )
 
         # Verify user received points
-        assert user.total_points == 50
+        self.assertEqual(user.total_points, 50)
 
         # User can now use these points in shop
         item = ShopItem.objects.create(
@@ -522,6 +518,6 @@ class FullUserJourneyTests(TestCase):
         )
         response = client.post(redeem_confirm_url)
 
-        assert response.status_code == 302
-        assert user.total_points == 0  # All points spent
-        assert Redemption.objects.filter(user_profile=user).count() == 1
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(user.total_points, 0)  # All points spent
+        self.assertEqual(Redemption.objects.filter(user_profile=user).count(), 1)

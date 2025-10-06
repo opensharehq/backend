@@ -21,8 +21,8 @@ db_update:
     @uv run manage.py migrate
 
 test:
-    uv run coverage run manage.py test --parallel
-    uv run coverage report
+    @uv run coverage run manage.py test --parallel --keepdb --timing --durations 10
+    @uv run coverage report
 
 docker-build IMAGE='fullsite':
     docker build --tag {{IMAGE}} .

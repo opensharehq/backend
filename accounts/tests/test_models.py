@@ -53,7 +53,33 @@ class UserModelTests(TestCase):
         )
         source2.tags.add(tag)
 
-        assert user.total_points == 110
+        # Test the property directly to ensure line coverage
+        total = user.total_points
+        assert total == 110
+
+    def test_total_points_aggregation_with_value(self):
+        """Test total_points when aggregate returns a non-None value."""
+        from points.models import PointSource, Tag
+
+        user = get_user_model().objects.create_user(
+            username="points-user",
+            email="points@example.com",
+            password="password123",
+        )
+
+        tag = Tag.objects.create(name="bonus")
+
+        # Create a point source with remaining points
+        source = PointSource.objects.create(
+            user_profile=user, initial_points=200, remaining_points=150
+        )
+        source.tags.add(tag)
+
+        # Access the property to trigger the aggregation
+        result = user.total_points
+
+        # Verify the aggregation logic is covered
+        assert result == 150
 
     def test_get_points_by_tag_empty(self):
         """Test get_points_by_tag returns empty list when no sources."""
@@ -126,6 +152,126 @@ class UserModelTests(TestCase):
         assert result[0]["tag"] == "test-tag"
         assert result[0]["points"] == 50
 
+    def test_get_points_by_tag_accumulates_same_tag(self):
+        """Test get_points_by_tag accumulates points for the same tag across sources."""
+        from points.models import PointSource, Tag
+
+        user = get_user_model().objects.create_user(
+            username="accumulate-user",
+            email="accumulate@example.com",
+            password="password123",
+        )
+
+        tag1 = Tag.objects.create(name="reward")
+        tag2 = Tag.objects.create(name="bonus")
+
+        # Source 1 with tag1
+        source1 = PointSource.objects.create(
+            user_profile=user, initial_points=100, remaining_points=60
+        )
+        source1.tags.add(tag1)
+
+        # Source 2 with tag1 and tag2
+        source2 = PointSource.objects.create(
+            user_profile=user, initial_points=80, remaining_points=40
+        )
+        source2.tags.add(tag1)
+        source2.tags.add(tag2)
+
+        # Source 3 with only tag2
+        source3 = PointSource.objects.create(
+            user_profile=user, initial_points=50, remaining_points=25
+        )
+        source3.tags.add(tag2)
+
+        result = user.get_points_by_tag()
+
+        # Should have 2 tags
+        assert len(result) == 2
+
+        # Convert to dict for easier assertion
+        tag_dict = {item["tag"]: item["points"] for item in result}
+
+        # tag1 should have 60 + 40 = 100 points
+        assert tag_dict["reward"] == 100
+
+        # tag2 should have 40 + 25 = 65 points
+        assert tag_dict["bonus"] == 65
+
+    def test_get_points_by_tag_with_source_without_tags(self):
+        """Test get_points_by_tag with point source that has no tags."""
+        from points.models import PointSource
+
+        user = get_user_model().objects.create_user(
+            username="notag-user",
+            email="notag@example.com",
+            password="password123",
+        )
+
+        # Create a source with remaining points but no tags
+        PointSource.objects.create(
+            user_profile=user, initial_points=100, remaining_points=50
+        )
+
+        result = user.get_points_by_tag()
+
+        # Should return empty list because source has no tags
+        assert result == []
+
+    def test_get_points_by_tag_comprehensive_coverage(self):
+        """Test get_points_by_tag to ensure all code paths are covered."""
+        from points.models import PointSource, Tag
+
+        user = get_user_model().objects.create_user(
+            username="coverage-user",
+            email="coverage@example.com",
+            password="password123",
+        )
+
+        # Create multiple tags
+        tag_a = Tag.objects.create(name="tag-a")
+        tag_b = Tag.objects.create(name="tag-b")
+        tag_c = Tag.objects.create(name="tag-c")
+
+        # Source 1: has tag_a and tag_b
+        source1 = PointSource.objects.create(
+            user_profile=user, initial_points=100, remaining_points=30
+        )
+        source1.tags.add(tag_a, tag_b)
+
+        # Source 2: has tag_a (accumulates with source1)
+        source2 = PointSource.objects.create(
+            user_profile=user, initial_points=50, remaining_points=20
+        )
+        source2.tags.add(tag_a)
+
+        # Source 3: has tag_c (new tag)
+        source3 = PointSource.objects.create(
+            user_profile=user, initial_points=75, remaining_points=15
+        )
+        source3.tags.add(tag_c)
+
+        # Source 4: has remaining_points=0, should be ignored
+        source4 = PointSource.objects.create(
+            user_profile=user, initial_points=200, remaining_points=0
+        )
+        source4.tags.add(tag_a)
+
+        result = user.get_points_by_tag()
+
+        # Convert to dict for assertions
+        tag_dict = {item["tag"]: item["points"] for item in result}
+
+        # Verify all branches:
+        # - Loop through sources with remaining_points > 0
+        # - Loop through tags for each source
+        # - Check if tag exists in dict (both True and False paths)
+        # - Accumulate points for existing tags
+        assert len(tag_dict) == 3
+        assert tag_dict["tag-a"] == 50  # 30 + 20
+        assert tag_dict["tag-b"] == 30  # Only from source1
+        assert tag_dict["tag-c"] == 15  # Only from source3
+
 
 class UserProfileModelTests(TestCase):
     """Test cases for UserProfile model."""
@@ -163,7 +309,10 @@ class UserProfileModelTests(TestCase):
     def test_user_profile_str(self):
         """Test string representation of user profile."""
         profile = UserProfile.objects.create(user=self.user)
-        assert str(profile) == "testuser"
+        # Explicitly test __str__ method
+        str_representation = str(profile)
+        assert str_representation == "testuser"
+        assert str_representation == self.user.username
 
     def test_user_profile_optional_fields(self):
         """Test that optional profile fields have default values."""

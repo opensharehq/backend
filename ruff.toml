@@ -41,7 +41,6 @@ select = [
    "I",          # isort (导入排序)
    "B",          # flake8-bugbear
    "C4",         # flake8-comprehensions
-   "PT",         # flake8-pytest-style
    "T20",        # flake8-print
    "S",          # Bandit (安全)
    "PL",         # Pylint (部分规则)
@@ -70,7 +69,8 @@ ignore = [
     "E501",      # Long lines are sometimes necessary for readability
     "D212",
     "D203",
-    "COM812"
+    "COM812",
+    "PT009"
 ]
 
 fixable = ["ALL"]

@@ -1,54 +1,940 @@
-{% extends "base.html" %} {% block content %}
-<div class="bg-light min-vh-100">
-    <nav
-        class="navbar navbar-expand-lg navbar-light bg-white border-bottom shadow-sm"
-    >
-        <div class="container-fluid px-4 py-2">
-            <a class="navbar-brand fw-bold fs-4 text-dark" href="#"
-                >OpenShare</a
-            >
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <meta name="description" content="OpenShare - 为开发者提供激励，让每一份开源贡献都值得回报">
+    <meta name="author" content="OpenShare">
+    <meta name="keywords" content="开源, 激励, 开发者, GitHub, GitLab, 贡献奖励">
 
-            <div class="d-flex ms-auto align-items-center">
-                <a
-                    class="btn btn-link text-decoration-none me-3 text-dark fw-semibold"
-                    href="#"
-                    >login</a
-                >
-                <button
-                    class="btn btn-primary rounded-pill px-3 py-1 fw-bold border-2"
-                    type="button"
-                >
-                    sign up
-                </button>
+    <title>OpenShare - 开源贡献激励平台</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css">
+
+    <!-- NobleUI Core CSS -->
+    <link rel="stylesheet" href="{% static 'nobleui/vendors/core/core.css' %}">
+    <link rel="stylesheet" href="{% static 'nobleui/css/demo1/style.css' %}">
+
+    <style>
+        /* Custom Landing Page Styles */
+        body {
+            font-family: 'Roboto', sans-serif;
+        }
+
+        /* Navbar */
+        .landing-navbar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.05);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        /* Hero Section */
+        .hero-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 120px 0 100px;
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+            opacity: 0.1;
+        }
+
+        .hero-title {
+            font-size: 3.5rem;
+            font-weight: 900;
+            margin-bottom: 1.5rem;
+            line-height: 1.2;
+        }
+
+        .hero-subtitle {
+            font-size: 1.5rem;
+            font-weight: 300;
+            margin-bottom: 3rem;
+            opacity: 0.95;
+        }
+
+        .search-box {
+            max-width: 600px;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .search-input {
+            padding: 1.2rem 3rem 1.2rem 1.5rem;
+            font-size: 1.1rem;
+            border: none;
+            border-radius: 50px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 1.5rem;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.5rem;
+            color: #667eea;
+        }
+
+        /* Social Proof Stats */
+        .stats-section {
+            background: white;
+            padding: 60px 0;
+            margin-top: -50px;
+            position: relative;
+            z-index: 10;
+        }
+
+        .stat-card {
+            text-align: center;
+            padding: 2rem;
+            border-radius: 15px;
+            background: white;
+            box-shadow: 0 5px 25px rgba(0, 0, 0, 0.08);
+            transition: transform 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-number {
+            font-size: 3rem;
+            font-weight: 900;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-label {
+            font-size: 1.1rem;
+            color: #6c757d;
+            font-weight: 500;
+        }
+
+        /* Section Titles */
+        .section-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            color: #2c3e50;
+        }
+
+        .section-subtitle {
+            font-size: 1.2rem;
+            color: #6c757d;
+            margin-bottom: 4rem;
+        }
+
+        /* Features */
+        .feature-card {
+            padding: 2.5rem;
+            border-radius: 15px;
+            background: white;
+            border: 2px solid #f0f0f0;
+            transition: all 0.3s;
+            height: 100%;
+        }
+
+        .feature-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.1);
+            transform: translateY(-5px);
+        }
+
+        .feature-icon {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            color: white;
+            margin-bottom: 1.5rem;
+        }
+
+        .feature-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            color: #2c3e50;
+        }
+
+        .feature-text {
+            color: #6c757d;
+            line-height: 1.8;
+        }
+
+        /* TopN Contributors */
+        .contributor-card {
+            background: white;
+            border-radius: 15px;
+            padding: 2rem;
+            text-align: center;
+            box-shadow: 0 5px 25px rgba(0, 0, 0, 0.08);
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .contributor-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
+        }
+
+        .contributor-rank {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 1.2rem;
+        }
+
+        .contributor-avatar {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            margin: 0 auto 1rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            color: white;
+        }
+
+        .contributor-name {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            color: #2c3e50;
+        }
+
+        .contributor-points {
+            font-size: 1.5rem;
+            color: #667eea;
+            font-weight: 700;
+        }
+
+        /* Testimonials */
+        .testimonial-card {
+            background: white;
+            border-radius: 15px;
+            padding: 2.5rem;
+            box-shadow: 0 5px 25px rgba(0, 0, 0, 0.08);
+            height: 100%;
+            position: relative;
+        }
+
+        .testimonial-quote {
+            font-size: 3rem;
+            color: #667eea;
+            opacity: 0.2;
+            position: absolute;
+            top: 1rem;
+            left: 1.5rem;
+        }
+
+        .testimonial-text {
+            font-size: 1.1rem;
+            line-height: 1.8;
+            color: #2c3e50;
+            margin-bottom: 2rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .testimonial-author {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .testimonial-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .testimonial-info h5 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+
+        .testimonial-info p {
+            margin: 0;
+            color: #6c757d;
+        }
+
+        /* Benefits */
+        .benefits-section {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        }
+
+        .benefit-item {
+            display: flex;
+            align-items: start;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .benefit-icon {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+
+        .benefit-content h4 {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            color: #2c3e50;
+        }
+
+        .benefit-content p {
+            color: #6c757d;
+            line-height: 1.8;
+            margin: 0;
+        }
+
+        /* Logo Cloud */
+        .logo-item {
+            background: white;
+            border-radius: 15px;
+            padding: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 120px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s;
+        }
+
+        .logo-item:hover {
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transform: translateY(-5px);
+        }
+
+        .logo-item i {
+            font-size: 3rem;
+            color: #667eea;
+        }
+
+        /* CTA Section */
+        .cta-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 100px 0;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cta-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+            opacity: 0.1;
+        }
+
+        .cta-title {
+            font-size: 3rem;
+            font-weight: 900;
+            margin-bottom: 1.5rem;
+        }
+
+        .cta-text {
+            font-size: 1.3rem;
+            margin-bottom: 2.5rem;
+            opacity: 0.95;
+        }
+
+        .btn-cta {
+            padding: 1rem 3rem;
+            font-size: 1.2rem;
+            font-weight: 700;
+            border-radius: 50px;
+            border: none;
+            transition: all 0.3s;
+        }
+
+        .btn-cta-primary {
+            background: white;
+            color: #667eea;
+        }
+
+        .btn-cta-primary:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            color: #667eea;
+        }
+
+        .btn-cta-outline {
+            background: transparent;
+            color: white;
+            border: 2px solid white;
+        }
+
+        .btn-cta-outline:hover {
+            background: white;
+            color: #667eea;
+        }
+
+        /* Footer */
+        .footer {
+            background: #2c3e50;
+            color: white;
+            padding: 3rem 0 1.5rem;
+        }
+
+        .footer a {
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .footer a:hover {
+            color: white;
+        }
+
+        /* Brand Colors */
+        .brand-primary {
+            color: #667eea;
+        }
+
+        .brand-secondary {
+            color: #764ba2;
+        }
+
+        /* Background Colors */
+        .bg-testimonials {
+            background: #f8f9fa;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero-title {
+                font-size: 2.5rem;
+            }
+
+            .hero-subtitle {
+                font-size: 1.2rem;
+            }
+
+            .section-title {
+                font-size: 2rem;
+            }
+
+            .stat-number {
+                font-size: 2.5rem;
+            }
+
+            .cta-title {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="landing-navbar">
+        <div class="container">
+            <div class="d-flex align-items-center justify-content-between py-3">
+                <a href="{% url 'homepage:index' %}" class="navbar-brand d-flex align-items-center text-decoration-none">
+                    <h3 class="mb-0 fw-bold brand-primary">Open<span class="brand-secondary">Share</span></h3>
+                </a>
+                <div class="d-flex align-items-center gap-3">
+                    <a href="#features" class="btn btn-link text-dark text-decoration-none d-none d-md-inline">功能</a>
+                    <a href="#benefits" class="btn btn-link text-dark text-decoration-none d-none d-md-inline">优势</a>
+                    <a href="#" class="btn btn-outline-primary rounded-pill px-4">登录</a>
+                    <a href="#" class="btn btn-primary rounded-pill px-4">注册</a>
+                </div>
             </div>
         </div>
     </nav>
 
-    <div class="container-fluid main-content min-vh-100 pt-5 pt-md-0">
-        <div class="row w-100">
-            <div
-                class="col-12 d-flex flex-column align-items-center text-center"
-            >
-                <h1 class="display-5 fw-bolder mb-5 mt-5 mt-md-0">
-                    Open For All
-                </h1>
+    <!-- Hero Section -->
+    <section class="hero-section">
+        <div class="container">
+            <div class="row justify-content-center text-center">
+                <div class="col-lg-10">
+                    <h1 class="hero-title">开源的世界里<br>每一份贡献都值得回报</h1>
+                    <p class="hero-subtitle">连接你的开源仓库，自动追踪贡献，获得实实在在的激励</p>
 
-                <div class="w-100 max-w-600 px-3">
-                    <div class="input-group">
-                        <input
-                            type="text"
-                            class="form-control rounded-5 ps-5 pe-5 border-dark border-2 text-center py-2 fs-6"
-                            placeholder="input your github/gitlab/gitee username or projectname"
-                            aria-label="Search field"
-                        />
-
-                        <span class="position-absolute end-0 p-3 pt-3 me-2">
-                            <i class="bi bi-search fs-5 text-dark"></i>
-                        </span>
+                    <div class="search-box">
+                        <input type="text" class="form-control search-input" placeholder="输入你的 GitHub / GitLab / Gitee 用户名或项目名">
+                        <i class="bi bi-search search-icon"></i>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-</div>
-{% endblock content %}
+    </section>
+
+    <!-- Social Proof Stats -->
+    <section class="stats-section">
+        <div class="container">
+            <div class="row g-4">
+                <div class="col-md-3 col-6">
+                    <div class="stat-card">
+                        <div class="stat-number">10K+</div>
+                        <div class="stat-label">注册开发者</div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-6">
+                    <div class="stat-card">
+                        <div class="stat-number">50K+</div>
+                        <div class="stat-label">项目贡献</div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-6">
+                    <div class="stat-card">
+                        <div class="stat-number">1M+</div>
+                        <div class="stat-label">积分发放</div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-6">
+                    <div class="stat-card">
+                        <div class="stat-number">500+</div>
+                        <div class="stat-label">合作项目</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="py-5 my-5" id="features">
+        <div class="container">
+            <div class="row justify-content-center text-center mb-5">
+                <div class="col-lg-8">
+                    <h2 class="section-title">强大的功能，简单的使用</h2>
+                    <p class="section-subtitle">为开发者量身打造的激励平台</p>
+                </div>
+            </div>
+
+            <div class="row g-4">
+                <div class="col-lg-4 col-md-6">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="bi bi-github"></i>
+                        </div>
+                        <h3 class="feature-title">多平台支持</h3>
+                        <p class="feature-text">支持 GitHub、GitLab、Gitee 等主流代码托管平台，一键连接你的开源项目</p>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-6">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="bi bi-graph-up-arrow"></i>
+                        </div>
+                        <h3 class="feature-title">自动追踪</h3>
+                        <p class="feature-text">智能追踪你的每一次 commit、PR、issue，自动计算贡献价值</p>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-6">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="bi bi-trophy"></i>
+                        </div>
+                        <h3 class="feature-title">积分奖励</h3>
+                        <p class="feature-text">根据贡献质量和影响力获得积分，可兑换实物奖励或服务</p>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-6">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="bi bi-people"></i>
+                        </div>
+                        <h3 class="feature-title">社区互动</h3>
+                        <p class="feature-text">与其他开发者交流经验，分享开源故事，建立专业人脉</p>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-6">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="bi bi-shield-check"></i>
+                        </div>
+                        <h3 class="feature-title">透明公正</h3>
+                        <p class="feature-text">开放的评分算法，公平的激励机制，让每一份努力都被看见</p>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-6">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="bi bi-gift"></i>
+                        </div>
+                        <h3 class="feature-title">丰富奖品</h3>
+                        <p class="feature-text">精选的技术书籍、课程、硬件设备等奖品，助力开发者成长</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Benefits Section -->
+    <section class="benefits-section py-5 my-5" id="benefits">
+        <div class="container">
+            <div class="row justify-content-center text-center mb-5">
+                <div class="col-lg-8">
+                    <h2 class="section-title">为什么选择 OpenShare</h2>
+                    <p class="section-subtitle">让开源贡献更有价值</p>
+                </div>
+            </div>
+
+            <div class="row align-items-center">
+                <div class="col-lg-6 mb-4 mb-lg-0">
+                    <div class="benefit-item">
+                        <div class="benefit-icon">
+                            <i class="bi bi-lightning-charge"></i>
+                        </div>
+                        <div class="benefit-content">
+                            <h4>即时反馈</h4>
+                            <p>每一次贡献都能立即获得积分反馈，让你的努力即刻被认可</p>
+                        </div>
+                    </div>
+
+                    <div class="benefit-item">
+                        <div class="benefit-icon">
+                            <i class="bi bi-bar-chart"></i>
+                        </div>
+                        <div class="benefit-content">
+                            <h4>数据可视化</h4>
+                            <p>直观的图表展示你的开源历程，见证个人技术成长轨迹</p>
+                        </div>
+                    </div>
+
+                    <div class="benefit-item">
+                        <div class="benefit-icon">
+                            <i class="bi bi-rocket"></i>
+                        </div>
+                        <div class="benefit-content">
+                            <h4>职业发展</h4>
+                            <p>积累的贡献记录可作为技术能力证明，助力求职和晋升</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-6">
+                    <div class="benefit-item">
+                        <div class="benefit-icon">
+                            <i class="bi bi-star"></i>
+                        </div>
+                        <div class="benefit-content">
+                            <h4>专属勋章</h4>
+                            <p>解锁各种成就勋章，展示你在开源世界的独特贡献</p>
+                        </div>
+                    </div>
+
+                    <div class="benefit-item">
+                        <div class="benefit-icon">
+                            <i class="bi bi-wallet2"></i>
+                        </div>
+                        <div class="benefit-content">
+                            <h4>实物奖励</h4>
+                            <p>积分可兑换技术书籍、在线课程、周边产品等实物奖励</p>
+                        </div>
+                    </div>
+
+                    <div class="benefit-item">
+                        <div class="benefit-icon">
+                            <i class="bi bi-globe"></i>
+                        </div>
+                        <div class="benefit-content">
+                            <h4>全球认可</h4>
+                            <p>加入国际开源社区，让你的贡献获得全球范围的认可</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TopN Contributors -->
+    <section class="py-5 my-5">
+        <div class="container">
+            <div class="row justify-content-center text-center mb-5">
+                <div class="col-lg-8">
+                    <h2 class="section-title">本月Top贡献者</h2>
+                    <p class="section-subtitle">向优秀的开源贡献者致敬</p>
+                </div>
+            </div>
+
+            <div class="row g-4">
+                <div class="col-lg-3 col-md-6">
+                    <div class="contributor-card">
+                        <div class="contributor-rank">1</div>
+                        <div class="contributor-avatar">
+                            <i class="bi bi-person"></i>
+                        </div>
+                        <h4 class="contributor-name">张开发</h4>
+                        <p class="mb-1 text-muted">@zhangdev</p>
+                        <div class="contributor-points">12,500 积分</div>
+                        <p class="mt-2 text-muted small">153 次贡献</p>
+                    </div>
+                </div>
+
+                <div class="col-lg-3 col-md-6">
+                    <div class="contributor-card">
+                        <div class="contributor-rank">2</div>
+                        <div class="contributor-avatar">
+                            <i class="bi bi-person"></i>
+                        </div>
+                        <h4 class="contributor-name">李程序</h4>
+                        <p class="mb-1 text-muted">@licoder</p>
+                        <div class="contributor-points">11,200 积分</div>
+                        <p class="mt-2 text-muted small">142 次贡献</p>
+                    </div>
+                </div>
+
+                <div class="col-lg-3 col-md-6">
+                    <div class="contributor-card">
+                        <div class="contributor-rank">3</div>
+                        <div class="contributor-avatar">
+                            <i class="bi bi-person"></i>
+                        </div>
+                        <h4 class="contributor-name">王工程</h4>
+                        <p class="mb-1 text-muted">@wangeng</p>
+                        <div class="contributor-points">9,800 积分</div>
+                        <p class="mt-2 text-muted small">128 次贡献</p>
+                    </div>
+                </div>
+
+                <div class="col-lg-3 col-md-6">
+                    <div class="contributor-card">
+                        <div class="contributor-rank">4</div>
+                        <div class="contributor-avatar">
+                            <i class="bi bi-person"></i>
+                        </div>
+                        <h4 class="contributor-name">陈代码</h4>
+                        <p class="mb-1 text-muted">@chencode</p>
+                        <div class="contributor-points">8,600 积分</div>
+                        <p class="mt-2 text-muted small">115 次贡献</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testimonials -->
+    <section class="py-5 my-5 bg-testimonials">
+        <div class="container">
+            <div class="row justify-content-center text-center mb-5">
+                <div class="col-lg-8">
+                    <h2 class="section-title">开发者说</h2>
+                    <p class="section-subtitle">听听他们的故事</p>
+                </div>
+            </div>
+
+            <div class="row g-4">
+                <div class="col-lg-4 col-md-6">
+                    <div class="testimonial-card">
+                        <div class="testimonial-quote">"</div>
+                        <p class="testimonial-text">OpenShare 让我的开源贡献不再是默默无闻。每一次 PR 都能获得积分奖励，这种即时反馈让我更有动力持续贡献。</p>
+                        <div class="testimonial-author">
+                            <div class="testimonial-avatar">ZK</div>
+                            <div class="testimonial-info">
+                                <h5>张凯</h5>
+                                <p>全栈工程师</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-6">
+                    <div class="testimonial-card">
+                        <div class="testimonial-quote">"</div>
+                        <p class="testimonial-text">作为开源项目维护者，OpenShare 帮我吸引了更多贡献者。激励机制让社区更加活跃，项目发展得更快了。</p>
+                        <div class="testimonial-author">
+                            <div class="testimonial-avatar">LM</div>
+                            <div class="testimonial-info">
+                                <h5>李明</h5>
+                                <p>开源项目负责人</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-6">
+                    <div class="testimonial-card">
+                        <div class="testimonial-quote">"</div>
+                        <p class="testimonial-text">通过 OpenShare 积累的贡献记录成为了我面试时的亮点。雇主能直观看到我的技术能力和开源精神。</p>
+                        <div class="testimonial-author">
+                            <div class="testimonial-avatar">WJ</div>
+                            <div class="testimonial-info">
+                                <h5>王静</h5>
+                                <p>前端开发者</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Logo Cloud -->
+    <section class="py-5 my-5">
+        <div class="container">
+            <div class="row justify-content-center text-center mb-5">
+                <div class="col-lg-8">
+                    <h2 class="section-title">支持的平台与技术</h2>
+                    <p class="section-subtitle">与主流开发平台无缝集成</p>
+                </div>
+            </div>
+
+            <div class="row g-4">
+                <div class="col-lg-2 col-md-3 col-4">
+                    <div class="logo-item">
+                        <i class="bi bi-github"></i>
+                    </div>
+                </div>
+                <div class="col-lg-2 col-md-3 col-4">
+                    <div class="logo-item">
+                        <i class="bi bi-gitlab"></i>
+                    </div>
+                </div>
+                <div class="col-lg-2 col-md-3 col-4">
+                    <div class="logo-item">
+                        <i class="bi bi-git"></i>
+                    </div>
+                </div>
+                <div class="col-lg-2 col-md-3 col-4">
+                    <div class="logo-item">
+                        <i class="bi bi-code-square"></i>
+                    </div>
+                </div>
+                <div class="col-lg-2 col-md-3 col-4">
+                    <div class="logo-item">
+                        <i class="bi bi-terminal"></i>
+                    </div>
+                </div>
+                <div class="col-lg-2 col-md-3 col-4">
+                    <div class="logo-item">
+                        <i class="bi bi-braces"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Call to Action -->
+    <section class="cta-section">
+        <div class="container">
+            <div class="row justify-content-center text-center">
+                <div class="col-lg-8">
+                    <h2 class="cta-title">准备好开始了吗？</h2>
+                    <p class="cta-text">加入 OpenShare，让你的每一份开源贡献都获得应有的回报</p>
+                    <div class="d-flex gap-3 justify-content-center flex-wrap">
+                        <a href="#" class="btn btn-cta btn-cta-primary">立即注册</a>
+                        <a href="#" class="btn btn-cta btn-cta-outline">了解更多</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="row">
+                <div class="col-lg-4 mb-4 mb-lg-0">
+                    <h4 class="mb-3 fw-bold">OpenShare</h4>
+                    <p class="text-white-50">为开发者提供激励，让每一份开源贡献都值得回报</p>
+                </div>
+                <div class="col-lg-2 col-md-3 col-6 mb-4 mb-lg-0">
+                    <h5 class="mb-3">产品</h5>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="#">功能</a></li>
+                        <li class="mb-2"><a href="#">定价</a></li>
+                        <li class="mb-2"><a href="#">积分商城</a></li>
+                    </ul>
+                </div>
+                <div class="col-lg-2 col-md-3 col-6 mb-4 mb-lg-0">
+                    <h5 class="mb-3">资源</h5>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="#">文档</a></li>
+                        <li class="mb-2"><a href="#">API</a></li>
+                        <li class="mb-2"><a href="#">博客</a></li>
+                    </ul>
+                </div>
+                <div class="col-lg-2 col-md-3 col-6 mb-4 mb-lg-0">
+                    <h5 class="mb-3">公司</h5>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="#">关于我们</a></li>
+                        <li class="mb-2"><a href="#">联系我们</a></li>
+                        <li class="mb-2"><a href="#">加入我们</a></li>
+                    </ul>
+                </div>
+                <div class="col-lg-2 col-md-3 col-6">
+                    <h5 class="mb-3">社交</h5>
+                    <div class="d-flex gap-3">
+                        <a href="#"><i class="bi bi-github fs-4"></i></a>
+                        <a href="#"><i class="bi bi-twitter fs-4"></i></a>
+                        <a href="#"><i class="bi bi-linkedin fs-4"></i></a>
+                    </div>
+                </div>
+            </div>
+            <hr class="my-4 bg-white opacity-25">
+            <div class="text-center text-white-50">
+                <p class="mb-0">© 2025 OpenShare. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="{% static 'nobleui/vendors/core/core.js' %}"></script>
+    <script src="{% static 'nobleui/vendors/lucide/lucide.min.js' %}"></script>
+    <script src="{% static 'nobleui/js/template.js' %}"></script>
+</body>
+</html>

@@ -21,7 +21,9 @@ db_update:
     @uv run manage.py migrate
 
 test:
-    @uv run coverage run manage.py test --parallel --keepdb --timing --durations 10
+    @uv run coverage erase
+    @uv run coverage run --concurrency=multiprocessing --parallel-mode manage.py test --parallel --keepdb --timing --durations 10
+    @uv run coverage combine
     @uv run coverage report
 
 docker-build IMAGE='fullsite':

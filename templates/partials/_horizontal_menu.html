@@ -2,7 +2,9 @@
 <nav class="bottom-navbar">
     <div class="container">
         <ul class="nav page-navigation">
-            <li class="nav-item {% if request.resolver_match.url_name == 'index' %}active{% endif %}">
+            <li
+                class="nav-item {% if request.resolver_match.url_name == 'index' %}active{% endif %}"
+            >
                 <a class="nav-link" href="{% url 'homepage:index' %}">
                     <i class="link-icon" data-lucide="home"></i>
                     <span class="menu-title">首页</span>
@@ -16,9 +18,20 @@
                 </a>
                 <div class="submenu">
                     <ul class="submenu-item">
-                        <li class="nav-item"><a class="nav-link" href="{% url 'accounts:profile' %}">个人资料</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{% url 'accounts:profile_edit' %}">编辑资料</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{% url 'points:my_points' %}">我的积分</a></li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link"
+                                href="{% url 'accounts:profile' %}"
+                                >个人资料</a
+                            >
+                        </li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link"
+                                href="{% url 'points:my_points' %}"
+                                >我的积分</a
+                            >
+                        </li>
                     </ul>
                 </div>
             </li>
@@ -33,18 +46,26 @@
                         <div class="col-md-6">
                             <ul class="submenu-item pe-md-0">
                                 <li class="category-heading">CHARTS</li>
-                                <li class="nav-item"><a class="nav-link" href="javascript:;">Apex</a></li>
-                                <li class="nav-item"><a class="nav-link" href="javascript:;">ChartJs</a></li>
-                                <li class="nav-item"><a class="nav-link" href="javascript:;">Float</a></li>
-                                <li class="nav-item"><a class="nav-link" href="javascript:;">Peity</a></li>
-                                <li class="nav-item"><a class="nav-link" href="javascript:;">Sparkline</a></li>
+                                <li class="nav-item">
+                                    <a class="nav-link" href="javascript:;"
+                                        >Apex</a
+                                    >
+                                </li>
                             </ul>
                         </div>
                         <div class="col-md-6">
                             <ul class="submenu-item ps-md-0">
                                 <li class="category-heading">TABLES</li>
-                                <li class="nav-item"><a class="nav-link" href="javascript:;">Basic Tables</a></li>
-                                <li class="nav-item"><a class="nav-link" href="javascript:;">Data Table</a></li>
+                                <li class="nav-item">
+                                    <a class="nav-link" href="javascript:;"
+                                        >Basic Tables</a
+                                    >
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" href="javascript:;"
+                                        >Data Table</a
+                                    >
+                                </li>
                             </ul>
                         </div>
                     </div>
@@ -52,15 +73,26 @@
             </li>
             <li class="nav-item">
                 <a href="#" class="nav-link">
-                    <i class="link-icon" data-lucide="smile"></i>
-                    <span class="menu-title">Icons</span>
+                    <i class="link-icon" data-lucide="gift"></i>
+                    <span class="menu-title">兑换积分</span>
                     <i class="link-arrow"></i>
                 </a>
                 <div class="submenu">
                     <ul class="submenu-item">
-                        <li class="nav-item"><a class="nav-link" href="javascript:;">Lucide Icons</a></li>
-                        <li class="nav-item"><a class="nav-link" href="javascript:;">Flag Icons</a></li>
-                        <li class="nav-item"><a class="nav-link" href="javascript:;">Mdi Icons</a></li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link"
+                                href="{% url 'accounts:shop_list' %}"
+                                >积分商城</a
+                            >
+                        </li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link"
+                                href="{% url 'accounts:redemption_list' %}"
+                                >兑换记录</a
+                            >
+                        </li>
                     </ul>
                 </div>
             </li>
@@ -72,9 +104,27 @@
                 </a>
                 <div class="submenu">
                     <ul class="submenu-item">
-                        <li class="nav-item"><a class="nav-link" href="{% url 'accounts:change_password' %}">修改密码</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{% url 'accounts:change_email' %}">修改邮箱</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{% url 'accounts:social_connections' %}">社交账号</a></li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link"
+                                href="{% url 'accounts:change_password' %}"
+                                >修改密码</a
+                            >
+                        </li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link"
+                                href="{% url 'accounts:change_email' %}"
+                                >修改邮箱</a
+                            >
+                        </li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link"
+                                href="{% url 'accounts:social_connections' %}"
+                                >社交账号</a
+                            >
+                        </li>
                     </ul>
                 </div>
             </li>

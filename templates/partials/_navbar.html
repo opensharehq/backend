@@ -87,6 +87,18 @@
                                 </a>
                             </li>
                             <li>
+                                <a href="{% url 'accounts:shop_list' %}" class="dropdown-item py-2 text-body ms-0">
+                                    <i class="me-2 icon-md" data-lucide="shopping-bag"></i>
+                                    <span>积分商城</span>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="{% url 'accounts:redemption_list' %}" class="dropdown-item py-2 text-body ms-0">
+                                    <i class="me-2 icon-md" data-lucide="package"></i>
+                                    <span>兑换记录</span>
+                                </a>
+                            </li>
+                            <li>
                                 <a href="{% url 'accounts:change_password' %}" class="dropdown-item py-2 text-body ms-0">
                                     <i class="me-2 icon-md" data-lucide="lock"></i>
                                     <span>修改密码</span>

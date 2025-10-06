@@ -100,6 +100,8 @@ class WSGIModuleTests(SimpleTestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             assert "DJANGO_SETTINGS_MODULE" not in os.environ
 
+            import config.wsgi  # noqa: F401
+
             assert os.environ["DJANGO_SETTINGS_MODULE"] == "config.settings"
 
         # Clean up
@@ -120,6 +122,8 @@ class WSGIModuleTests(SimpleTestCase):
             with mock.patch(
                 "django.core.wsgi.get_wsgi_application", return_value=mock.Mock()
             ) as mock_get_wsgi:
+                import config.wsgi  # noqa: F401
+
                 # Verify get_wsgi_application was called
                 mock_get_wsgi.assert_called_once()
 

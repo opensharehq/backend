@@ -6,6 +6,7 @@ import sys
 from unittest import mock
 
 from django.conf import settings
+from django.contrib import admin
 from django.core.handlers.asgi import ASGIHandler
 from django.core.handlers.wsgi import WSGIHandler
 from django.test import SimpleTestCase
@@ -48,3 +49,16 @@ class ConfigModuleTests(SimpleTestCase):
 
             assert os.environ["DJANGO_SETTINGS_MODULE"] == "config.settings"
             assert isinstance(reloaded.application, WSGIHandler)
+
+    def test_admin_site_customization(self):
+        """Test that admin site is customized with OpenShare branding."""
+        # Import admin customization to apply settings
+        import config.admin  # noqa: F401
+
+        assert admin.site.site_header == "OpenShare 管理后台"
+        assert admin.site.site_title == "OpenShare 管理后台"
+        assert admin.site.index_title == "欢迎使用 OpenShare 管理后台"
+
+    def test_language_code_is_chinese(self):
+        """Test that default language is Chinese."""
+        assert settings.LANGUAGE_CODE == "zh-hans"

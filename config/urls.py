@@ -20,6 +20,9 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+# Import admin customization to apply settings
+from config import admin as _admin_config  # noqa: F401
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("", include("social_django.urls", namespace="social")),

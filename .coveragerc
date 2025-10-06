@@ -1,22 +1,17 @@
 [run]
-source =
-    accounts
-    homepage
-    config
-    points
-    shop
+source = .
 omit =
+    */tests/*
+    */test_*.py
+    **/conftest.py
+    conftest.py
     manage.py
     */migrations/*
     */admin.py
-    config/asgi.py
-    config/wsgi.py
-parallel = True
-concurrency = multiprocessing
+    .venv/*
+    */.venv/*
 
 [report]
-show_missing = True
-fail_under = 100
 exclude_lines =
     pragma: no cover
     def __repr__
@@ -24,3 +19,6 @@ exclude_lines =
     raise NotImplementedError
     if __name__ == .__main__.:
     if TYPE_CHECKING:
+
+[html]
+directory = htmlcov

@@ -1,4 +1,4 @@
-"""Tests for homepage app."""
+"""Tests for homepage app views."""
 
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import resolve

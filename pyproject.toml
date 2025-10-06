@@ -28,13 +28,28 @@ profile="django"
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = "tests.py test_*.py *_tests.py"
-addopts = "--cov=accounts --cov=homepage --cov=config --cov=points --cov=shop --cov-report=term-missing --cov-fail-under=100"
+addopts = "--cov=accounts --cov=homepage --cov=config --cov=points --cov=shop --cov-report=term-missing --cov-fail-under=100 --strict-markers"
+markers = [
+    "unit: Unit tests (fast, isolated tests)",
+    "integration: Integration tests (tests that involve multiple components)",
+    "model: Model layer tests",
+    "view: View layer tests",
+    "form: Form tests",
+    "service: Service layer tests",
+    "task: Background task tests",
+    "command: Management command tests",
+    "slow: Slow running tests",
+]
 
 [tool.coverage.run]
 omit = [
     "manage.py",
     "*/migrations/*",
     "*/admin.py",
+    "*/conftest.py",
+    "conftest.py",
+    "*/tests/*",
+    "*/tests.py",
 ]
 
 [tool.coverage.report]

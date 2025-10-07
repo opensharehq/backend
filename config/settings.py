@@ -155,6 +155,9 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
 STORAGES = {
     "default": {
         "BACKEND": "storages.backends.s3.S3Storage",
@@ -295,7 +298,7 @@ LOGGING = {
         "file": {
             "level": "INFO",
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": BASE_DIR / "logs" / "app.log",
+            "filename": LOG_DIR / "app.log",
             "maxBytes": 1024 * 1024 * 10,  # 10MB
             "backupCount": 5,
             "formatter": "verbose",
@@ -303,7 +306,7 @@ LOGGING = {
         "error_file": {
             "level": "ERROR",
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": BASE_DIR / "logs" / "error.log",
+            "filename": LOG_DIR / "error.log",
             "maxBytes": 1024 * 1024 * 10,  # 10MB
             "backupCount": 5,
             "formatter": "verbose",
@@ -311,7 +314,7 @@ LOGGING = {
         "points_file": {
             "level": "INFO",
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": BASE_DIR / "logs" / "points.log",
+            "filename": LOG_DIR / "points.log",
             "maxBytes": 1024 * 1024 * 10,  # 10MB
             "backupCount": 10,
             "formatter": "verbose",
@@ -319,7 +322,7 @@ LOGGING = {
         "shop_file": {
             "level": "INFO",
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": BASE_DIR / "logs" / "shop.log",
+            "filename": LOG_DIR / "shop.log",
             "maxBytes": 1024 * 1024 * 10,  # 10MB
             "backupCount": 10,
             "formatter": "verbose",

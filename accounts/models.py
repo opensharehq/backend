@@ -102,8 +102,18 @@ class UserProfile(models.Model):
         blank=True,
         verbose_name="LinkedIn 地址",
     )
-    company = models.CharField(max_length=100, blank=True, verbose_name="公司")
-    location = models.CharField(max_length=100, blank=True, verbose_name="位置")
+    company = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="公司",
+        db_index=True,
+    )
+    location = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="位置",
+        db_index=True,
+    )
 
     class Meta:
         """Meta configuration for UserProfile."""

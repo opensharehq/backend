@@ -6,6 +6,24 @@ from django.utils.html import format_html
 from .models import Redemption, ShopItem
 
 
+class RedemptionInline(admin.TabularInline):
+    """Inline admin for redemptions on ShopItem."""
+
+    model = Redemption
+    extra = 0
+    readonly_fields = (
+        "user_profile",
+        "points_cost_at_redemption",
+        "status",
+        "created_at",
+    )
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        """Disable adding redemptions inline."""
+        return False
+
+
 @admin.register(ShopItem)
 class ShopItemAdmin(admin.ModelAdmin):
     """Admin for ShopItem model."""
@@ -28,6 +46,7 @@ class ShopItemAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at", "updated_at", "redemption_count")
     ordering = ("-created_at",)
     date_hierarchy = "created_at"
+    inlines = [RedemptionInline]
 
     fieldsets = (
         (
@@ -94,24 +113,6 @@ class ShopItemAdmin(admin.ModelAdmin):
         """Display redemption count."""
         count = obj.redemptions.count()
         return count if count > 0 else 0
-
-
-class RedemptionInline(admin.TabularInline):
-    """Inline admin for redemptions on ShopItem."""
-
-    model = Redemption
-    extra = 0
-    readonly_fields = (
-        "user_profile",
-        "points_cost_at_redemption",
-        "status",
-        "created_at",
-    )
-    can_delete = False
-
-    def has_add_permission(self, request, obj=None):
-        """Disable adding redemptions inline."""
-        return False
 
 
 @admin.register(Redemption)

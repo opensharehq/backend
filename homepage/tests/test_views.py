@@ -164,7 +164,7 @@ class HomepageViewTests(TestCase):
 
         # Check for NobleUI CSS
         self.assertIn("nobleui/vendors/core/core.css", content)
-        self.assertIn("nobleui/css/demo1/style.css", content)
+        self.assertIn("nobleui/css/demo2/style.css", content)
 
         # Check for scripts
         self.assertIn("nobleui/vendors/lucide/lucide.min.js", content)

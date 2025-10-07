@@ -1,5 +1,7 @@
 """Django settings for fullsite project."""
 
+import os
+import sys
 from pathlib import Path
 
 import environ
@@ -411,3 +413,19 @@ LOGGING = {
         "level": "INFO",
     },
 }
+TESTING = "test" in sys.argv or "PYTEST_VERSION" in os.environ
+
+if not TESTING:
+    INTERNAL_IPS = [
+        # ...
+        "127.0.0.1",
+        # ...
+    ]
+    INSTALLED_APPS = [
+        *INSTALLED_APPS,
+        "debug_toolbar",
+    ]
+    MIDDLEWARE = [
+        "debug_toolbar.middleware.DebugToolbarMiddleware",
+        *MIDDLEWARE,
+    ]

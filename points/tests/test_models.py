@@ -2,6 +2,7 @@
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
+from django.db.models import F
 from django.test import TestCase
 from django.utils import timezone
 
@@ -291,6 +292,15 @@ class PointSourceModelTests(TestCase):
         self.assertEqual(source.initial_points, 100)
         self.assertEqual(source.remaining_points, 30)
 
+    def test_point_source_user_profile_property_alias(self):
+        """PointSource.user_profile setter mirrors legacy behavior."""
+        source = PointSource(initial_points=10, remaining_points=10)
+
+        source.user_profile = self.user
+
+        self.assertEqual(source.user, self.user)
+        self.assertIs(source.user_profile, self.user)
+
 
 class PointTransactionModelTests(TestCase):
     """Test cases for PointTransaction model."""
@@ -409,6 +419,89 @@ class PointTransactionModelTests(TestCase):
         self.user.delete()
 
         self.assertEqual(PointTransaction.objects.count(), 0)
+
+    def test_transaction_user_profile_property_alias(self):
+        """PointTransaction.user_profile setter mirrors legacy behavior."""
+        transaction = PointTransaction(
+            points=5, transaction_type=PointTransaction.TransactionType.EARN
+        )
+
+        transaction.user_profile = self.user
+
+        self.assertEqual(transaction.user, self.user)
+        self.assertIs(transaction.user_profile, self.user)
+
+
+class PointQuerySetAliasTests(TestCase):
+    """Ensure legacy queryset aliasing continues to work."""
+
+    def setUp(self):
+        """Create user and source fixtures for alias tests."""
+        self.user = User.objects.create_user(
+            username="alias-user", email="alias@example.com", password="password123"
+        )
+        self.source = PointSource.objects.create(
+            user=self.user, initial_points=100, remaining_points=100
+        )
+
+    def test_filter_aliases_legacy_user_profile_lookup(self):
+        """Filtering with user_profile prefix maps to the user field."""
+        result = PointSource.objects.filter(user_profile__username="alias-user")
+
+        self.assertIn(self.source, list(result))
+
+    def test_get_aliases_legacy_user_profile_lookup(self):
+        """get() accepts the legacy user_profile keyword."""
+        fetched = PointSource.objects.get(user_profile=self.user)
+
+        self.assertEqual(fetched, self.source)
+
+    def test_filter_without_kwargs_triggers_no_alias_work(self):
+        """Calling filter with no kwargs returns the same queryset."""
+        qs = PointSource.objects.filter()
+
+        self.assertEqual(qs.count(), 1)
+
+    def test_alias_field_handles_empty_input(self):
+        """_alias_field safely returns falsy input values."""
+        qs = PointSource.objects.all()
+
+        self.assertEqual(qs._alias_field(""), "")
+
+    def test_order_by_alias_handles_prefixed_fields(self):
+        """order_by converts prefixed legacy fields to current names."""
+        other_user = User.objects.create_user(
+            username="z-user", email="z@example.com", password="password123"
+        )
+        other_source = PointSource.objects.create(
+            user=other_user, initial_points=50, remaining_points=50
+        )
+
+        ordered = list(
+            PointSource.objects.order_by("-user_profile__username").values_list(
+                "user__username", flat=True
+            )
+        )
+
+        self.assertEqual(ordered, ["z-user", "alias-user"])
+
+        other_source.delete()
+
+    def test_values_aliases_legacy_user_profile_fields(self):
+        """values() remaps legacy field and expression names."""
+        rows = list(
+            PointSource.objects.values(
+                "user_profile__username",
+                user_profile__username_label=F("user__username"),
+            )
+        )
+
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertIn("user__username", row)
+        self.assertEqual(row["user__username"], "alias-user")
+        self.assertIn("user__username_label", row)
+        self.assertEqual(row["user__username_label"], "alias-user")
 
     def test_transaction_consumed_sources_relationship(self):
         """Test many-to-many relationship with consumed sources."""

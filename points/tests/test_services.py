@@ -4,7 +4,39 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, TransactionTestCase
 
 from points.models import PointSource, PointTransaction, Tag
-from points.services import InsufficientPointsError, grant_points, spend_points
+from points.services import (
+    InsufficientPointsError,
+    _normalize_user,
+    grant_points,
+    spend_points,
+)
+
+
+class NormalizeUserTests(TestCase):
+    """Validate the user normalization helper."""
+
+    def setUp(self):
+        """Create users for normalization scenarios."""
+        self.user = get_user_model().objects.create_user(
+            username="normalize-user", email="norm@example.com", password="password123"
+        )
+        self.other_user = get_user_model().objects.create_user(
+            username="other-user", email="other@example.com", password="password123"
+        )
+
+    def test_normalize_user_requires_arguments(self):
+        """_normalize_user raises when both arguments are empty."""
+        with self.assertRaisesMessage(
+            ValueError, "必须提供 user 或 user_profile 参数。"
+        ):
+            _normalize_user()
+
+    def test_normalize_user_rejects_mismatched_arguments(self):
+        """_normalize_user rejects conflicting user references."""
+        with self.assertRaisesMessage(
+            ValueError, "user 与 user_profile 参数指向不同的用户。"
+        ):
+            _normalize_user(user=self.user, user_profile=self.other_user)
 
 
 class GrantPointsTests(TestCase):
@@ -163,6 +195,16 @@ class GrantPointsTests(TestCase):
         self.assertEqual(source.tags.count(), 1)
         # Should not create duplicate
         self.assertEqual(Tag.objects.filter(name="推荐奖励").count(), 1)
+
+    def test_grant_points_rejects_unknown_legacy_kwargs(self):
+        """Passing unexpected legacy kwargs raises TypeError."""
+        with self.assertRaisesMessage(TypeError, "Unsupported legacy kwargs: legacy"):
+            grant_points(
+                user=self.user,
+                points=10,
+                description="Invalid legacy",
+                legacy="value",
+            )
 
 
 class SpendPointsTests(TestCase):
@@ -445,6 +487,16 @@ class SpendPointsTests(TestCase):
         self.assertEqual(source2.remaining_points, 25)
         # Third source should be untouched (newest)
         self.assertEqual(source3.remaining_points, 50)
+
+    def test_spend_points_rejects_unknown_legacy_kwargs(self):
+        """Passing unexpected legacy kwargs raises TypeError before spending."""
+        with self.assertRaisesMessage(TypeError, "Unsupported legacy kwargs: legacy"):
+            spend_points(
+                user=self.user,
+                amount=10,
+                description="Invalid legacy",
+                legacy="value",
+            )
 
 
 class TransactionAtomicityTests(TransactionTestCase):

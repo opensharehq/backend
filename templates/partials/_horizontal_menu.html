@@ -2,14 +2,7 @@
 <nav class="bottom-navbar">
     <div class="container">
         <ul class="nav page-navigation">
-            <li
-                class="nav-item {% if request.resolver_match.url_name == 'index' %}active{% endif %}"
-            >
-                <a class="nav-link" href="{% url 'homepage:index' %}">
-                    <i class="link-icon" data-lucide="home"></i>
-                    <span class="menu-title">首页</span>
-                </a>
-            </li>
+           
             <li class="nav-item">
                 <a href="#" class="nav-link">
                     <i class="link-icon" data-lucide="user"></i>
@@ -17,60 +10,37 @@
                     <i class="link-arrow"></i>
                 </a>
                 <div class="submenu">
-                    <ul class="submenu-item">
-                        <li class="nav-item">
-                            <a
+                    <div class="row">
+                        <div class="col-md-6">
+                            <ul class="submenu-item pe-md-0">
+                                <li class="category-heading">个人资料</li>
+                                <li class="nav-item">
+                                     <a
                                 class="nav-link"
                                 href="{% url 'accounts:profile' %}"
                                 >个人资料</a
                             >
-                        </li>
-                        <li class="nav-item">
-                            <a
-                                class="nav-link"
-                                href="{% url 'points:my_points' %}"
-                                >我的积分</a
-                            >
-                        </li>
-                    </ul>
-                </div>
-            </li>
-            <li class="nav-item">
-                <a href="#" class="nav-link">
-                    <i class="link-icon" data-lucide="pie-chart"></i>
-                    <span class="menu-title">数据</span>
-                    <i class="link-arrow"></i>
-                </a>
-                <div class="submenu">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <ul class="submenu-item pe-md-0">
-                                <li class="category-heading">CHARTS</li>
-                                <li class="nav-item">
-                                    <a class="nav-link" href="javascript:;"
-                                        >Apex</a
-                                    >
                                 </li>
                             </ul>
                         </div>
                         <div class="col-md-6">
                             <ul class="submenu-item ps-md-0">
-                                <li class="category-heading">TABLES</li>
+                                <li class="category-heading">激励</li>
                                 <li class="nav-item">
-                                    <a class="nav-link" href="javascript:;"
-                                        >Basic Tables</a
-                                    >
+                                    <a
+                                class="nav-link"
+                                href="{% url 'points:my_points' %}"
+                                >我的积分</a
+                            >
                                 </li>
-                                <li class="nav-item">
-                                    <a class="nav-link" href="javascript:;"
-                                        >Data Table</a
-                                    >
-                                </li>
+                               
                             </ul>
                         </div>
                     </div>
+                    
                 </div>
             </li>
+            
             <li class="nav-item">
                 <a href="#" class="nav-link">
                     <i class="link-icon" data-lucide="gift"></i>

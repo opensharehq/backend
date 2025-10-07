@@ -17,6 +17,7 @@ from django.utils.http import urlsafe_base64_encode
 from social_django.models import UserSocialAuth
 
 from accounts.models import Education, UserProfile, WorkExperience
+from common.test_utils import CacheClearTestCase
 
 User = get_user_model()
 
@@ -730,7 +731,7 @@ class RedeemConfirmViewEdgeCaseTests(TestCase):
         assert "Test Item" in str(messages[0])
 
 
-class PublicProfileViewEdgeCaseTests(TestCase):
+class PublicProfileViewEdgeCaseTests(CacheClearTestCase):
     """Edge case tests for public profile view."""
 
     def test_public_profile_view_with_zero_points(self):

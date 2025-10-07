@@ -12,9 +12,10 @@ from accounts.models import (
     UserProfile,
     WorkExperience,
 )
+from common.test_utils import CacheClearTestCase
 
 
-class UserModelTests(TestCase):
+class UserModelTests(CacheClearTestCase):
     """Test cases for User model."""
 
     def test_user_defaults_active(self):

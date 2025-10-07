@@ -1,9 +1,10 @@
 """Tests for homepage app views."""
 
 from django.contrib.auth import get_user_model
-from django.test import Client, RequestFactory, TestCase, override_settings
+from django.test import Client, RequestFactory, override_settings
 from django.urls import resolve, reverse
 
+from common.test_utils import CacheClearTestCase
 from homepage.views import index
 
 User = get_user_model()
@@ -17,7 +18,7 @@ User = get_user_model()
         },
     },
 )
-class HomepageViewTests(TestCase):
+class HomepageViewTests(CacheClearTestCase):
     """Test cases for homepage views."""
 
     def setUp(self):
@@ -291,7 +292,7 @@ class HomepageViewTests(TestCase):
         self.assertTrue("准备好开始了吗" in content or "立即注册" in content)
 
 
-class TestHomepageIntegration(TestCase):
+class TestHomepageIntegration(CacheClearTestCase):
     """Integration tests for homepage view with full request/response cycle."""
 
     def setUp(self):

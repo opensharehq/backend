@@ -12,6 +12,7 @@ from django.utils.http import urlsafe_base64_encode
 from social_django.models import UserSocialAuth
 
 from accounts.models import Education, UserProfile, WorkExperience
+from common.test_utils import CacheClearTestCase
 
 
 class AccountsIndexViewTests(TestCase):
@@ -1795,7 +1796,7 @@ class RedeemConfirmViewTests(TestCase):
         assert response.status_code == 404
 
 
-class PublicProfileViewTests(TestCase):
+class PublicProfileViewTests(CacheClearTestCase):
     """Test cases for public profile view."""
 
     def setUp(self):

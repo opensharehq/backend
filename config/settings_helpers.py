@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 
-def build_cache_settings(debug: bool, redis_url: str) -> dict[str, Any]:
+def build_cache_settings(
+    debug: bool, redis_url: str, testing: bool = False
+) -> dict[str, Any]:
     """Return Django cache configuration based on debug flag and Redis URL."""
     if redis_url:
         return {
@@ -15,6 +17,14 @@ def build_cache_settings(debug: bool, redis_url: str) -> dict[str, Any]:
                 "OPTIONS": {
                     "ssl_cert_reqs": None,
                 },
+            }
+        }
+
+    # Use DummyCache for testing to avoid cache pollution in parallel tests
+    if testing:
+        return {
+            "default": {
+                "BACKEND": "django.core.cache.backends.dummy.DummyCache",
             }
         }
 

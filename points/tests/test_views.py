@@ -5,14 +5,14 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
 from django.urls import reverse
 
+from common.test_utils import CacheClearTestCase
 from points.models import PointSource, Tag
 from points.services import grant_points, spend_points
 
 
-class MyPointsViewTests(TestCase):
+class MyPointsViewTests(CacheClearTestCase):
     """Test cases for my_points view."""
 
     def setUp(self):

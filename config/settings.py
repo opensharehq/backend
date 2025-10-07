@@ -185,7 +185,7 @@ STORAGES = {
     },
 }
 
-CACHES = build_cache_settings(DEBUG and not TESTING, REDIS_URL)
+CACHES = build_cache_settings(DEBUG and not TESTING, REDIS_URL, TESTING)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

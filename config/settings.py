@@ -410,7 +410,9 @@ if not TESTING:
         *INSTALLED_APPS,
         "debug_toolbar",
     ]
+    gzip_index = MIDDLEWARE.index("django.middleware.gzip.GZipMiddleware")
     MIDDLEWARE = [
+        *MIDDLEWARE[: gzip_index + 1],
         "debug_toolbar.middleware.DebugToolbarMiddleware",
-        *MIDDLEWARE,
+        *MIDDLEWARE[gzip_index + 1 :],
     ]

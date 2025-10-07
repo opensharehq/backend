@@ -83,6 +83,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.sites",
+    "django.contrib.flatpages",
     # third party app
     "django_extensions",
     "django_tasks",
@@ -109,6 +111,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.middleware.cache.FetchFromCacheMiddleware",
+    "django.contrib.flatpages.middleware.FlatpageFallbackMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -261,6 +264,9 @@ SOCIAL_AUTH_PIPELINE = (
     # Custom pipeline to update user profile from GitHub
     "accounts.pipeline.update_user_profile_from_github",
 )
+
+# site
+SITE_ID = 1
 
 
 # Email Configuration

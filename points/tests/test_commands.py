@@ -320,7 +320,8 @@ class GrantPointsCommandTests(TestCase):
 
     def test_command_point_source_creation(self):
         """Test that PointSource is created correctly."""
-        call_command("grant_points", "testuser", "150")
+        out = StringIO()
+        call_command("grant_points", "testuser", "150", stdout=out)
 
         source = PointSource.objects.first()
         self.assertIsNotNone(source)
@@ -330,11 +331,13 @@ class GrantPointsCommandTests(TestCase):
 
     def test_command_point_transaction_creation(self):
         """Test that PointTransaction is created correctly."""
+        out = StringIO()
         call_command(
             "grant_points",
             "testuser",
             "250",
             "--description=测试积分",
+            stdout=out,
         )
 
         transaction = PointTransaction.objects.first()

@@ -1,81 +1,127 @@
 {% load static %}
-<nav class="navbar">
-    <div class="navbar-content">
-        <div class="logo-mini-wrapper">
-            <img src="{% static 'nobleui/images/logo-mini-light.png' %}" class="logo-mini logo-mini-light" alt="logo" width="40" height="40">
-            <img src="{% static 'nobleui/images/logo-mini-dark.png' %}" class="logo-mini logo-mini-dark" alt="logo" width="40" height="40">
-        </div>
-        <form
-            class="search-form"
-            method="get"
-            action="{% url 'homepage:search' %}"
-        >
-            <div class="input-group">
-                <div class="input-group-text">
-                    <i data-lucide="search"></i>
-                </div>
-                <input
-                    type="text"
-                    class="form-control"
-                    id="navbarForm"
-                    placeholder="搜索..."
-                    name="q"
-                    value="{{ request.GET.q|default_if_none:'' }}"
-                    aria-label="搜索用户或项目"
-                    required
+{% with nav_class=nav_class|default:'navbar top-navbar' %}
+<nav class="{{ nav_class }}">
+    {% with container=container_class|default:'container' %}
+    {% if container %}<div class="{{ container }}">{% endif %}
+        <div class="navbar-content">
+            {% if show_brand|default:False %}
+            <a
+                href="{% if brand_url %}{{ brand_url }}{% else %}{% url 'homepage:index' %}{% endif %}"
+                class="{{ brand_class|default:'navbar-brand d-none d-lg-flex' }}"
+            >
+                {{ brand_text_prefix|default:'Open' }}<span>{{ brand_text_suffix|default:'Share' }}</span>
+            </a>
+            {% endif %}
+
+            {% if show_logo_mini|default:True %}
+            <div class="logo-mini-wrapper">
+                <img
+                    src="{% static 'nobleui/images/logo-mini-light.png' %}"
+                    class="logo-mini logo-mini-light"
+                    alt="logo"
+                    width="40"
+                    height="40"
+                >
+                <img
+                    src="{% static 'nobleui/images/logo-mini-dark.png' %}"
+                    class="logo-mini logo-mini-dark"
+                    alt="logo"
+                    width="40"
+                    height="40"
                 >
             </div>
-        </form>
-        <ul class="navbar-nav">
-            <li class="theme-switcher-wrapper nav-item">
-                <input type="checkbox" value="" id="theme-switcher">
-                <label for="theme-switcher">
-                    <div class="box">
-                        <div class="ball"></div>
-                        <div class="icons">
-                            <i data-lucide="sun"></i>
-                            <i data-lucide="moon"></i>
+            {% endif %}
+
+            <form
+                class="search-form"
+                method="get"
+                action="{% url 'homepage:search' %}"
+            >
+                <div class="input-group">
+                    <div class="input-group-text">
+                        <i data-lucide="search"></i>
+                    </div>
+                    <input
+                        type="text"
+                        class="form-control"
+                        id="navbarForm"
+                        placeholder="搜索..."
+                        name="q"
+                        value="{{ request.GET.q|default_if_none:'' }}"
+                        aria-label="搜索用户或项目"
+                        required
+                    >
+                </div>
+            </form>
+
+            <ul class="navbar-nav">
+                <li class="theme-switcher-wrapper nav-item">
+                    <input type="checkbox" value="" id="theme-switcher">
+                    <label for="theme-switcher">
+                        <div class="box">
+                            <div class="ball"></div>
+                            <div class="icons">
+                                <i data-lucide="sun"></i>
+                                <i data-lucide="moon"></i>
+                            </div>
+                        </div>
+                    </label>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="notificationDropdown" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        <i data-lucide="bell"></i>
+                        {% comment %}
+                        <div class="indicator">
+                            <div class="circle"></div>
+                        </div>
+                        {% endcomment %}
+                    </a>
+                    <div class="dropdown-menu p-0" aria-labelledby="notificationDropdown">
+                        <div class="px-3 py-2 d-flex align-items-center justify-content-between border-bottom">
+                            <p>通知</p>
+                            <a href="javascript:;" class="text-secondary">全部标记已读</a>
+                        </div>
+                        <div class="p-1">
+                            <p class="text-center text-secondary py-3">暂无新通知</p>
+                        </div>
+                        <div class="px-3 py-2 d-flex align-items-center justify-content-center border-top">
+                            <a href="javascript:;">查看全部</a>
                         </div>
                     </div>
-                </label>
-            </li>
-            <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" id="notificationDropdown" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                    <i data-lucide="bell"></i>
-                    {% comment %}
-                    <div class="indicator">
-                        <div class="circle"></div>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="profileDropdown" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        {% if user.is_authenticated %}
+                            {% include "partials/_user_avatar.html" with user=user fallback_name="User" classes="w-30px h-30px ms-1 rounded-circle" width=30 height=30 alt="profile" %}
+                        {% else %}
+                            {% include "partials/_user_avatar.html" with name="Guest" fallback_name="Guest" classes="w-30px h-30px ms-1 rounded-circle" width=30 height=30 alt="profile" %}
+                        {% endif %}
+                    </a>
+                    <div class="dropdown-menu p-0" aria-labelledby="profileDropdown">
+                        {% include "partials/_user_dropdown.html" %}
                     </div>
-                    {% endcomment %}
-                </a>
-                <div class="dropdown-menu p-0" aria-labelledby="notificationDropdown">
-                    <div class="px-3 py-2 d-flex align-items-center justify-content-between border-bottom">
-                        <p>通知</p>
-                        <a href="javascript:;" class="text-secondary">全部标记已读</a>
-                    </div>
-                    <div class="p-1">
-                        <p class="text-center text-secondary py-3">暂无新通知</p>
-                    </div>
-                    <div class="px-3 py-2 d-flex align-items-center justify-content-center border-top">
-                        <a href="javascript:;">查看全部</a>
-                    </div>
+                </li>
+            </ul>
+
+            {% with mode=toggler_mode|default:'sidebar' %}
+                {% if mode == 'horizontal' %}
+                <div
+                    data-toggle="horizontal-menu-toggle"
+                    class="navbar-toggler navbar-toggler-right d-lg-none align-self-center"
+                >
+                    <span class="icon-bar"></span>
+                    <span class="icon-bar"></span>
+                    <span class="icon-bar"></span>
+                    <span class="icon-bar"></span>
                 </div>
-            </li>
-            <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" id="profileDropdown" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                    {% if user.is_authenticated %}
-                        {% include "partials/_user_avatar.html" with user=user fallback_name="User" classes="w-30px h-30px ms-1 rounded-circle" width=30 height=30 alt="profile" %}
-                    {% else %}
-                        {% include "partials/_user_avatar.html" with name="Guest" fallback_name="Guest" classes="w-30px h-30px ms-1 rounded-circle" width=30 height=30 alt="profile" %}
-                    {% endif %}
+                {% elif mode == 'sidebar' %}
+                <a href="#" class="sidebar-toggler">
+                    <i data-lucide="menu"></i>
                 </a>
-                <div class="dropdown-menu p-0" aria-labelledby="profileDropdown">
-                    {% include "partials/_user_dropdown.html" %}
-                </div>
-            </li>
-        </ul>
-        <a href="#" class="sidebar-toggler">
-            <i data-lucide="menu"></i>
-        </a>
-    </div>
+                {% endif %}
+            {% endwith %}
+        </div>
+    {% if container %}</div>{% endif %}
+    {% endwith %}
 </nav>
+{% endwith %}

@@ -246,10 +246,10 @@ SOCIAL_AUTH_ADMIN_USER_SEARCH_FIELDS = ["username", "first_name", "email"]
 
 
 # email backend
-SOCIAL_AUTH_EMAIL_FORM_URL = "/accounts/sign-in/"
+SOCIAL_AUTH_EMAIL_FORM_URL = "/accounts/login"
 SOCIAL_AUTH_EMAIL_FORM_HTML = "sign_in.html"
 # username auth
-SOCIAL_AUTH_USERNAME_FORM_URL = "/accounts/sign-in/"
+SOCIAL_AUTH_USERNAME_FORM_URL = "/accounts/login"
 SOCIAL_AUTH_USERNAME_FORM_HTML = "sign_in.html"
 
 # Social Auth Backends Configuration

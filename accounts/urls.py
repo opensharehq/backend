@@ -25,8 +25,8 @@ app_name = "accounts"
 
 urlpatterns = [
     path("", accounts_index, name="index"),
-    path("sign-in/", sign_in_view, name="sign_in"),
-    path("sign-up/", sign_up_view, name="sign_up"),
+    path("login/", sign_in_view, name="sign_in"),
+    path("signup/", sign_up_view, name="sign_up"),
     path("profile/", profile_view, name="profile"),
     path("profile/edit/", profile_edit_view, name="profile_edit"),
     path("logout/", logout_view, name="logout"),

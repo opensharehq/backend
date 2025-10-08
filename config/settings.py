@@ -93,6 +93,7 @@ INSTALLED_APPS = [
     "django_tasks.backends.database",
     "social_django",
     "anymail",
+    "turnstile",
     # app
     "homepage",
     "accounts",

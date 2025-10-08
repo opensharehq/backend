@@ -19,6 +19,7 @@ dependencies = [
     "tblib>=3.1.0",
     "django-debug-toolbar>=6.0.0",
     "docutils>=0.22.2",
+    "django-turnstile>=0.1.2",
 ]
 
 [tool.djlint]

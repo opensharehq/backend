@@ -139,12 +139,29 @@
                                 </a>
                             </div>
                             <p class="text-muted">当前积分余额</p>
+                            {% if user.withdrawable_points > 0 %}
+                                <div class="alert alert-success d-flex align-items-center mb-3" role="alert">
+                                    <i data-lucide="wallet" class="icon-sm me-2"></i>
+                                    <div>
+                                        <strong>可提现积分:</strong> {{ user.withdrawable_points }}
+                                    </div>
+                                </div>
+                            {% endif %}
                             {% if user.get_points_by_tag %}
                                 <div class="mt-3">
                                     <div class="d-flex flex-wrap gap-2">
                                         {% for item in user.get_points_by_tag %}
-                                            <span class="badge bg-primary">{{ item.tag }}: {{ item.points }}</span>
+                                            <span class="badge {% if item.withdrawable %}bg-success{% else %}bg-primary{% endif %}">
+                                                {{ item.tag }}: {{ item.points }}
+                                                {% if item.withdrawable %}<i data-lucide="check-circle" class="icon-xs ms-1"></i>{% endif %}
+                                            </span>
                                         {% endfor %}
+                                    </div>
+                                    <div class="mt-2">
+                                        <small class="text-muted">
+                                            <i data-lucide="info" class="icon-xs"></i>
+                                            绿色标签表示可提现积分
+                                        </small>
                                     </div>
                                 </div>
                             {% endif %}

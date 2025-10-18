@@ -350,6 +350,135 @@ class UserModelTests(CacheClearTestCase):
         assert tag_dict["tag-b"] == 30  # Only from source1
         assert tag_dict["tag-c"] == 15  # Only from source3
 
+    def test_get_points_by_tag_includes_withdrawable_status(self):
+        """Test get_points_by_tag returns withdrawable status for each tag."""
+        from points.models import PointSource, Tag
+
+        user = get_user_model().objects.create_user(
+            username="withdrawable-user",
+            email="withdrawable@example.com",
+            password="password123",
+        )
+
+        # Create withdrawable and non-withdrawable tags
+        withdrawable_tag = Tag.objects.create(name="withdrawable", withdrawable=True)
+        non_withdrawable_tag = Tag.objects.create(
+            name="non-withdrawable", withdrawable=False
+        )
+
+        # Create sources with different tags
+        source1 = PointSource.objects.create(
+            user_profile=user, initial_points=100, remaining_points=50
+        )
+        source1.tags.add(withdrawable_tag)
+
+        source2 = PointSource.objects.create(
+            user_profile=user, initial_points=80, remaining_points=30
+        )
+        source2.tags.add(non_withdrawable_tag)
+
+        result = user.get_points_by_tag()
+
+        # Verify withdrawable status is included
+        assert len(result) == 2
+        tag_dict = {item["tag"]: item for item in result}
+
+        assert tag_dict["withdrawable"]["points"] == 50
+        assert tag_dict["withdrawable"]["withdrawable"] is True
+
+        assert tag_dict["non-withdrawable"]["points"] == 30
+        assert tag_dict["non-withdrawable"]["withdrawable"] is False
+
+    def test_withdrawable_points_with_no_sources(self):
+        """Test withdrawable_points returns 0 when user has no sources."""
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="password123",
+        )
+
+        assert user.withdrawable_points == 0
+
+    def test_withdrawable_points_with_withdrawable_sources(self):
+        """Test withdrawable_points returns sum of withdrawable points."""
+        from points.models import PointSource, Tag
+
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="password123",
+        )
+
+        withdrawable_tag = Tag.objects.create(name="withdrawable", withdrawable=True)
+        non_withdrawable_tag = Tag.objects.create(
+            name="non-withdrawable", withdrawable=False
+        )
+
+        # Withdrawable source
+        source1 = PointSource.objects.create(
+            user_profile=user, initial_points=100, remaining_points=80
+        )
+        source1.tags.add(withdrawable_tag)
+
+        # Non-withdrawable source
+        source2 = PointSource.objects.create(
+            user_profile=user, initial_points=50, remaining_points=30
+        )
+        source2.tags.add(non_withdrawable_tag)
+
+        # Only count withdrawable points
+        assert user.withdrawable_points == 80
+
+    def test_withdrawable_points_ignores_empty_sources(self):
+        """Test withdrawable_points ignores sources with 0 remaining points."""
+        from points.models import PointSource, Tag
+
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="password123",
+        )
+
+        withdrawable_tag = Tag.objects.create(name="withdrawable", withdrawable=True)
+
+        # Active source
+        source1 = PointSource.objects.create(
+            user_profile=user, initial_points=100, remaining_points=50
+        )
+        source1.tags.add(withdrawable_tag)
+
+        # Depleted source
+        source2 = PointSource.objects.create(
+            user_profile=user, initial_points=100, remaining_points=0
+        )
+        source2.tags.add(withdrawable_tag)
+
+        assert user.withdrawable_points == 50
+
+    def test_withdrawable_points_with_mixed_tags(self):
+        """Test withdrawable_points counts sources with at least one withdrawable tag."""
+        from points.models import PointSource, Tag
+
+        user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="password123",
+        )
+
+        withdrawable_tag = Tag.objects.create(name="withdrawable", withdrawable=True)
+        non_withdrawable_tag = Tag.objects.create(
+            name="non-withdrawable", withdrawable=False
+        )
+
+        # Source with both withdrawable and non-withdrawable tags
+        source = PointSource.objects.create(
+            user_profile=user, initial_points=100, remaining_points=60
+        )
+        source.tags.add(withdrawable_tag, non_withdrawable_tag)
+
+        # Should count because it has at least one withdrawable tag
+        assert user.withdrawable_points == 60
+
 
 class UserProfileModelTests(TestCase):
     """Test cases for UserProfile model."""

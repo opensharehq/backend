@@ -79,6 +79,7 @@ class Tag(models.Model):
     )
     description = models.TextField(blank=True, verbose_name="描述")
     is_default = models.BooleanField(default=False, verbose_name="是否为默认标签")
+    withdrawable = models.BooleanField(default=False, verbose_name="是否可提现")
 
     class Meta:
         """模型元数据配置."""
@@ -146,6 +147,11 @@ class PointSource(models.Model):
     @user_profile.setter
     def user_profile(self, value):
         self.user = value
+
+    @property
+    def is_withdrawable(self):
+        """判断积分池是否可提现, 基于关联的标签."""
+        return self.tags.filter(withdrawable=True).exists()
 
 
 class PointTransaction(models.Model):

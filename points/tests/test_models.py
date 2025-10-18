@@ -103,6 +103,24 @@ class TagModelTests(TestCase):
         tag2 = Tag.objects.create(name="test", slug=long_slug)
         self.assertEqual(len(tag2.slug), 50)
 
+    def test_tag_withdrawable_field(self):
+        """Test withdrawable field behavior."""
+        withdrawable_tag = Tag.objects.create(
+            name="withdrawable-tag", withdrawable=True
+        )
+        non_withdrawable_tag = Tag.objects.create(
+            name="non-withdrawable-tag", withdrawable=False
+        )
+
+        self.assertTrue(withdrawable_tag.withdrawable)
+        self.assertFalse(non_withdrawable_tag.withdrawable)
+
+    def test_tag_withdrawable_defaults_to_false(self):
+        """Test that withdrawable defaults to False."""
+        tag = Tag.objects.create(name="test-tag")
+
+        self.assertFalse(tag.withdrawable)
+
 
 class PointSourceModelTests(TestCase):
     """Test cases for PointSource model."""
@@ -300,6 +318,53 @@ class PointSourceModelTests(TestCase):
 
         self.assertEqual(source.user, self.user)
         self.assertIs(source.user_profile, self.user)
+
+    def test_point_source_is_withdrawable_with_withdrawable_tag(self):
+        """Test is_withdrawable property returns True when source has withdrawable tag."""
+        withdrawable_tag = Tag.objects.create(
+            name="withdrawable-tag", withdrawable=True
+        )
+        source = PointSource.objects.create(
+            user_profile=self.user, initial_points=100, remaining_points=100
+        )
+        source.tags.add(withdrawable_tag)
+
+        self.assertTrue(source.is_withdrawable)
+
+    def test_point_source_is_withdrawable_without_withdrawable_tag(self):
+        """Test is_withdrawable property returns False when source has no withdrawable tags."""
+        non_withdrawable_tag = Tag.objects.create(
+            name="non-withdrawable-tag", withdrawable=False
+        )
+        source = PointSource.objects.create(
+            user_profile=self.user, initial_points=100, remaining_points=100
+        )
+        source.tags.add(non_withdrawable_tag)
+
+        self.assertFalse(source.is_withdrawable)
+
+    def test_point_source_is_withdrawable_with_mixed_tags(self):
+        """Test is_withdrawable property returns True when at least one tag is withdrawable."""
+        withdrawable_tag = Tag.objects.create(
+            name="withdrawable-tag", withdrawable=True
+        )
+        non_withdrawable_tag = Tag.objects.create(
+            name="non-withdrawable-tag", withdrawable=False
+        )
+        source = PointSource.objects.create(
+            user_profile=self.user, initial_points=100, remaining_points=100
+        )
+        source.tags.add(withdrawable_tag, non_withdrawable_tag)
+
+        self.assertTrue(source.is_withdrawable)
+
+    def test_point_source_is_withdrawable_with_no_tags(self):
+        """Test is_withdrawable property returns False when source has no tags."""
+        source = PointSource.objects.create(
+            user_profile=self.user, initial_points=100, remaining_points=100
+        )
+
+        self.assertFalse(source.is_withdrawable)
 
 
 class PointTransactionModelTests(TestCase):

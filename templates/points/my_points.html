@@ -51,12 +51,23 @@
                                 <div class="col-md-6 col-lg-4 mb-3">
                                     <div class="border rounded p-3">
                                         <div class="d-flex justify-content-between align-items-center">
-                                            <span class="badge bg-primary">{{ item.tag }}</span>
-                                            <h4 class="text-primary mb-0">{{ item.points }}</h4>
+                                            <span class="badge {% if item.withdrawable %}bg-success{% else %}bg-primary{% endif %}">
+                                                {{ item.tag }}
+                                                {% if item.withdrawable %}
+                                                    <i data-lucide="check-circle" class="icon-xs ms-1"></i>
+                                                {% endif %}
+                                            </span>
+                                            <h4 class="{% if item.withdrawable %}text-success{% else %}text-primary{% endif %} mb-0">{{ item.points }}</h4>
                                         </div>
                                     </div>
                                 </div>
                             {% endfor %}
+                        </div>
+                        <div class="mt-2">
+                            <small class="text-muted">
+                                <i data-lucide="info" class="icon-xs"></i>
+                                绿色标签表示可提现积分
+                            </small>
                         </div>
                     </div>
                 </div>
@@ -89,7 +100,12 @@
                                             <td class="text-success fw-bold">{{ source.remaining_points }}</td>
                                             <td>
                                                 {% for tag in source.tags.all %}
-                                                    <span class="badge bg-secondary me-1">{{ tag.name }}</span>
+                                                    <span class="badge {% if tag.withdrawable %}bg-success{% else %}bg-secondary{% endif %} me-1">
+                                                        {{ tag.name }}
+                                                        {% if tag.withdrawable %}
+                                                            <i data-lucide="check-circle" class="icon-xs ms-1"></i>
+                                                        {% endif %}
+                                                    </span>
                                                 {% endfor %}
                                             </td>
                                             <td>

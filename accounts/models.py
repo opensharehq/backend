@@ -78,17 +78,32 @@ class User(AbstractUser):
         """
         Get points grouped by tag.
 
-        Returns a list of dicts with tag name and total points.
+        Returns a list of dicts with tag name, total points, and withdrawable status.
 
         """
         tag_points = {}
         for source in self.point_sources.filter(remaining_points__gt=0):
             for tag in source.tags.all():
                 if tag.name not in tag_points:
-                    tag_points[tag.name] = 0
-                tag_points[tag.name] += source.remaining_points
+                    tag_points[tag.name] = {
+                        "points": 0,
+                        "withdrawable": tag.withdrawable,
+                    }
+                tag_points[tag.name]["points"] += source.remaining_points
 
-        return [{"tag": tag, "points": points} for tag, points in tag_points.items()]
+        return [
+            {"tag": tag, "points": data["points"], "withdrawable": data["withdrawable"]}
+            for tag, data in tag_points.items()
+        ]
+
+    @property
+    def withdrawable_points(self):
+        """Get total withdrawable points across all sources."""
+        total = 0
+        for source in self.point_sources.filter(remaining_points__gt=0):
+            if source.is_withdrawable:
+                total += source.remaining_points
+        return total
 
 
 class UserProfile(models.Model):

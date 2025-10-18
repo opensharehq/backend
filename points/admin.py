@@ -14,8 +14,8 @@ User = get_user_model()
 class TagAdmin(admin.ModelAdmin):
     """Admin for Tag model."""
 
-    list_display = ("name", "slug", "is_default", "description_short")
-    list_filter = ("is_default",)
+    list_display = ("name", "slug", "is_default", "withdrawable", "description_short")
+    list_filter = ("is_default", "withdrawable")
     search_fields = ("name", "slug", "description")
     ordering = ("name",)
     readonly_fields = ("slug",)
@@ -73,6 +73,7 @@ class PointSourceAdmin(admin.ModelAdmin):
         "created_at",
         "expires_at",
         "is_expired",
+        "withdrawable_status",
     )
     list_filter = ("created_at", "expires_at", "tags")
     search_fields = ("user__username", "user__email", "notes")
@@ -131,6 +132,11 @@ class PointSourceAdmin(admin.ModelAdmin):
         from django.utils import timezone
 
         return timezone.now() > obj.expires_at
+
+    @admin.display(boolean=True, description="可提现")
+    def withdrawable_status(self, obj):
+        """Display if points are withdrawable based on tags."""
+        return obj.is_withdrawable
 
 
 @admin.register(PointTransaction)

@@ -54,6 +54,12 @@ env = environ.Env(
     MAILGUN_API_KEY=(str, "PLACEHOLDER_MAILGUN_API_KEY"),
     MAILGUN_SENDER_DOMAIN=(str, "PLACEHOLDER_MAILGUN_SENDER_DOMAIN"),
     REDIS_URL=(str, ""),
+    CLICKHOUSE_HOST=(str, "localhost"),
+    CLICKHOUSE_PORT=(int, 8123),
+    CLICKHOUSE_USER=(str, "default"),
+    CLICKHOUSE_PASSWORD=(str, ""),
+    CLICKHOUSE_DATABASE=(str, "default"),
+    CLICKHOUSE_SECURE=(bool, False),
 )
 
 TESTING = "test" in sys.argv or "PYTEST_VERSION" in os.environ
@@ -75,6 +81,14 @@ AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL")
 AWS_S3_ADDRESSING_STYLE = "virtual"
 AWS_S3_SIGNATURE_VERSION = "s3"
 REDIS_URL = env("REDIS_URL")
+
+# ClickHouse Configuration
+CLICKHOUSE_HOST = env("CLICKHOUSE_HOST")
+CLICKHOUSE_PORT = env("CLICKHOUSE_PORT")
+CLICKHOUSE_USER = env("CLICKHOUSE_USER")
+CLICKHOUSE_PASSWORD = env("CLICKHOUSE_PASSWORD")
+CLICKHOUSE_DATABASE = env("CLICKHOUSE_DATABASE")
+CLICKHOUSE_SECURE = env("CLICKHOUSE_SECURE")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -99,6 +113,7 @@ INSTALLED_APPS = [
     "accounts",
     "points",
     "shop",
+    "chdb",
 ]
 
 MIDDLEWARE = [

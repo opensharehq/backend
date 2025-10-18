@@ -35,6 +35,12 @@ class ShopItem(models.Model):
         help_text="如果为空，则任何积分都可兑换。如果不为空，则只有带这些标签的积分才能用于兑换。",
     )
 
+    requires_shipping = models.BooleanField(
+        default=False,
+        verbose_name="需要线下发货",
+        help_text="如果选中，用户兑换时需要提供收货地址",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -83,6 +89,15 @@ class Redemption(models.Model):
         null=True,
         blank=True,
         related_name="redemption",
+    )
+    shipping_address = models.ForeignKey(
+        "accounts.ShippingAddress",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="redemptions",
+        verbose_name="收货地址",
+        help_text="兑换时用户选择的收货地址（仅需要线下发货的商品）",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 

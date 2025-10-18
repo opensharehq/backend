@@ -467,7 +467,12 @@ class FullUserJourneyTests(TestCase):
         edit_url = reverse("accounts:profile_edit")
         profile_data = {
             "bio": "I love open source!",
+            "birth_date": "",
             "github_url": "https://github.com/profileuser",
+            "homepage_url": "",
+            "blog_url": "",
+            "twitter_url": "",
+            "linkedin_url": "",
             "company": "Tech Company",
             "location": "Shanghai",
             # Formset management data for work experiences
@@ -480,6 +485,11 @@ class FullUserJourneyTests(TestCase):
             "educations-INITIAL_FORMS": "0",
             "educations-MIN_NUM_FORMS": "0",
             "educations-MAX_NUM_FORMS": "1000",
+            # Formset management data for shipping addresses
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
 
         response = client.post(edit_url, profile_data)

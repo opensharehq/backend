@@ -151,6 +151,11 @@ class ProfileManagementFlowTests(TestCase):
             "educations-INITIAL_FORMS": "0",
             "educations-MIN_NUM_FORMS": "0",
             "educations-MAX_NUM_FORMS": "1000",
+            # Formset management data for shipping addresses
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
 
         response = self.client.post(edit_url, profile_data)

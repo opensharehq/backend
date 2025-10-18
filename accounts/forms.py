@@ -8,7 +8,7 @@ from django.contrib.auth.forms import (
     UserCreationForm,
 )
 
-from .models import Education, UserProfile, WorkExperience
+from .models import Education, ShippingAddress, UserProfile, WorkExperience
 
 
 class SignUpForm(UserCreationForm):
@@ -313,3 +313,44 @@ class PasswordResetConfirmForm(SetPasswordForm):
             },
         ),
     )
+
+
+class ShippingAddressForm(forms.ModelForm):
+    """Shipping address form."""
+
+    class Meta:
+        """Meta configuration for ShippingAddressForm."""
+
+        model = ShippingAddress
+        fields = [
+            "receiver_name",
+            "phone",
+            "province",
+            "city",
+            "district",
+            "address",
+            "is_default",
+        ]
+        widgets = {
+            "receiver_name": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "收件人姓名"},
+            ),
+            "phone": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "联系电话"},
+            ),
+            "province": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "省份"},
+            ),
+            "city": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "城市"},
+            ),
+            "district": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "区/县"},
+            ),
+            "address": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "详细地址"},
+            ),
+            "is_default": forms.CheckboxInput(
+                attrs={"class": "form-check-input"},
+            ),
+        }

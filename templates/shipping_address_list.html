@@ -1,0 +1,82 @@
+{% extends "horizontal_base.html" %}
+
+{% block title %}收货地址管理{% endblock title %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">收货地址管理</h4>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap">
+            <a href="{% url 'accounts:shipping_address_create' %}"
+               class="btn btn-primary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="plus" class="btn-icon-prepend"></i> 添加新地址
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12 col-xl-12">
+            {% if addresses %}
+                <div class="row">
+                    {% for address in addresses %}
+                        <div class="col-md-6 col-lg-4 grid-margin stretch-card">
+                            <div class="card">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <h6 class="card-title mb-0">
+                                            <i data-lucide="map-pin" class="icon-sm"></i>
+                                            {{ address.receiver_name }}
+                                        </h6>
+                                        {% if address.is_default %}
+                                            <span class="badge bg-primary">默认</span>
+                                        {% endif %}
+                                    </div>
+                                    <div class="mb-3">
+                                        <p class="text-muted mb-1">
+                                            <i data-lucide="phone" class="icon-sm"></i> {{ address.phone }}
+                                        </p>
+                                        <p class="mb-0">
+                                            {{ address.province }} {{ address.city }} {{ address.district }}<br>
+                                            {{ address.address }}
+                                        </p>
+                                    </div>
+                                    <div class="d-flex gap-2 flex-wrap">
+                                        <a href="{% url 'accounts:shipping_address_edit' address.id %}"
+                                           class="btn btn-sm btn-outline-primary btn-icon-text">
+                                            <i data-lucide="edit" class="btn-icon-prepend"></i> 编辑
+                                        </a>
+                                        {% if not address.is_default %}
+                                            <form method="post"
+                                                  action="{% url 'accounts:shipping_address_set_default' address.id %}"
+                                                  class="d-inline">
+                                                {% csrf_token %}
+                                                <button type="submit" class="btn btn-sm btn-outline-success btn-icon-text">
+                                                    <i data-lucide="check" class="btn-icon-prepend"></i> 设为默认
+                                                </button>
+                                            </form>
+                                        {% endif %}
+                                        <a href="{% url 'accounts:shipping_address_delete' address.id %}"
+                                           class="btn btn-sm btn-outline-danger btn-icon-text">
+                                            <i data-lucide="trash-2" class="btn-icon-prepend"></i> 删除
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="card">
+                    <div class="card-body text-center py-5">
+                        <i data-lucide="map-pin" class="icon-xxl text-muted mb-3"></i>
+                        <h5 class="text-muted">还没有收货地址</h5>
+                        <p class="text-muted mb-4">添加收货地址以便兑换需要线下发货的商品</p>
+                        <a href="{% url 'accounts:shipping_address_create' %}" class="btn btn-primary btn-icon-text">
+                            <i data-lucide="plus" class="btn-icon-prepend"></i> 添加收货地址
+                        </a>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+{% endblock content %}

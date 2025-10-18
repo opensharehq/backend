@@ -15,6 +15,12 @@ from .views import (
     profile_view,
     redeem_confirm_view,
     redemption_list_view,
+    shipping_address_create_guide_view,
+    shipping_address_create_view,
+    shipping_address_delete_view,
+    shipping_address_edit_view,
+    shipping_address_list_view,
+    shipping_address_set_default_view,
     shop_list_view,
     sign_in_view,
     sign_up_view,
@@ -57,4 +63,35 @@ urlpatterns = [
     path("shop/", shop_list_view, name="shop_list"),
     path("redemption/", redemption_list_view, name="redemption_list"),
     path("redeem/<int:item_id>/", redeem_confirm_view, name="redeem_confirm"),
+    # Shipping address URLs
+    path(
+        "shipping-addresses/",
+        shipping_address_list_view,
+        name="shipping_address_list",
+    ),
+    path(
+        "shipping-addresses/create/",
+        shipping_address_create_view,
+        name="shipping_address_create",
+    ),
+    path(
+        "shipping-addresses/create-for-item/<int:item_id>/",
+        shipping_address_create_guide_view,
+        name="shipping_address_create_guide",
+    ),
+    path(
+        "shipping-addresses/<int:address_id>/edit/",
+        shipping_address_edit_view,
+        name="shipping_address_edit",
+    ),
+    path(
+        "shipping-addresses/<int:address_id>/delete/",
+        shipping_address_delete_view,
+        name="shipping_address_delete",
+    ),
+    path(
+        "shipping-addresses/<int:address_id>/set-default/",
+        shipping_address_set_default_view,
+        name="shipping_address_set_default",
+    ),
 ]

@@ -3,7 +3,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import Education, User, UserProfile, WorkExperience
+from .models import Education, ShippingAddress, User, UserProfile, WorkExperience
 
 
 class WorkExperienceInline(admin.TabularInline):
@@ -153,3 +153,53 @@ class EducationAdmin(admin.ModelAdmin):
     )
     ordering = ("-start_date",)
     date_hierarchy = "start_date"
+
+
+@admin.register(ShippingAddress)
+class ShippingAddressAdmin(admin.ModelAdmin):
+    """Admin for ShippingAddress model."""
+
+    list_display = (
+        "receiver_name",
+        "user",
+        "phone",
+        "province",
+        "city",
+        "district",
+        "is_default",
+        "created_at",
+    )
+    list_filter = ("is_default", "province", "city", "created_at")
+    search_fields = (
+        "user__username",
+        "receiver_name",
+        "phone",
+        "province",
+        "city",
+        "district",
+        "address",
+    )
+    ordering = ("-is_default", "-updated_at")
+    date_hierarchy = "created_at"
+    readonly_fields = ("created_at", "updated_at")
+
+    fieldsets = (
+        (
+            "收件人信息",
+            {
+                "fields": ("user", "receiver_name", "phone"),
+            },
+        ),
+        (
+            "地址信息",
+            {
+                "fields": ("province", "city", "district", "address"),
+            },
+        ),
+        (
+            "设置",
+            {
+                "fields": ("is_default", "created_at", "updated_at"),
+            },
+        ),
+    )

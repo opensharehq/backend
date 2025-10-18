@@ -17,7 +17,7 @@ class RedemptionError(Exception):
 
 
 @transaction.atomic
-def redeem_item(user_profile, item_id: int) -> Redemption:
+def redeem_item(user_profile, item_id: int, shipping_address_id=None) -> Redemption:
     """
     执行商品兑换的核心业务逻辑.
 
@@ -26,12 +26,13 @@ def redeem_item(user_profile, item_id: int) -> Redemption:
     Args:
         user_profile (UserProfile): 执行兑换的用户.
         item_id (int): 要兑换的商品 ID.
+        shipping_address_id (int, optional): 收货地址 ID (需要线下发货的商品必须提供).
 
     Returns:
         Redemption: 成功创建的兑换记录.
 
     Raises:
-        RedemptionError: 如果商品无效、下架或库存不足.
+        RedemptionError: 如果商品无效、下架、库存不足或缺少收货地址.
         InsufficientPointsError: 如果用户积分不足(由 points 服务层抛出).
 
     """
@@ -65,6 +66,32 @@ def redeem_item(user_profile, item_id: int) -> Redemption:
         )
         raise RedemptionError(msg)
 
+    # 检查是否需要收货地址
+    shipping_address = None
+    if item.requires_shipping:
+        if not shipping_address_id:
+            msg = "此商品需要收货地址。"
+            logger.warning(
+                "兑换失败（缺少收货地址）: 用户=%s (ID=%s), 商品=%s (ID=%s)",
+                user_profile.username,
+                user_profile.id,
+                item.name,
+                item.id,
+            )
+            raise RedemptionError(msg)
+
+        # 验证地址是否属于当前用户
+        from accounts.models import ShippingAddress
+
+        try:
+            shipping_address = ShippingAddress.objects.get(
+                id=shipping_address_id,
+                user=user_profile,
+            )
+        except ShippingAddress.DoesNotExist as err:
+            msg = "无效的收货地址。"
+            raise RedemptionError(msg) from err
+
     # 2. 确定积分标签约束
     allowed_tags = list(item.allowed_tags.values_list("name", flat=True))
 
@@ -88,6 +115,7 @@ def redeem_item(user_profile, item_id: int) -> Redemption:
         points_cost_at_redemption=item.cost,  # 记录兑换时的价格
         transaction=spend_transaction,
         status=Redemption.StatusChoices.COMPLETED,  # 成功则直接完成
+        shipping_address=shipping_address,  # 关联收货地址（如果需要）
     )
 
     # 5. 更新库存 (使用 F() 表达式防止并发问题)

@@ -22,10 +22,11 @@ from .forms import (
     PasswordResetConfirmForm,
     PasswordResetRequestForm,
     ProfileForm,
+    ShippingAddressForm,
     SignUpForm,
     WorkExperienceForm,
 )
-from .models import Education, UserProfile, WorkExperience
+from .models import Education, ShippingAddress, UserProfile, WorkExperience
 from .tasks import send_password_reset_email
 
 
@@ -128,21 +129,38 @@ def profile_edit_view(request):
         can_delete=True,
     )
 
-    form, work_formset, education_formset, is_post = _get_profile_edit_forms(
-        request,
-        profile,
-        WorkExperienceFormSet,
-        EducationFormSet,
+    # Create ShippingAddress formset using User model (not UserProfile)
+    ShippingAddressFormSet = inlineformset_factory(
+        get_user_model(),
+        ShippingAddress,
+        form=ShippingAddressForm,
+        extra=0,
+        can_delete=True,
     )
 
+    if request.method == "POST":
+        form = ProfileForm(request.POST, instance=profile)
+        work_formset = WorkExperienceFormSet(request.POST, instance=profile)
+        education_formset = EducationFormSet(request.POST, instance=profile)
+        address_formset = ShippingAddressFormSet(request.POST, instance=request.user)
+        is_post = True
+    else:
+        form = ProfileForm(instance=profile)
+        work_formset = WorkExperienceFormSet(instance=profile)
+        education_formset = EducationFormSet(instance=profile)
+        address_formset = ShippingAddressFormSet(instance=request.user)
+        is_post = False
+
     if is_post and all(
-        form_like.is_valid() for form_like in (form, work_formset, education_formset)
+        form_like.is_valid()
+        for form_like in (form, work_formset, education_formset, address_formset)
     ):
         form_changed = _save_profile_form(form)
         work_changed = _persist_inline_formset(work_formset)
         education_changed = _persist_inline_formset(education_formset)
+        address_changed = _persist_inline_formset(address_formset)
 
-        if form_changed or work_changed or education_changed:
+        if form_changed or work_changed or education_changed or address_changed:
             messages.success(request, "个人资料已更新")
         else:
             messages.info(request, "未检测到任何更改")
@@ -156,6 +174,7 @@ def profile_edit_view(request):
             "form": form,
             "work_formset": work_formset,
             "education_formset": education_formset,
+            "address_formset": address_formset,
         },
     )
 
@@ -483,10 +502,34 @@ def redeem_confirm_view(request, item_id):
     """Handle item redemption confirmation and processing."""
     item = get_object_or_404(ShopItem, id=item_id)
 
+    # Check if item requires shipping
+    if item.requires_shipping:
+        user_addresses = ShippingAddress.objects.filter(user=request.user)
+        if not user_addresses.exists():
+            # No addresses - redirect to create address page
+            messages.warning(request, "此商品需要收货地址，请先添加收货地址")
+            return redirect("accounts:shipping_address_create_guide", item_id=item_id)
+
+        default_address = user_addresses.filter(is_default=True).first()
+    else:
+        user_addresses = None
+        default_address = None
+
     # Only process POST requests for redemption
     if request.method == "POST":
+        shipping_address_id = None
+        if item.requires_shipping:
+            shipping_address_id = request.POST.get("shipping_address")
+            if not shipping_address_id:
+                messages.error(request, "请选择收货地址")
+                return redirect("accounts:redeem_confirm", item_id=item_id)
+
         try:
-            redemption = redeem_item(user_profile=request.user, item_id=item_id)
+            redemption = redeem_item(
+                user_profile=request.user,
+                item_id=item_id,
+                shipping_address_id=shipping_address_id,
+            )
             messages.success(
                 request,
                 f"成功兑换 {item.name}！消耗积分：{redemption.points_cost_at_redemption}",
@@ -518,6 +561,9 @@ def redeem_confirm_view(request, item_id):
             "can_afford": can_afford,
             "remaining_after_redeem": remaining_after_redeem,
             "points_needed": points_needed,
+            "requires_shipping": item.requires_shipping,
+            "addresses": user_addresses,
+            "default_address": default_address,
         },
     )
 
@@ -546,3 +592,111 @@ def public_profile_view(request, username):
             "total_points": total_points,
         },
     )
+
+
+@login_required
+def shipping_address_list_view(request):
+    """Display user's shipping addresses."""
+    addresses = ShippingAddress.objects.filter(user=request.user)
+    return render(
+        request,
+        "shipping_address_list.html",
+        {"addresses": addresses},
+    )
+
+
+@login_required
+def shipping_address_create_view(request):
+    """Create a new shipping address."""
+    if request.method == "POST":
+        form = ShippingAddressForm(request.POST)
+        if form.is_valid():
+            address = form.save(commit=False)
+            address.user = request.user
+            address.save()
+            messages.success(request, "收货地址已添加")
+            return redirect("accounts:shipping_address_list")
+    else:
+        form = ShippingAddressForm()
+
+    return render(
+        request,
+        "shipping_address_form.html",
+        {"form": form, "action": "create"},
+    )
+
+
+@login_required
+def shipping_address_create_guide_view(request, item_id):
+    """Guide user to create shipping address for redemption."""
+    item = get_object_or_404(ShopItem, id=item_id)
+
+    if request.method == "POST":
+        form = ShippingAddressForm(request.POST)
+        if form.is_valid():
+            address = form.save(commit=False)
+            address.user = request.user
+            address.save()
+            messages.success(request, "收货地址已添加，现在可以继续兑换")
+            return redirect("accounts:redeem_confirm", item_id=item_id)
+    else:
+        # Set is_default to True for the first address
+        initial_data = {"is_default": True}
+        form = ShippingAddressForm(initial=initial_data)
+
+    return render(
+        request,
+        "shipping_address_guide.html",
+        {"form": form, "item": item},
+    )
+
+
+@login_required
+def shipping_address_edit_view(request, address_id):
+    """Edit an existing shipping address."""
+    address = get_object_or_404(ShippingAddress, id=address_id, user=request.user)
+
+    if request.method == "POST":
+        form = ShippingAddressForm(request.POST, instance=address)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "收货地址已更新")
+            return redirect("accounts:shipping_address_list")
+    else:
+        form = ShippingAddressForm(instance=address)
+
+    return render(
+        request,
+        "shipping_address_form.html",
+        {"form": form, "action": "edit", "address": address},
+    )
+
+
+@login_required
+def shipping_address_delete_view(request, address_id):
+    """Delete a shipping address."""
+    address = get_object_or_404(ShippingAddress, id=address_id, user=request.user)
+
+    if request.method == "POST":
+        address.delete()
+        messages.success(request, "收货地址已删除")
+        return redirect("accounts:shipping_address_list")
+
+    return render(
+        request,
+        "shipping_address_confirm_delete.html",
+        {"address": address},
+    )
+
+
+@login_required
+def shipping_address_set_default_view(request, address_id):
+    """Set an address as default."""
+    address = get_object_or_404(ShippingAddress, id=address_id, user=request.user)
+
+    if request.method == "POST":
+        address.is_default = True
+        address.save()
+        messages.success(request, "已设置为默认地址")
+
+    return redirect("accounts:shipping_address_list")

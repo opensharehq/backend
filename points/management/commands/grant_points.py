@@ -36,8 +36,8 @@ class Command(BaseCommand):
             "--tags",
             "-t",
             type=str,
-            default="默认",
-            help="Comma-separated tags (name or slug) (default: 默认)",
+            default="openshare",
+            help="Comma-separated tags (name or slug) (default: openshare)",
         )
 
     def handle(self, *args, **options):

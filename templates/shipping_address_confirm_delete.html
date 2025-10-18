@@ -1,0 +1,53 @@
+{% extends "horizontal_base.html" %}
+
+{% block title %}删除收货地址{% endblock title %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">删除收货地址</h4>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap">
+            <a href="{% url 'accounts:shipping_address_list' %}"
+               class="btn btn-outline-secondary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12 col-xl-8">
+            <div class="card">
+                <div class="card-body">
+                    <div class="alert alert-warning" role="alert">
+                        <i data-lucide="alert-triangle" class="icon-sm"></i>
+                        <strong>确认删除</strong>
+                        <p class="mb-0 mt-2">您确定要删除以下收货地址吗？此操作不可撤销。</p>
+                    </div>
+                    <div class="border rounded p-3 mb-4">
+                        <h6 class="mb-3">
+                            <i data-lucide="map-pin" class="icon-sm"></i>
+                            {{ address.receiver_name }}
+                            {% if address.is_default %}
+                                <span class="badge bg-primary">默认</span>
+                            {% endif %}
+                        </h6>
+                        <p class="text-muted mb-1">
+                            <i data-lucide="phone" class="icon-sm"></i> {{ address.phone }}
+                        </p>
+                        <p class="mb-0">
+                            {{ address.province }} {{ address.city }} {{ address.district }}<br>
+                            {{ address.address }}
+                        </p>
+                    </div>
+                    <form method="post">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-danger">
+                            <i data-lucide="trash-2" class="btn-icon-prepend"></i> 确认删除
+                        </button>
+                        <a href="{% url 'accounts:shipping_address_list' %}" class="btn btn-secondary">取消</a>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

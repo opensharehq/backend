@@ -34,13 +34,20 @@ class ShopItemAdmin(admin.ModelAdmin):
         "cost",
         "stock_display",
         "is_active",
+        "requires_shipping",
         "has_image",
         "display_tags",
         "redemption_count",
         "created_at",
         "updated_at",
     )
-    list_filter = ("is_active", "created_at", "updated_at", "allowed_tags")
+    list_filter = (
+        "is_active",
+        "requires_shipping",
+        "created_at",
+        "updated_at",
+        "allowed_tags",
+    )
     search_fields = ("name", "description")
     filter_horizontal = ("allowed_tags",)
     readonly_fields = ("created_at", "updated_at", "redemption_count")
@@ -58,7 +65,7 @@ class ShopItemAdmin(admin.ModelAdmin):
         (
             "库存和状态",
             {
-                "fields": ("stock", "is_active"),
+                "fields": ("stock", "is_active", "requires_shipping"),
             },
         ),
         (
@@ -126,6 +133,7 @@ class RedemptionAdmin(admin.ModelAdmin):
         "points_cost_at_redemption",
         "status_display",
         "has_transaction",
+        "has_shipping_address",
         "created_at",
     )
     list_filter = ("status", "created_at", "item")
@@ -133,8 +141,10 @@ class RedemptionAdmin(admin.ModelAdmin):
         "user_profile__username",
         "user_profile__email",
         "item__name",
+        "shipping_address__receiver_name",
+        "shipping_address__phone",
     )
-    readonly_fields = ("created_at", "transaction")
+    readonly_fields = ("created_at", "transaction", "shipping_address_display")
     ordering = ("-created_at",)
     date_hierarchy = "created_at"
 
@@ -148,6 +158,13 @@ class RedemptionAdmin(admin.ModelAdmin):
                     "points_cost_at_redemption",
                     "status",
                 ),
+            },
+        ),
+        (
+            "收货信息",
+            {
+                "fields": ("shipping_address", "shipping_address_display"),
+                "description": "如果商品需要线下发货，这里会显示用户选择的收货地址",
             },
         ),
         (
@@ -185,6 +202,32 @@ class RedemptionAdmin(admin.ModelAdmin):
     def has_transaction(self, obj):
         """Check if redemption has a transaction."""
         return obj.transaction is not None
+
+    @admin.display(boolean=True, description="有收货地址")
+    def has_shipping_address(self, obj):
+        """Check if redemption has a shipping address."""
+        return obj.shipping_address is not None
+
+    @admin.display(description="收货地址详情")
+    def shipping_address_display(self, obj):
+        """Display shipping address details."""
+        if not obj.shipping_address:
+            return format_html('<span style="color: gray;">无需发货</span>')
+
+        addr = obj.shipping_address
+        return format_html(
+            '<div style="line-height: 1.6;">'
+            "<strong>{}</strong> {}<br>"
+            "{} {} {}<br>"
+            "{}"
+            "</div>",
+            addr.receiver_name,
+            addr.phone,
+            addr.province,
+            addr.city,
+            addr.district,
+            addr.address,
+        )
 
     @admin.action(description="标记为已完成")
     def mark_as_completed(self, request, queryset):

@@ -414,14 +414,18 @@ class ProfileEditViewTests(TestCase):
             "blog_url": "",
             "twitter_url": "",
             "linkedin_url": "",
-            "work_experiences-TOTAL_FORMS": "1",
+            "work_experiences-TOTAL_FORMS": "0",
             "work_experiences-INITIAL_FORMS": "0",
             "work_experiences-MIN_NUM_FORMS": "0",
             "work_experiences-MAX_NUM_FORMS": "1000",
-            "educations-TOTAL_FORMS": "1",
+            "educations-TOTAL_FORMS": "0",
             "educations-INITIAL_FORMS": "0",
             "educations-MIN_NUM_FORMS": "0",
             "educations-MAX_NUM_FORMS": "1000",
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
         response = self.client.post(reverse("accounts:profile_edit"), data)
         self.assertRedirects(response, reverse("accounts:profile"))
@@ -453,14 +457,18 @@ class ProfileEditViewTests(TestCase):
             "blog_url": "",
             "twitter_url": "",
             "linkedin_url": "",
-            "work_experiences-TOTAL_FORMS": "1",
+            "work_experiences-TOTAL_FORMS": "0",
             "work_experiences-INITIAL_FORMS": "0",
             "work_experiences-MIN_NUM_FORMS": "0",
             "work_experiences-MAX_NUM_FORMS": "1000",
-            "educations-TOTAL_FORMS": "1",
+            "educations-TOTAL_FORMS": "0",
             "educations-INITIAL_FORMS": "0",
             "educations-MIN_NUM_FORMS": "0",
             "educations-MAX_NUM_FORMS": "1000",
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
         response = self.client.post(reverse("accounts:profile_edit"), data, follow=True)
         messages = list(response.context["messages"])
@@ -490,14 +498,18 @@ class ProfileEditViewTests(TestCase):
             "blog_url": "",
             "twitter_url": "",
             "linkedin_url": "",
-            "work_experiences-TOTAL_FORMS": "1",
+            "work_experiences-TOTAL_FORMS": "0",
             "work_experiences-INITIAL_FORMS": "0",
             "work_experiences-MIN_NUM_FORMS": "0",
             "work_experiences-MAX_NUM_FORMS": "1000",
-            "educations-TOTAL_FORMS": "1",
+            "educations-TOTAL_FORMS": "0",
             "educations-INITIAL_FORMS": "0",
             "educations-MIN_NUM_FORMS": "0",
             "educations-MAX_NUM_FORMS": "1000",
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
         response = self.client.post(reverse("accounts:profile_edit"), data, follow=True)
         messages = list(response.context["messages"])
@@ -545,10 +557,14 @@ class ProfileEditViewTests(TestCase):
             "work_experiences-0-start_date": "2020-01-01",
             "work_experiences-0-end_date": "2022-12-31",
             "work_experiences-0-description": "Test description",
-            "educations-TOTAL_FORMS": "1",
+            "educations-TOTAL_FORMS": "0",
             "educations-INITIAL_FORMS": "0",
             "educations-MIN_NUM_FORMS": "0",
             "educations-MAX_NUM_FORMS": "1000",
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
         self.client.post(reverse("accounts:profile_edit"), data, follow=True)
         assert WorkExperience.objects.count() == 1
@@ -574,7 +590,7 @@ class ProfileEditViewTests(TestCase):
             "blog_url": "",
             "twitter_url": "",
             "linkedin_url": "",
-            "work_experiences-TOTAL_FORMS": "1",
+            "work_experiences-TOTAL_FORMS": "0",
             "work_experiences-INITIAL_FORMS": "0",
             "work_experiences-MIN_NUM_FORMS": "0",
             "work_experiences-MAX_NUM_FORMS": "1000",
@@ -587,6 +603,10 @@ class ProfileEditViewTests(TestCase):
             "educations-0-field_of_study": "Computer Science",
             "educations-0-start_date": "2015-09-01",
             "educations-0-end_date": "2019-06-30",
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
         self.client.post(reverse("accounts:profile_edit"), data, follow=True)
         assert Education.objects.count() == 1
@@ -635,6 +655,10 @@ class ProfileEditViewTests(TestCase):
             "educations-INITIAL_FORMS": "0",
             "educations-MIN_NUM_FORMS": "0",
             "educations-MAX_NUM_FORMS": "1000",
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
         self.client.post(reverse("accounts:profile_edit"), data, follow=True)
         assert WorkExperience.objects.count() == 0
@@ -680,6 +704,10 @@ class ProfileEditViewTests(TestCase):
             "educations-0-end_date": "",
             "educations-0-degree": "",
             "educations-0-DELETE": "on",
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
         self.client.post(reverse("accounts:profile_edit"), data, follow=True)
         assert Education.objects.count() == 0
@@ -715,6 +743,10 @@ class ProfileEditViewTests(TestCase):
             "educations-INITIAL_FORMS": "0",
             "educations-MIN_NUM_FORMS": "0",
             "educations-MAX_NUM_FORMS": "1000",
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
         response = self.client.post(reverse("accounts:profile_edit"), data)
         assert response.status_code == 200

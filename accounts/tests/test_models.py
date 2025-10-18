@@ -9,6 +9,7 @@ from django.test import TestCase, override_settings
 from accounts.models import (
     TOTAL_POINTS_CACHE_KEY_TEMPLATE,
     Education,
+    ShippingAddress,
     UserProfile,
     WorkExperience,
 )
@@ -529,3 +530,191 @@ class EducationModelTests(TestCase):
         educations = self.profile.educations.all()
         assert educations[0] == edu2
         assert educations[1] == edu1
+
+
+class ShippingAddressModelTests(TestCase):
+    """Test cases for ShippingAddress model."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.user = get_user_model().objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="password123",
+        )
+
+    def test_create_shipping_address(self):
+        """Test creating a shipping address."""
+        address = ShippingAddress.objects.create(
+            user=self.user,
+            receiver_name="张三",
+            phone="13800138000",
+            province="北京",
+            city="北京市",
+            district="朝阳区",
+            address="某某街道123号",
+            is_default=True,
+        )
+
+        assert address.receiver_name == "张三"
+        assert address.phone == "13800138000"
+        assert address.province == "北京"
+        assert address.is_default is True
+
+    def test_shipping_address_str(self):
+        """Test shipping address string representation."""
+        address = ShippingAddress.objects.create(
+            user=self.user,
+            receiver_name="李四",
+            phone="13900139000",
+            province="上海",
+            city="上海市",
+            district="浦东新区",
+            address="陆家嘴环路1000号",
+            is_default=False,
+        )
+
+        expected = "李四 - 上海上海市浦东新区陆家嘴环路1000号"
+        assert str(address) == expected
+
+    def test_only_one_default_address_per_user(self):
+        """Test that only one address can be default per user."""
+        # Create first default address
+        address1 = ShippingAddress.objects.create(
+            user=self.user,
+            receiver_name="张三",
+            phone="13800138000",
+            province="北京",
+            city="北京市",
+            district="朝阳区",
+            address="地址1",
+            is_default=True,
+        )
+
+        # Create second default address
+        address2 = ShippingAddress.objects.create(
+            user=self.user,
+            receiver_name="李四",
+            phone="13900139000",
+            province="上海",
+            city="上海市",
+            district="浦东新区",
+            address="地址2",
+            is_default=True,
+        )
+
+        # Refresh address1 from database
+        address1.refresh_from_db()
+
+        # First address should no longer be default
+        assert address1.is_default is False
+        assert address2.is_default is True
+
+    def test_multiple_users_can_have_default_addresses(self):
+        """Test that different users can each have a default address."""
+        user2 = get_user_model().objects.create_user(
+            username="user2",
+            email="user2@example.com",
+            password="password123",
+        )
+
+        address1 = ShippingAddress.objects.create(
+            user=self.user,
+            receiver_name="张三",
+            phone="13800138000",
+            province="北京",
+            city="北京市",
+            district="朝阳区",
+            address="地址1",
+            is_default=True,
+        )
+
+        address2 = ShippingAddress.objects.create(
+            user=user2,
+            receiver_name="李四",
+            phone="13900139000",
+            province="上海",
+            city="上海市",
+            district="浦东新区",
+            address="地址2",
+            is_default=True,
+        )
+
+        # Both addresses should remain default
+        assert address1.is_default is True
+        assert address2.is_default is True
+
+    def test_updating_existing_default_address(self):
+        """Test updating an existing default address to remain default."""
+        address = ShippingAddress.objects.create(
+            user=self.user,
+            receiver_name="张三",
+            phone="13800138000",
+            province="北京",
+            city="北京市",
+            district="朝阳区",
+            address="旧地址",
+            is_default=True,
+        )
+
+        # Update the address
+        address.address = "新地址"
+        address.save()
+
+        # Should still be default
+        address.refresh_from_db()
+        assert address.is_default is True
+        assert address.address == "新地址"
+
+    def test_shipping_address_ordering(self):
+        """Test that addresses are ordered by is_default desc, then updated_at desc."""
+        # Create non-default address first
+        addr1 = ShippingAddress.objects.create(
+            user=self.user,
+            receiver_name="张三",
+            phone="13800138000",
+            province="北京",
+            city="北京市",
+            district="朝阳区",
+            address="地址1",
+            is_default=False,
+        )
+
+        # Create default address
+        addr2 = ShippingAddress.objects.create(
+            user=self.user,
+            receiver_name="李四",
+            phone="13900139000",
+            province="上海",
+            city="上海市",
+            district="浦东新区",
+            address="地址2",
+            is_default=True,
+        )
+
+        addresses = ShippingAddress.objects.filter(user=self.user)
+        # Default address should come first
+        assert addresses[0] == addr2
+        assert addresses[1] == addr1
+
+    def test_cascade_delete_on_user_deletion(self):
+        """Test that addresses are deleted when user is deleted."""
+        ShippingAddress.objects.create(
+            user=self.user,
+            receiver_name="张三",
+            phone="13800138000",
+            province="北京",
+            city="北京市",
+            district="朝阳区",
+            address="地址1",
+            is_default=True,
+        )
+
+        user_id = self.user.id
+        assert ShippingAddress.objects.filter(user_id=user_id).count() == 1
+
+        # Delete user
+        self.user.delete()
+
+        # Addresses should be cascade deleted
+        assert ShippingAddress.objects.filter(user_id=user_id).count() == 0

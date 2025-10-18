@@ -331,6 +331,148 @@
                         </div>
                     </div>
                 </div>
+                <!-- 收货地址卡片 -->
+                <div class="card mb-3" x-data="addressManager({{ address_formset.total_form_count }})">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="card-title mb-0">
+                                <i data-lucide="map-pin" class="icon-sm"></i> 收货地址
+                            </h6>
+                            <button type="button" class="btn btn-sm btn-primary btn-icon-text" @click="addForm()">
+                                <i data-lucide="plus-circle" class="btn-icon-prepend"></i> 添加收货地址
+                            </button>
+                        </div>
+                        {{ address_formset.management_form }}
+                        <template id="address-form-template">
+                            <div class="border rounded p-3 mb-3 formset-form">
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">收件人姓名</label>
+                                        <input type="text"
+                                               name="shipping_addresses-__prefix__-receiver_name"
+                                               class="form-control">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">联系电话</label>
+                                        <input type="text" name="shipping_addresses-__prefix__-phone" class="form-control">
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">省份</label>
+                                        <input type="text" name="shipping_addresses-__prefix__-province" class="form-control">
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">城市</label>
+                                        <input type="text" name="shipping_addresses-__prefix__-city" class="form-control">
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">区/县</label>
+                                        <input type="text" name="shipping_addresses-__prefix__-district" class="form-control">
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">详细地址</label>
+                                    <input type="text" name="shipping_addresses-__prefix__-address" class="form-control">
+                                </div>
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox"
+                                           name="shipping_addresses-__prefix__-is_default"
+                                           class="form-check-input"
+                                           id="id_shipping_addresses-__prefix__-is_default">
+                                    <label class="form-check-label" for="id_shipping_addresses-__prefix__-is_default">设为默认地址</label>
+                                </div>
+                                <input type="hidden" name="shipping_addresses-__prefix__-id">
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-danger btn-icon-text"
+                                        x-on:click="$el.closest('.formset-form').remove(); formCount--;">
+                                    <i data-lucide="trash-2" class="btn-icon-prepend"></i> 删除
+                                </button>
+                            </div>
+                        </template>
+                        <div id="address-formset">
+                            {% for addr_form in address_formset %}
+                                <div class="border rounded p-3 mb-3 formset-form">
+                                    {{ addr_form.id }}
+                                    {% if addr_form.non_field_errors %}
+                                        <div class="alert alert-danger" role="alert">{{ addr_form.non_field_errors.0 }}</div>
+                                    {% endif %}
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label for="{{ addr_form.receiver_name.id_for_label }}" class="form-label">
+                                                收件人姓名 {% if addr_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                            </label>
+                                            {{ addr_form.receiver_name }}
+                                            {% if addr_form.receiver_name.errors %}
+                                                <div class="invalid-feedback d-block">{{ addr_form.receiver_name.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label for="{{ addr_form.phone.id_for_label }}" class="form-label">
+                                                联系电话 {% if addr_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                            </label>
+                                            {{ addr_form.phone }}
+                                            {% if addr_form.phone.errors %}
+                                                <div class="invalid-feedback d-block">{{ addr_form.phone.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-4 mb-3">
+                                            <label for="{{ addr_form.province.id_for_label }}" class="form-label">
+                                                省份 {% if addr_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                            </label>
+                                            {{ addr_form.province }}
+                                            {% if addr_form.province.errors %}
+                                                <div class="invalid-feedback d-block">{{ addr_form.province.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                        <div class="col-md-4 mb-3">
+                                            <label for="{{ addr_form.city.id_for_label }}" class="form-label">
+                                                城市 {% if addr_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                            </label>
+                                            {{ addr_form.city }}
+                                            {% if addr_form.city.errors %}
+                                                <div class="invalid-feedback d-block">{{ addr_form.city.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                        <div class="col-md-4 mb-3">
+                                            <label for="{{ addr_form.district.id_for_label }}" class="form-label">
+                                                区/县 {% if addr_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                            </label>
+                                            {{ addr_form.district }}
+                                            {% if addr_form.district.errors %}
+                                                <div class="invalid-feedback d-block">{{ addr_form.district.errors.0 }}</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="{{ addr_form.address.id_for_label }}" class="form-label">
+                                            详细地址 {% if addr_form.instance.pk %}<span class="text-danger">*</span>{% endif %}
+                                        </label>
+                                        {{ addr_form.address }}
+                                        {% if addr_form.address.errors %}
+                                            <div class="invalid-feedback d-block">{{ addr_form.address.errors.0 }}</div>
+                                        {% endif %}
+                                    </div>
+                                    <div class="mb-3 form-check">
+                                        {{ addr_form.is_default }}
+                                        <label class="form-check-label" for="{{ addr_form.is_default.id_for_label }}">设为默认地址</label>
+                                        {% if addr_form.is_default.errors %}
+                                            <div class="invalid-feedback d-block">{{ addr_form.is_default.errors.0 }}</div>
+                                        {% endif %}
+                                    </div>
+                                    {% if addr_form.instance.pk %}
+                                        <div class="form-check">
+                                            {{ addr_form.DELETE }}
+                                            <label class="form-check-label text-danger" for="{{ addr_form.DELETE.id_for_label }}">删除此收货地址</label>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
                 <!-- 操作按钮 -->
                 <div class="d-flex justify-content-end gap-2">
                     <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary btn-icon-text">
@@ -376,6 +518,24 @@
                     formset.appendChild(newForm);
                     this.formCount++;
                     document.getElementById('id_educations-TOTAL_FORMS').value = this.formCount;
+                    if (window.lucide) {
+                        lucide.createIcons();
+                    }
+                }
+            }
+        }
+
+        function addressManager(initialCount) {
+            return {
+                formCount: initialCount,
+                addForm() {
+                    const formset = document.getElementById('address-formset');
+                    const template = document.getElementById('address-form-template');
+                    const newForm = template.content.cloneNode(true).querySelector('.formset-form');
+                    newForm.innerHTML = newForm.innerHTML.replace(/__prefix__/g, this.formCount);
+                    formset.appendChild(newForm);
+                    this.formCount++;
+                    document.getElementById('id_shipping_addresses-TOTAL_FORMS').value = this.formCount;
                     if (window.lucide) {
                         lucide.createIcons();
                     }

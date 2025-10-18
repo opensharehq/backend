@@ -119,6 +119,10 @@ class ProfileEditViewEdgeCaseTests(TestCase):
             "educations-INITIAL_FORMS": "0",
             "educations-MIN_NUM_FORMS": "0",
             "educations-MAX_NUM_FORMS": "1000",
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
         response = self.client.post(reverse("accounts:profile_edit"), data)
         assert response.status_code == 200
@@ -156,6 +160,10 @@ class ProfileEditViewEdgeCaseTests(TestCase):
             "educations-0-institution_name": "",  # Required field empty
             "educations-0-field_of_study": "CS",
             "educations-0-start_date": "2015-09-01",
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
         response = self.client.post(reverse("accounts:profile_edit"), data)
         assert response.status_code == 200
@@ -203,6 +211,10 @@ class ProfileEditViewEdgeCaseTests(TestCase):
             "educations-INITIAL_FORMS": "0",
             "educations-MIN_NUM_FORMS": "0",
             "educations-MAX_NUM_FORMS": "1000",
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
         response = self.client.post(reverse("accounts:profile_edit"), data, follow=True)
         messages = list(response.context["messages"])
@@ -253,6 +265,10 @@ class ProfileEditViewEdgeCaseTests(TestCase):
             "educations-0-start_date": "2015-09-01",
             "educations-0-end_date": "",
             "educations-0-degree": "",
+            "shipping_addresses-TOTAL_FORMS": "0",
+            "shipping_addresses-INITIAL_FORMS": "0",
+            "shipping_addresses-MIN_NUM_FORMS": "0",
+            "shipping_addresses-MAX_NUM_FORMS": "1000",
         }
         response = self.client.post(reverse("accounts:profile_edit"), data, follow=True)
         messages = list(response.context["messages"])

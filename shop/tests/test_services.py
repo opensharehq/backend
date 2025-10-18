@@ -443,3 +443,154 @@ class RedeemItemServiceTests(TestCase):
         # Stock should NOT have changed
         item.refresh_from_db()
         self.assertEqual(item.stock, initial_stock)
+
+    def test_redeem_item_requires_shipping_without_address(self):
+        """Test redeeming item that requires shipping without address fails."""
+        grant_points(
+            user_profile=self.user,
+            points=200,
+            description="Initial",
+            tag_names=["default"],
+        )
+
+        item = ShopItem.objects.create(
+            name="Physical Item",
+            description="Test",
+            cost=100,
+            requires_shipping=True,
+        )
+
+        # Should raise error when no shipping address provided
+        with self.assertRaisesMessage(RedemptionError, "此商品需要收货地址"):
+            redeem_item(user_profile=self.user, item_id=item.id)
+
+    def test_redeem_item_requires_shipping_with_invalid_address(self):
+        """Test redeeming with invalid shipping address ID fails."""
+        grant_points(
+            user_profile=self.user,
+            points=200,
+            description="Initial",
+            tag_names=["default"],
+        )
+
+        item = ShopItem.objects.create(
+            name="Physical Item",
+            description="Test",
+            cost=100,
+            requires_shipping=True,
+        )
+
+        # Should raise error with invalid address ID
+        with self.assertRaisesMessage(RedemptionError, "无效的收货地址"):
+            redeem_item(
+                user_profile=self.user,
+                item_id=item.id,
+                shipping_address_id=99999,
+            )
+
+    def test_redeem_item_requires_shipping_with_other_user_address(self):
+        """Test redeeming with another user's address fails."""
+        from accounts.models import ShippingAddress
+
+        grant_points(
+            user_profile=self.user,
+            points=200,
+            description="Initial",
+            tag_names=["default"],
+        )
+
+        # Create another user with an address
+        other_user = get_user_model().objects.create_user(
+            username="otheruser",
+            email="other@example.com",
+            password="password123",
+        )
+        other_address = ShippingAddress.objects.create(
+            user=other_user,
+            receiver_name="李四",
+            phone="13900139000",
+            province="上海",
+            city="上海市",
+            district="浦东新区",
+            address="地址1",
+            is_default=True,
+        )
+
+        item = ShopItem.objects.create(
+            name="Physical Item",
+            description="Test",
+            cost=100,
+            requires_shipping=True,
+        )
+
+        # Should raise error when using other user's address
+        with self.assertRaisesMessage(RedemptionError, "无效的收货地址"):
+            redeem_item(
+                user_profile=self.user,
+                item_id=item.id,
+                shipping_address_id=other_address.id,
+            )
+
+    def test_redeem_item_requires_shipping_success(self):
+        """Test successful redemption of item requiring shipping."""
+        from accounts.models import ShippingAddress
+
+        grant_points(
+            user_profile=self.user,
+            points=200,
+            description="Initial",
+            tag_names=["default"],
+        )
+
+        # Create shipping address
+        address = ShippingAddress.objects.create(
+            user=self.user,
+            receiver_name="张三",
+            phone="13800138000",
+            province="北京",
+            city="北京市",
+            district="朝阳区",
+            address="某某街道123号",
+            is_default=True,
+        )
+
+        item = ShopItem.objects.create(
+            name="Physical Item",
+            description="Test",
+            cost=100,
+            requires_shipping=True,
+        )
+
+        # Should succeed with valid address
+        redemption = redeem_item(
+            user_profile=self.user,
+            item_id=item.id,
+            shipping_address_id=address.id,
+        )
+
+        self.assertIsNotNone(redemption)
+        self.assertEqual(redemption.shipping_address, address)
+        self.assertEqual(self.user.total_points, 100)
+
+    def test_redeem_item_not_requiring_shipping(self):
+        """Test redeeming virtual item without shipping address."""
+        grant_points(
+            user_profile=self.user,
+            points=200,
+            description="Initial",
+            tag_names=["default"],
+        )
+
+        item = ShopItem.objects.create(
+            name="Virtual Item",
+            description="Test",
+            cost=100,
+            requires_shipping=False,
+        )
+
+        # Should succeed without shipping address
+        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+
+        self.assertIsNotNone(redemption)
+        self.assertIsNone(redemption.shipping_address)
+        self.assertEqual(self.user.total_points, 100)

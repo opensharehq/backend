@@ -192,3 +192,46 @@ class Education(models.Model):
         ordering = ["-start_date"]
         verbose_name = "学习经历"
         verbose_name_plural = verbose_name
+
+
+class ShippingAddress(models.Model):
+    """Shipping address model for users."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="shipping_addresses",
+        verbose_name="用户",
+    )
+    receiver_name = models.CharField(max_length=100, verbose_name="收件人姓名")
+    phone = models.CharField(max_length=20, verbose_name="联系电话")
+    province = models.CharField(max_length=50, verbose_name="省份")
+    city = models.CharField(max_length=50, verbose_name="城市")
+    district = models.CharField(max_length=50, verbose_name="区/县")
+    address = models.CharField(max_length=200, verbose_name="详细地址")
+    is_default = models.BooleanField(default=False, verbose_name="默认地址")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        """Meta configuration for ShippingAddress."""
+
+        ordering = ["-is_default", "-updated_at"]
+        verbose_name = "收货地址"
+        verbose_name_plural = verbose_name
+        indexes = [
+            models.Index(fields=["user", "is_default"]),
+        ]
+
+    def __str__(self):
+        """Return address string representation."""
+        return f"{self.receiver_name} - {self.province}{self.city}{self.district}{self.address}"
+
+    def save(self, *args, **kwargs):
+        """Override save to ensure only one default address per user."""
+        if self.is_default:
+            # 将该用户的其他地址设为非默认
+            ShippingAddress.objects.filter(user=self.user, is_default=True).exclude(
+                pk=self.pk
+            ).update(is_default=False)
+        super().save(*args, **kwargs)

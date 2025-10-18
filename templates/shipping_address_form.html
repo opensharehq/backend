@@ -1,0 +1,113 @@
+{% extends "horizontal_base.html" %}
+
+{% block title %}
+    {% if action == "edit" %}编辑收货地址{% else %}添加收货地址{% endif %}
+{% endblock title %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">
+                {% if action == "edit" %}编辑收货地址{% else %}添加收货地址{% endif %}
+            </h4>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap">
+            <a href="{% url 'accounts:shipping_address_list' %}"
+               class="btn btn-outline-secondary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12 col-xl-8">
+            <div class="card">
+                <div class="card-body">
+                    <form method="post" novalidate>
+                        {% csrf_token %}
+                        {% if form.non_field_errors %}
+                            <div class="alert alert-danger" role="alert">
+                                {{ form.non_field_errors.0 }}
+                            </div>
+                        {% endif %}
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.receiver_name.id_for_label }}" class="form-label">
+                                    收件人姓名 <span class="text-danger">*</span>
+                                </label>
+                                {{ form.receiver_name }}
+                                {% if form.receiver_name.errors %}
+                                    <div class="invalid-feedback d-block">{{ form.receiver_name.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="{{ form.phone.id_for_label }}" class="form-label">
+                                    联系电话 <span class="text-danger">*</span>
+                                </label>
+                                {{ form.phone }}
+                                {% if form.phone.errors %}
+                                    <div class="invalid-feedback d-block">{{ form.phone.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label for="{{ form.province.id_for_label }}" class="form-label">
+                                    省份 <span class="text-danger">*</span>
+                                </label>
+                                {{ form.province }}
+                                {% if form.province.errors %}
+                                    <div class="invalid-feedback d-block">{{ form.province.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label for="{{ form.city.id_for_label }}" class="form-label">
+                                    城市 <span class="text-danger">*</span>
+                                </label>
+                                {{ form.city }}
+                                {% if form.city.errors %}
+                                    <div class="invalid-feedback d-block">{{ form.city.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label for="{{ form.district.id_for_label }}" class="form-label">
+                                    区/县 <span class="text-danger">*</span>
+                                </label>
+                                {{ form.district }}
+                                {% if form.district.errors %}
+                                    <div class="invalid-feedback d-block">{{ form.district.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.address.id_for_label }}" class="form-label">
+                                详细地址 <span class="text-danger">*</span>
+                            </label>
+                            {{ form.address }}
+                            {% if form.address.errors %}
+                                <div class="invalid-feedback d-block">{{ form.address.errors.0 }}</div>
+                            {% endif %}
+                            <div class="form-text">例如：街道、门牌号、楼栋单元等</div>
+                        </div>
+                        <div class="mb-3 form-check">
+                            {{ form.is_default }}
+                            <label class="form-check-label" for="{{ form.is_default.id_for_label }}">
+                                设为默认地址
+                            </label>
+                            {% if form.is_default.errors %}
+                                <div class="invalid-feedback d-block">{{ form.is_default.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            {% if action == "edit" %}
+                                <i data-lucide="save" class="btn-icon-prepend"></i> 保存
+                            {% else %}
+                                <i data-lucide="plus" class="btn-icon-prepend"></i> 添加
+                            {% endif %}
+                        </button>
+                        <a href="{% url 'accounts:shipping_address_list' %}" class="btn btn-secondary">取消</a>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

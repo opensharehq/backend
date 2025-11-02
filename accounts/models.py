@@ -5,8 +5,12 @@ from django.core.cache import cache
 from django.db import models
 from django.db.models import Sum
 
-TOTAL_POINTS_CACHE_KEY_TEMPLATE = "accounts:user_total_points:{user_id}"
+TOTAL_POINTS_CACHE_KEY_TEMPLATE = "fullsite:accounts:user_total_points:{user_id}"
 TOTAL_POINTS_CACHE_TIMEOUT = 300
+WITHDRAWABLE_POINTS_CACHE_KEY_TEMPLATE = (
+    "fullsite:accounts:user_withdrawable_points:{user_id}"
+)
+WITHDRAWABLE_POINTS_CACHE_TIMEOUT = 300
 
 
 class UserQuerySet(models.QuerySet):
@@ -68,11 +72,20 @@ class User(AbstractUser):
         return total
 
     def clear_points_cache(self):
-        """Clear cached points value."""
-        cache_key = TOTAL_POINTS_CACHE_KEY_TEMPLATE.format(user_id=self.pk)
-        cache.delete(cache_key)
+        """Clear cached points values (total and withdrawable)."""
+        # Clear total points cache
+        total_cache_key = TOTAL_POINTS_CACHE_KEY_TEMPLATE.format(user_id=self.pk)
+        cache.delete(total_cache_key)
         if "total_points" in self.__dict__:
             del self.__dict__["total_points"]
+
+        # Clear withdrawable points cache
+        withdrawable_cache_key = WITHDRAWABLE_POINTS_CACHE_KEY_TEMPLATE.format(
+            user_id=self.pk
+        )
+        cache.delete(withdrawable_cache_key)
+        if "withdrawable_points" in self.__dict__:
+            del self.__dict__["withdrawable_points"]
 
     def get_points_by_tag(self):
         """
@@ -82,7 +95,10 @@ class User(AbstractUser):
 
         """
         tag_points = {}
-        for source in self.point_sources.filter(remaining_points__gt=0):
+        # Use prefetch_related to avoid N+1 queries
+        for source in self.point_sources.filter(
+            remaining_points__gt=0
+        ).prefetch_related("tags"):
             for tag in source.tags.all():
                 if tag.name not in tag_points:
                     tag_points[tag.name] = {
@@ -98,11 +114,22 @@ class User(AbstractUser):
 
     @property
     def withdrawable_points(self):
-        """Get total withdrawable points across all sources."""
+        """
+        Get total withdrawable points across all sources (cached).
+
+        Cache is automatically cleared when PointSource or PointTransaction is modified.
+        """
+        cache_key = WITHDRAWABLE_POINTS_CACHE_KEY_TEMPLATE.format(user_id=self.pk)
+        cached_total = cache.get(cache_key)
+        if cached_total is not None:
+            return cached_total
+
         total = 0
         for source in self.point_sources.filter(remaining_points__gt=0):
             if source.is_withdrawable:
                 total += source.remaining_points
+
+        cache.set(cache_key, total, WITHDRAWABLE_POINTS_CACHE_TIMEOUT)
         return total
 
 

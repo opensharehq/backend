@@ -30,7 +30,7 @@ class ShopRedemptionFlowTests(TestCase):
 
         # Grant user some points
         grant_points(
-            user_profile=self.user,
+            user=self.user,
             points=500,
             tag_names=[self.general_tag.name],
             description="初始积分",
@@ -52,7 +52,7 @@ class ShopRedemptionFlowTests(TestCase):
 
         # Redeem item
         redemption = redeem_item(
-            user_profile=self.user,
+            user=self.user,
             item_id=item.id,
         )
 
@@ -71,7 +71,7 @@ class ShopRedemptionFlowTests(TestCase):
 
         # Verify spend transaction was created
         spend_transaction = PointTransaction.objects.filter(
-            user_profile=self.user,
+            user=self.user,
             transaction_type="SPEND",
         ).first()
         self.assertIsNotNone(spend_transaction)
@@ -93,7 +93,7 @@ class ShopRedemptionFlowTests(TestCase):
         from points.services import InsufficientPointsError
 
         with self.assertRaises(InsufficientPointsError) as exc_info:
-            redeem_item(user_profile=self.user, item_id=item.id)
+            redeem_item(user=self.user, item_id=item.id)
 
         self.assertTrue(
             "积分不足" in str(exc_info.exception)
@@ -125,7 +125,7 @@ class ShopRedemptionFlowTests(TestCase):
         # User has 500 general (default) points but no event points
         # The service will use priority tag first, then fall back to default
         # Since user has enough default points, redemption succeeds
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         self.assertIsNotNone(redemption)
         self.assertEqual(redemption.points_cost_at_redemption, 50)
@@ -135,7 +135,7 @@ class ShopRedemptionFlowTests(TestCase):
 
         # Grant user some event points
         grant_points(
-            user_profile=self.user,
+            user=self.user,
             points=100,
             tag_names=[self.event_tag.name],
             description="活动奖励",
@@ -152,7 +152,7 @@ class ShopRedemptionFlowTests(TestCase):
         item2.allowed_tags.add(self.event_tag)
 
         # Now redemption will prefer event points
-        redemption2 = redeem_item(user_profile=self.user, item_id=item2.id)
+        redemption2 = redeem_item(user=self.user, item_id=item2.id)
 
         self.assertIsNotNone(redemption2)
         self.assertEqual(redemption2.points_cost_at_redemption, 60)
@@ -172,7 +172,7 @@ class ShopRedemptionFlowTests(TestCase):
         )
 
         with self.assertRaises(RedemptionError) as exc_info:
-            redeem_item(user_profile=self.user, item_id=item.id)
+            redeem_item(user=self.user, item_id=item.id)
 
         self.assertTrue(
             "库存不足" in str(exc_info.exception).lower()
@@ -195,7 +195,7 @@ class ShopRedemptionFlowTests(TestCase):
         )
 
         with self.assertRaises(RedemptionError) as exc_info:
-            redeem_item(user_profile=self.user, item_id=item.id)
+            redeem_item(user=self.user, item_id=item.id)
 
         self.assertTrue(
             "商品已下架" in str(exc_info.exception)
@@ -223,11 +223,11 @@ class ShopRedemptionFlowTests(TestCase):
         )
 
         # Redeem first item
-        redemption1 = redeem_item(user_profile=self.user, item_id=item1.id)
+        redemption1 = redeem_item(user=self.user, item_id=item1.id)
         self.assertEqual(self.user.total_points, 400)  # 500 - 100
 
         # Redeem second item
-        redemption2 = redeem_item(user_profile=self.user, item_id=item2.id)
+        redemption2 = redeem_item(user=self.user, item_id=item2.id)
         self.assertEqual(self.user.total_points, 250)  # 400 - 150
 
         # Verify both redemptions exist
@@ -256,7 +256,7 @@ class ShopViewFlowTests(TestCase):
             name="general", description="通用积分", is_default=True
         )
         grant_points(
-            user_profile=self.user,
+            user=self.user,
             points=500,
             tag_names=[tag.name],
             description="初始积分",

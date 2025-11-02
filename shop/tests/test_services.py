@@ -35,7 +35,7 @@ class RedeemItemServiceTests(TestCase):
         )
 
         # Redeem
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         self.assertEqual(redemption.user_profile, self.user)
         self.assertEqual(redemption.item, item)
@@ -63,7 +63,7 @@ class RedeemItemServiceTests(TestCase):
             name="Unlimited Item", description="Test", cost=100, stock=None
         )
 
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         self.assertIsNotNone(redemption)
         # Stock should remain None
@@ -73,7 +73,7 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_nonexistent(self):
         """Test redeeming non-existent item raises error."""
         with self.assertRaisesMessage(RedemptionError, "商品不存在"):
-            redeem_item(user_profile=self.user, item_id=99999)
+            redeem_item(user=self.user, item_id=99999)
 
     def test_redeem_item_inactive(self):
         """Test redeeming inactive item raises error."""
@@ -82,7 +82,7 @@ class RedeemItemServiceTests(TestCase):
         )
 
         with self.assertRaisesMessage(RedemptionError, "该商品已下架"):
-            redeem_item(user_profile=self.user, item_id=item.id)
+            redeem_item(user=self.user, item_id=item.id)
 
     def test_redeem_item_out_of_stock(self):
         """Test redeeming out of stock item raises error."""
@@ -91,7 +91,7 @@ class RedeemItemServiceTests(TestCase):
         )
 
         with self.assertRaisesMessage(RedemptionError, "该商品已售罄"):
-            redeem_item(user_profile=self.user, item_id=item.id)
+            redeem_item(user=self.user, item_id=item.id)
 
     def test_redeem_item_insufficient_points(self):
         """Test redeeming without enough points raises error."""
@@ -107,7 +107,7 @@ class RedeemItemServiceTests(TestCase):
         )
 
         with self.assertRaises(InsufficientPointsError):
-            redeem_item(user_profile=self.user, item_id=item.id)
+            redeem_item(user=self.user, item_id=item.id)
 
     def test_redeem_item_with_allowed_tags(self):
         """Test redeeming item with tag restrictions."""
@@ -127,7 +127,7 @@ class RedeemItemServiceTests(TestCase):
         item.allowed_tags.add(premium_tag)
 
         # Redeem
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         self.assertIsNotNone(redemption)
         self.assertEqual(self.user.total_points, 100)
@@ -158,7 +158,7 @@ class RedeemItemServiceTests(TestCase):
         item.allowed_tags.set([tag1, tag2])
 
         # Redeem - should use tag1 as priority
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         self.assertIsNotNone(redemption)
 
@@ -181,7 +181,7 @@ class RedeemItemServiceTests(TestCase):
 
         # Try to redeem - should fail
         with self.assertRaises(RedemptionError):
-            redeem_item(user_profile=self.user, item_id=item.id)
+            redeem_item(user=self.user, item_id=item.id)
 
         # Points should not have changed
         self.assertEqual(self.user.total_points, initial_points)
@@ -200,7 +200,7 @@ class RedeemItemServiceTests(TestCase):
 
         item = ShopItem.objects.create(name="Price Test", description="Test", cost=100)
 
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         # Record the cost
         original_cost = redemption.points_cost_at_redemption
@@ -229,7 +229,7 @@ class RedeemItemServiceTests(TestCase):
 
         initial_transaction_count = self.user.point_transactions.count()
 
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         # Should have one more transaction
         self.assertEqual(
@@ -256,7 +256,7 @@ class RedeemItemServiceTests(TestCase):
         )
 
         # Redeem item
-        redeem_item(user_profile=self.user, item_id=item.id)
+        redeem_item(user=self.user, item_id=item.id)
 
         # Get fresh copy from DB
         item_from_db = ShopItem.objects.get(id=item.id)
@@ -276,7 +276,7 @@ class RedeemItemServiceTests(TestCase):
         # Ensure allowed_tags is empty (no tags added)
 
         # Should succeed with any points (no tag restriction)
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         self.assertIsNotNone(redemption)
         self.assertEqual(redemption.status, Redemption.StatusChoices.COMPLETED)
@@ -295,7 +295,7 @@ class RedeemItemServiceTests(TestCase):
             name="特殊商品名称", description="Test", cost=100
         )
 
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         # Verify transaction description contains item name
         self.assertIn("兑换商品", redemption.transaction.description)
@@ -312,7 +312,7 @@ class RedeemItemServiceTests(TestCase):
 
         item = ShopItem.objects.create(name="Exact Cost", description="Test", cost=100)
 
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         self.assertIsNotNone(redemption)
         # User should have 0 points left
@@ -331,7 +331,7 @@ class RedeemItemServiceTests(TestCase):
             name="Last Item", description="Test", cost=50, stock=1
         )
 
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         self.assertIsNotNone(redemption)
 
@@ -348,7 +348,7 @@ class RedeemItemServiceTests(TestCase):
         )
 
         with self.assertRaisesMessage(RedemptionError, "该商品已售罄"):
-            redeem_item(user_profile=self.user, item_id=item.id)
+            redeem_item(user=self.user, item_id=item.id)
 
     def test_redeem_item_preserves_transaction_link(self):
         """Test that redemption properly links to the spend transaction."""
@@ -361,7 +361,7 @@ class RedeemItemServiceTests(TestCase):
 
         item = ShopItem.objects.create(name="Link Test", description="Test", cost=100)
 
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         # Verify bidirectional link
         self.assertIsNotNone(redemption.transaction)
@@ -388,7 +388,7 @@ class RedeemItemServiceTests(TestCase):
         item.allowed_tags.set([tag1, tag2, tag3])
 
         # Redeem - should work with prefetch optimization
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         self.assertIsNotNone(redemption)
 
@@ -414,7 +414,7 @@ class RedeemItemServiceTests(TestCase):
         item = ShopItem.objects.create(name="Open Item", description="Test", cost=100)
 
         # Should successfully use special tagged points for unrestricted item
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         self.assertIsNotNone(redemption)
         self.assertEqual(self.user.total_points, 50)
@@ -436,7 +436,7 @@ class RedeemItemServiceTests(TestCase):
 
         # Try to redeem with insufficient points
         try:
-            redeem_item(user_profile=self.user, item_id=item.id)
+            redeem_item(user=self.user, item_id=item.id)
         except InsufficientPointsError:
             pass
 
@@ -462,7 +462,7 @@ class RedeemItemServiceTests(TestCase):
 
         # Should raise error when no shipping address provided
         with self.assertRaisesMessage(RedemptionError, "此商品需要收货地址"):
-            redeem_item(user_profile=self.user, item_id=item.id)
+            redeem_item(user=self.user, item_id=item.id)
 
     def test_redeem_item_requires_shipping_with_invalid_address(self):
         """Test redeeming with invalid shipping address ID fails."""
@@ -483,7 +483,7 @@ class RedeemItemServiceTests(TestCase):
         # Should raise error with invalid address ID
         with self.assertRaisesMessage(RedemptionError, "无效的收货地址"):
             redeem_item(
-                user_profile=self.user,
+                user=self.user,
                 item_id=item.id,
                 shipping_address_id=99999,
             )
@@ -526,7 +526,7 @@ class RedeemItemServiceTests(TestCase):
         # Should raise error when using other user's address
         with self.assertRaisesMessage(RedemptionError, "无效的收货地址"):
             redeem_item(
-                user_profile=self.user,
+                user=self.user,
                 item_id=item.id,
                 shipping_address_id=other_address.id,
             )
@@ -563,7 +563,7 @@ class RedeemItemServiceTests(TestCase):
 
         # Should succeed with valid address
         redemption = redeem_item(
-            user_profile=self.user,
+            user=self.user,
             item_id=item.id,
             shipping_address_id=address.id,
         )
@@ -589,7 +589,7 @@ class RedeemItemServiceTests(TestCase):
         )
 
         # Should succeed without shipping address
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         self.assertIsNotNone(redemption)
         self.assertIsNone(redemption.shipping_address)

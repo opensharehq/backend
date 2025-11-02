@@ -7,7 +7,6 @@ from django.contrib.auth import get_user_model, login, logout, update_session_au
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import PermissionDenied
-from django.db.models import Sum
 from django.forms import inlineformset_factory
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -488,11 +487,8 @@ def shop_list_view(request):
     # Get all active items
     items = ShopItem.objects.filter(is_active=True).prefetch_related("allowed_tags")
 
-    # Get user's total available points
-    user_points = (
-        request.user.point_sources.aggregate(total=Sum("remaining_points"))["total"]
-        or 0
-    )
+    # Get user's total available points (uses cached value)
+    user_points = request.user.total_points
 
     return render(
         request,
@@ -549,7 +545,7 @@ def redeem_confirm_view(request, item_id):
 
         try:
             redemption = redeem_item(
-                user_profile=request.user,
+                user=request.user,
                 item_id=item_id,
                 shipping_address_id=shipping_address_id,
             )
@@ -566,10 +562,8 @@ def redeem_confirm_view(request, item_id):
             return redirect("accounts:shop_list")
 
     # GET request - show confirmation page
-    user_points = (
-        request.user.point_sources.aggregate(total=Sum("remaining_points"))["total"]
-        or 0
-    )
+    # Use cached total_points for better performance
+    user_points = request.user.total_points
 
     can_afford = user_points >= item.cost
     remaining_after_redeem = user_points - item.cost if can_afford else 0

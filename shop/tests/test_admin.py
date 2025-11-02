@@ -107,13 +107,13 @@ class RedemptionAdminTests(TestCase):
 
         # Grant points and redeem
         grant_points(
-            user_profile=self.user,
+            user=self.user,
             points=200,
             description="Test",
             tag_names=["default"],
         )
         redemption = redeem_item(
-            user_profile=self.user,
+            user=self.user,
             item_id=item.id,
             shipping_address_id=address.id,
         )
@@ -134,12 +134,12 @@ class RedemptionAdminTests(TestCase):
 
         # Grant points and redeem
         grant_points(
-            user_profile=self.user,
+            user=self.user,
             points=200,
             description="Test",
             tag_names=["default"],
         )
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         # Test display method
         result = self.admin.has_shipping_address(redemption)
@@ -167,13 +167,13 @@ class RedemptionAdminTests(TestCase):
 
         # Grant points and redeem
         grant_points(
-            user_profile=self.user,
+            user=self.user,
             points=200,
             description="Test",
             tag_names=["default"],
         )
         redemption = redeem_item(
-            user_profile=self.user,
+            user=self.user,
             item_id=item.id,
             shipping_address_id=address.id,
         )
@@ -200,12 +200,12 @@ class RedemptionAdminTests(TestCase):
 
         # Grant points and redeem
         grant_points(
-            user_profile=self.user,
+            user=self.user,
             points=200,
             description="Test",
             tag_names=["default"],
         )
-        redemption = redeem_item(user_profile=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)
 
         # Test display method
         result = self.admin.shipping_address_display(redemption)

@@ -250,3 +250,112 @@ class ShippingAddress(models.Model):
                 pk=self.pk
             ).update(is_default=False)
         super().save(*args, **kwargs)
+
+
+class Organization(models.Model):
+    """Organization model for teams and groups."""
+
+    name = models.CharField(max_length=200, verbose_name="组织名称")
+    slug = models.SlugField(max_length=200, unique=True, verbose_name="URL别名")
+    description = models.TextField(blank=True, verbose_name="组织描述")
+    avatar_url = models.URLField(max_length=500, blank=True, verbose_name="头像URL")
+    website = models.URLField(max_length=500, blank=True, verbose_name="网站")
+    location = models.CharField(max_length=200, blank=True, verbose_name="位置")
+
+    # OAuth provider information
+    provider = models.CharField(
+        max_length=50,
+        choices=[
+            ("github", "GitHub"),
+            ("gitee", "Gitee"),
+            ("huggingface", "HuggingFace"),
+            ("gitlab", "GitLab"),
+            ("bitbucket", "Bitbucket"),
+        ],
+        blank=True,
+        verbose_name="OAuth提供商",
+    )
+    provider_id = models.CharField(
+        max_length=100, blank=True, db_index=True, verbose_name="提供商组织ID"
+    )
+    provider_login = models.CharField(
+        max_length=200, blank=True, verbose_name="提供商组织登录名"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    members = models.ManyToManyField(
+        User,
+        through="OrganizationMembership",
+        related_name="organizations",
+        verbose_name="成员",
+    )
+
+    class Meta:
+        """Meta configuration for Organization."""
+
+        ordering = ["name"]
+        verbose_name = "组织"
+        verbose_name_plural = verbose_name
+        indexes = [
+            models.Index(fields=["provider", "provider_id"]),
+            models.Index(fields=["slug"]),
+        ]
+        unique_together = [["provider", "provider_id"]]
+
+    def __str__(self):
+        """Return organization string representation."""
+        return self.name
+
+
+class OrganizationMembership(models.Model):
+    """Organization membership model linking users to organizations."""
+
+    class Role(models.TextChoices):
+        """Organization member roles."""
+
+        OWNER = "owner", "所有者"
+        ADMIN = "admin", "管理员"
+        MEMBER = "member", "成员"
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="organization_memberships",
+        verbose_name="用户",
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="memberships",
+        verbose_name="组织",
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        default=Role.MEMBER,
+        verbose_name="角色",
+    )
+    joined_at = models.DateTimeField(auto_now_add=True, verbose_name="加入时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        """Meta configuration for OrganizationMembership."""
+
+        ordering = ["-joined_at"]
+        verbose_name = "组织成员"
+        verbose_name_plural = verbose_name
+        unique_together = [["user", "organization"]]
+        indexes = [
+            models.Index(fields=["user", "role"]),
+            models.Index(fields=["organization", "role"]),
+        ]
+
+    def __str__(self):
+        """Return membership string representation."""
+        return f"{self.user.username} - {self.organization.name} ({self.get_role_display()})"
+
+    def is_admin_or_owner(self):
+        """Check if the member has admin or owner privileges."""
+        return self.role in [self.Role.OWNER, self.Role.ADMIN]

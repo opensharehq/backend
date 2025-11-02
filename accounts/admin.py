@@ -3,7 +3,15 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import Education, ShippingAddress, User, UserProfile, WorkExperience
+from .models import (
+    Education,
+    Organization,
+    OrganizationMembership,
+    ShippingAddress,
+    User,
+    UserProfile,
+    WorkExperience,
+)
 
 
 class WorkExperienceInline(admin.TabularInline):
@@ -200,6 +208,107 @@ class ShippingAddressAdmin(admin.ModelAdmin):
             "设置",
             {
                 "fields": ("is_default", "created_at", "updated_at"),
+            },
+        ),
+    )
+
+
+class OrganizationMembershipInline(admin.TabularInline):
+    """Inline admin for organization membership."""
+
+    model = OrganizationMembership
+    extra = 0
+    fields = ("user", "role", "joined_at")
+    readonly_fields = ("joined_at",)
+    autocomplete_fields = ["user"]
+
+
+@admin.register(Organization)
+class OrganizationAdmin(admin.ModelAdmin):
+    """Admin for Organization model."""
+
+    list_display = (
+        "name",
+        "slug",
+        "provider",
+        "provider_login",
+        "member_count",
+        "created_at",
+    )
+    list_filter = ("provider", "created_at")
+    search_fields = ("name", "slug", "provider_login", "description")
+    readonly_fields = ("created_at", "updated_at")
+    ordering = ("-created_at",)
+    date_hierarchy = "created_at"
+    inlines = [OrganizationMembershipInline]
+    prepopulated_fields = {"slug": ("name",)}
+
+    fieldsets = (
+        (
+            "基本信息",
+            {
+                "fields": ("name", "slug", "description", "avatar_url"),
+            },
+        ),
+        (
+            "联系信息",
+            {
+                "fields": ("website", "location"),
+            },
+        ),
+        (
+            "OAuth提供商信息",
+            {
+                "fields": ("provider", "provider_id", "provider_login"),
+            },
+        ),
+        (
+            "时间信息",
+            {
+                "fields": ("created_at", "updated_at"),
+            },
+        ),
+    )
+
+    @admin.display(description="成员数量")
+    def member_count(self, obj):
+        """Display count of organization members."""
+        return obj.memberships.count()
+
+
+@admin.register(OrganizationMembership)
+class OrganizationMembershipAdmin(admin.ModelAdmin):
+    """Admin for OrganizationMembership model."""
+
+    list_display = (
+        "user",
+        "organization",
+        "role",
+        "joined_at",
+    )
+    list_filter = ("role", "joined_at", "organization")
+    search_fields = (
+        "user__username",
+        "user__email",
+        "organization__name",
+        "organization__slug",
+    )
+    readonly_fields = ("joined_at", "updated_at")
+    ordering = ("-joined_at",)
+    date_hierarchy = "joined_at"
+    autocomplete_fields = ["user", "organization"]
+
+    fieldsets = (
+        (
+            "成员信息",
+            {
+                "fields": ("user", "organization", "role"),
+            },
+        ),
+        (
+            "时间信息",
+            {
+                "fields": ("joined_at", "updated_at"),
             },
         ),
     )

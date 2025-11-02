@@ -1,0 +1,163 @@
+{% extends "horizontal_base.html" %}
+{% load static %}
+
+{% block title %}{{ organization.name }} - 成员管理{% endblock title %}
+
+{% block extra_css %}
+    <style>
+        .user-avatar-sm {
+            width: 32px;
+            height: 32px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .th-actions {
+            width: 200px;
+        }
+        .form-inline {
+            display: inline;
+        }
+    </style>
+{% endblock extra_css %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">成员管理</h4>
+            <p class="text-muted">管理 {{ organization.name }} 的成员和角色</p>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap">
+            <a href="{% url 'accounts:organization_detail' organization.slug %}" class="btn btn-outline-secondary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回详情
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12 grid-margin stretch-card">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title mb-4">
+                        <i data-lucide="users" class="icon-sm"></i> 成员列表 ({{ memberships.count }})
+                    </h6>
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>成员</th>
+                                    <th>角色</th>
+                                    <th>加入时间</th>
+                                    <th class="th-actions">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for membership in memberships %}
+                                    <tr>
+                                        <td>
+                                            <div class="d-flex align-items-center">
+                                                <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-2 user-avatar-sm">
+                                                    {{ membership.user.username|slice:":1"|upper }}
+                                                </div>
+                                                <div>
+                                                    <div>{{ membership.user.username }}</div>
+                                                    {% if membership.user.email %}
+                                                        <small class="text-muted">{{ membership.user.email }}</small>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="badge {% if membership.role == 'owner' %}bg-danger{% elif membership.role == 'admin' %}bg-warning{% else %}bg-primary{% endif %}">
+                                                {{ membership.get_role_display }}
+                                            </span>
+                                        </td>
+                                        <td>{{ membership.joined_at|date:"Y-m-d H:i" }}</td>
+                                        <td>
+                                            {% if membership.user != request.user %}
+                                                <div class="d-flex gap-2">
+                                                    <!-- Role Update Dropdown -->
+                                                    <div class="dropdown">
+                                                        <button class="btn btn-sm btn-outline-primary dropdown-toggle"
+                                                                type="button"
+                                                                id="roleDropdown{{ membership.id }}"
+                                                                data-bs-toggle="dropdown"
+                                                                aria-expanded="false"
+                                                                {% if membership.role == 'owner' and owner_count == 1 %}disabled{% endif %}>
+                                                            <i data-lucide="user-cog" class="icon-xs"></i> 更改角色
+                                                        </button>
+                                                        <ul class="dropdown-menu" aria-labelledby="roleDropdown{{ membership.id }}">
+                                                            {% if membership.role != 'owner' %}
+                                                                <li>
+                                                                    <form method="post"
+                                                                          action="{% url 'accounts:organization_member_update_role' organization.slug membership.id %}"
+                                                                          class="form-inline">
+                                                                        {% csrf_token %}
+                                                                        <input type="hidden" name="role" value="owner" />
+                                                                        <button type="submit" class="dropdown-item">
+                                                                            <i data-lucide="crown" class="icon-xs"></i> 设为所有者
+                                                                        </button>
+                                                                    </form>
+                                                                </li>
+                                                            {% endif %}
+                                                            {% if membership.role != 'admin' %}
+                                                                <li>
+                                                                    <form method="post"
+                                                                          action="{% url 'accounts:organization_member_update_role' organization.slug membership.id %}"
+                                                                          class="form-inline">
+                                                                        {% csrf_token %}
+                                                                        <input type="hidden" name="role" value="admin" />
+                                                                        <button type="submit" class="dropdown-item">
+                                                                            <i data-lucide="shield" class="icon-xs"></i> 设为管理员
+                                                                        </button>
+                                                                    </form>
+                                                                </li>
+                                                            {% endif %}
+                                                            {% if membership.role != 'member' %}
+                                                                <li>
+                                                                    <form method="post"
+                                                                          action="{% url 'accounts:organization_member_update_role' organization.slug membership.id %}"
+                                                                          class="form-inline">
+                                                                        {% csrf_token %}
+                                                                        <input type="hidden" name="role" value="member" />
+                                                                        <button type="submit"
+                                                                                class="dropdown-item"
+                                                                                {% if membership.role == 'owner' and owner_count == 1 %}disabled{% endif %}>
+                                                                            <i data-lucide="user" class="icon-xs"></i> 设为普通成员
+                                                                        </button>
+                                                                    </form>
+                                                                </li>
+                                                            {% endif %}
+                                                        </ul>
+                                                    </div>
+                                                    <!-- Remove Button -->
+                                                    <form method="post"
+                                                          action="{% url 'accounts:organization_member_remove' organization.slug membership.id %}"
+                                                          onsubmit="return confirm('确定要移除 {{ membership.user.username }} 吗？');"
+                                                          class="form-inline">
+                                                        {% csrf_token %}
+                                                        <button type="submit"
+                                                                class="btn btn-sm btn-outline-danger"
+                                                                {% if membership.role == 'owner' and owner_count == 1 %}disabled{% endif %}>
+                                                            <i data-lucide="user-minus" class="icon-xs"></i> 移除
+                                                        </button>
+                                                    </form>
+                                                </div>
+                                            {% else %}
+                                                <span class="text-muted">（当前用户）</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% if owner_count == 1 %}
+                        <div class="alert alert-info mt-3" role="alert">
+                            <i data-lucide="info" class="icon-sm"></i>
+                            注意：组织必须至少有一个所有者，因此最后一个所有者无法被降级或移除。
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

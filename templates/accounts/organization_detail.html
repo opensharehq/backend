@@ -1,0 +1,167 @@
+{% extends "horizontal_base.html" %}
+{% load static %}
+
+{% block title %}{{ organization.name }}{% endblock title %}
+
+{% block extra_css %}
+    <style>
+        .org-avatar-lg {
+            width: 120px;
+            height: 120px;
+            object-fit: cover;
+        }
+        .org-avatar-placeholder-lg {
+            width: 120px;
+            height: 120px;
+            font-size: 48px;
+            font-weight: bold;
+        }
+        .user-avatar-sm {
+            width: 32px;
+            height: 32px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+    </style>
+{% endblock extra_css %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">{{ organization.name }}</h4>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap gap-2">
+            {% if is_admin %}
+                <a href="{% url 'accounts:organization_members' organization.slug %}" class="btn btn-primary btn-icon-text mb-2 mb-md-0">
+                    <i data-lucide="users" class="btn-icon-prepend"></i> 成员管理
+                </a>
+                <a href="{% url 'accounts:organization_settings' organization.slug %}" class="btn btn-outline-primary btn-icon-text mb-2 mb-md-0">
+                    <i data-lucide="settings" class="btn-icon-prepend"></i> 组织设置
+                </a>
+            {% endif %}
+            <a href="{% url 'accounts:organization_list' %}" class="btn btn-outline-secondary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回列表
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <!-- Organization Info Card -->
+        <div class="col-12 col-lg-4 grid-margin stretch-card">
+            <div class="card">
+                <div class="card-body">
+                    <div class="text-center mb-4">
+                        {% if organization.avatar_url %}
+                            <img src="{{ organization.avatar_url }}"
+                                 alt="{{ organization.name }}"
+                                 class="rounded mb-3 org-avatar-lg"
+                                 width="120"
+                                 height="120" />
+                        {% else %}
+                            <div class="rounded bg-primary text-white d-flex align-items-center justify-content-center mx-auto mb-3 org-avatar-placeholder-lg">
+                                {{ organization.name|slice:":1"|upper }}
+                            </div>
+                        {% endif %}
+                        <h5 class="mb-1">{{ organization.name }}</h5>
+                        <p class="text-muted mb-0">
+                            <i data-lucide="at-sign" class="icon-xs"></i> {{ organization.slug }}
+                        </p>
+                    </div>
+                    {% if organization.description %}
+                        <div class="mb-3">
+                            <h6 class="mb-2">
+                                <i data-lucide="file-text" class="icon-sm"></i> 简介
+                            </h6>
+                            <p class="text-muted">{{ organization.description }}</p>
+                        </div>
+                    {% endif %}
+                    <div class="mb-3">
+                        <h6 class="mb-2">
+                            <i data-lucide="info" class="icon-sm"></i> 基本信息
+                        </h6>
+                        <div class="d-flex flex-column gap-2">
+                            <div>
+                                <small class="text-muted">OAuth 提供商</small>
+                                <div>
+                                    <span class="badge bg-info">
+                                        <i data-lucide="git-branch" class="icon-xs"></i> {{ organization.get_provider_display }}
+                                    </span>
+                                </div>
+                            </div>
+                            <div>
+                                <small class="text-muted">登录名</small>
+                                <div>{{ organization.provider_login }}</div>
+                            </div>
+                            {% if organization.location %}
+                                <div>
+                                    <small class="text-muted">位置</small>
+                                    <div>
+                                        <i data-lucide="map-pin" class="icon-xs"></i> {{ organization.location }}
+                                    </div>
+                                </div>
+                            {% endif %}
+                            {% if organization.website %}
+                                <div>
+                                    <small class="text-muted">网站</small>
+                                    <div>
+                                        <i data-lucide="link" class="icon-xs"></i>
+                                        <a href="{{ organization.website }}" target="_blank" class="text-decoration-none">{{ organization.website }}</a>
+                                    </div>
+                                </div>
+                            {% endif %}
+                            <div>
+                                <small class="text-muted">创建时间</small>
+                                <div>{{ organization.created_at|date:"Y-m-d H:i" }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Members List -->
+        <div class="col-12 col-lg-8 grid-margin stretch-card">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i data-lucide="users" class="icon-sm"></i> 成员列表 ({{ memberships.count }})
+                    </h6>
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>成员</th>
+                                    <th>角色</th>
+                                    <th>加入时间</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for membership in memberships %}
+                                    <tr>
+                                        <td>
+                                            <div class="d-flex align-items-center">
+                                                <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-2 user-avatar-sm">
+                                                    {{ membership.user.username|slice:":1"|upper }}
+                                                </div>
+                                                <div>
+                                                    <div>{{ membership.user.username }}</div>
+                                                    {% if membership.user.email %}
+                                                        <small class="text-muted">{{ membership.user.email }}</small>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="badge {% if membership.role == 'owner' %}bg-danger{% elif membership.role == 'admin' %}bg-warning{% else %}bg-primary{% endif %}">
+                                                {{ membership.get_role_display }}
+                                            </span>
+                                        </td>
+                                        <td>{{ membership.joined_at|date:"Y-m-d" }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

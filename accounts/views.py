@@ -1,12 +1,16 @@
 """Views for user authentication and profile management."""
 
+from urllib.parse import urlencode
+
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.tokens import default_token_generator
+from django.core.exceptions import PermissionDenied
 from django.db.models import Sum
 from django.forms import inlineformset_factory
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from social_django.models import UserSocialAuth
@@ -26,7 +30,14 @@ from .forms import (
     SignUpForm,
     WorkExperienceForm,
 )
-from .models import Education, ShippingAddress, UserProfile, WorkExperience
+from .models import (
+    Education,
+    Organization,
+    OrganizationMembership,
+    ShippingAddress,
+    UserProfile,
+    WorkExperience,
+)
 from .tasks import send_password_reset_email
 
 
@@ -712,3 +723,391 @@ def shipping_address_set_default_view(request, address_id):
         messages.success(request, "已设置为默认地址")
 
     return redirect("accounts:shipping_address_list")
+
+
+# Organization views
+
+
+@login_required
+def organization_list(request):
+    """
+    Display list of organizations the user is a member of.
+
+    Args:
+        request: HTTP request
+
+    """
+    # Get user's organizations with their memberships
+    memberships = (
+        OrganizationMembership.objects.filter(user=request.user)
+        .select_related("organization")
+        .order_by("-joined_at")
+    )
+
+    # Build organizations list with membership info
+    organizations = []
+    for membership in memberships:
+        org = membership.organization
+        # Attach membership info for easy template access
+        org.user_membership = membership
+        organizations.append(org)
+
+    # Get user's connected social accounts that support organization sync
+    social_accounts = UserSocialAuth.objects.filter(
+        user=request.user, provider__in=["github", "gitee", "huggingface"]
+    ).values_list("provider", flat=True)
+
+    context = {
+        "organizations": organizations,
+        "social_accounts": list(social_accounts),
+    }
+
+    return render(request, "accounts/organization_list.html", context)
+
+
+@login_required
+def organization_sync(request, provider):
+    """
+    Trigger organization sync with OAuth re-authorization.
+
+    This view forces a fresh OAuth authorization to ensure users can grant
+    organization access permissions. For GitHub, this will show the organization
+    authorization screen where users can grant access to their organizations.
+
+    Args:
+        request: HTTP request
+        provider: OAuth provider name (github, gitee, huggingface)
+
+    """
+    # Validate provider
+    if provider not in ["github", "gitee", "huggingface"]:
+        messages.error(request, "不支持的 OAuth 提供商。")
+        return redirect("accounts:organization_list")
+
+    # Check if user has connected this provider
+    social = UserSocialAuth.objects.filter(user=request.user, provider=provider).first()
+    if not social:
+        messages.error(request, f"您还未连接 {provider.title()} 账号。")
+        return redirect("accounts:social_connections")
+
+    # Store sync flag in session
+    request.session["is_organization_sync"] = True
+    request.session.modified = True
+
+    # Build OAuth URL with parameters
+
+    # Get the OAuth begin URL
+    oauth_url = reverse("social:begin", args=[provider])
+
+    # Add parameters to control OAuth flow
+    params = {
+        "next": reverse("accounts:organization_list"),
+    }
+
+    # For GitHub, disconnect and reconnect to force fresh authorization
+    # This ensures the organization authorization screen is shown
+    if provider == "github":
+        # GitHub requires users to manually authorize organization access
+        # on their first authorization or when reconnecting
+        messages.info(
+            request,
+            "即将重定向到 GitHub 授权页面。请在授权页面中点击「Organization access」部分的「Grant」或「Request」按钮，以授权访问您的组织数据。",
+        )
+
+    # Redirect to OAuth with parameters
+    oauth_url = f"{oauth_url}?{urlencode(params)}"
+
+    return redirect(oauth_url)
+
+
+@login_required
+def organization_detail(request, slug):
+    """
+    Display organization details.
+
+    Args:
+        request: HTTP request
+        slug: Organization slug
+
+    """
+    organization = get_object_or_404(Organization, slug=slug)
+
+    # Check if user is a member
+    try:
+        membership = OrganizationMembership.objects.get(
+            user=request.user, organization=organization
+        )
+    except OrganizationMembership.DoesNotExist:
+        msg = "您不是该组织的成员。"
+        raise PermissionDenied(msg) from None
+
+    # Get all memberships
+    memberships = (
+        OrganizationMembership.objects.filter(organization=organization)
+        .select_related("user")
+        .order_by("-role", "joined_at")
+    )
+
+    context = {
+        "organization": organization,
+        "membership": membership,
+        "memberships": memberships,
+        "is_admin": membership.is_admin_or_owner(),
+    }
+
+    return render(request, "accounts/organization_detail.html", context)
+
+
+@login_required
+def organization_settings(request, slug):
+    """
+    Display and handle organization settings (admin only).
+
+    Args:
+        request: HTTP request
+        slug: Organization slug
+
+    """
+    organization = get_object_or_404(Organization, slug=slug)
+
+    # Check if user is admin/owner
+    try:
+        membership = OrganizationMembership.objects.get(
+            user=request.user, organization=organization
+        )
+    except OrganizationMembership.DoesNotExist:
+        msg = "您不是该组织的成员。"
+        raise PermissionDenied(msg) from None
+
+    if not membership.is_admin_or_owner():
+        msg = "您没有权限访问该页面。"
+        raise PermissionDenied(msg)
+
+    form_data = None
+    if request.method == "POST":
+        # Create a dict with form data for validation
+        form_data = {
+            "name": request.POST.get("name", "").strip(),
+            "slug": request.POST.get("slug", "").strip(),
+            "description": request.POST.get("description", "").strip(),
+            "avatar_url": request.POST.get("avatar_url", "").strip(),
+            "website": request.POST.get("website", "").strip(),
+            "location": request.POST.get("location", "").strip(),
+        }
+
+        # Validate required fields
+        errors = {}
+        if not form_data["name"]:
+            errors["name"] = "组织名称不能为空。"
+        if not form_data["slug"]:
+            errors["slug"] = "URL 别名不能为空。"
+
+        # Check slug uniqueness
+        if form_data["slug"]:
+            existing = (
+                Organization.objects.filter(slug=form_data["slug"])
+                .exclude(id=organization.id)
+                .first()
+            )
+            if existing:
+                errors["slug"] = "URL 别名已存在。"
+
+        if not errors:
+            # Update organization settings
+            organization.name = form_data["name"]
+            organization.slug = form_data["slug"]
+            organization.description = form_data["description"]
+            organization.avatar_url = form_data["avatar_url"]
+            organization.website = form_data["website"]
+            organization.location = form_data["location"]
+            organization.save()
+
+            messages.success(request, "组织设置已更新。")
+            return redirect("accounts:organization_settings", slug=organization.slug)
+        else:
+            # Pass errors to template
+            form_data["errors"] = errors
+
+    # Prepare form data for GET request or failed POST
+    if not form_data:
+        form_data = {
+            "name": organization.name,
+            "slug": organization.slug,
+            "description": organization.description or "",
+            "avatar_url": organization.avatar_url or "",
+            "website": organization.website or "",
+            "location": organization.location or "",
+        }
+
+    context = {
+        "organization": organization,
+        "membership": membership,
+        "form": type(
+            "obj", (object,), form_data
+        ),  # Create a simple object with form data
+    }
+
+    return render(request, "accounts/organization_settings.html", context)
+
+
+@login_required
+def organization_members(request, slug):
+    """
+    Display and manage organization members (admin only).
+
+    Args:
+        request: HTTP request
+        slug: Organization slug
+
+    """
+    organization = get_object_or_404(Organization, slug=slug)
+
+    # Check if user is admin/owner
+    try:
+        membership = OrganizationMembership.objects.get(
+            user=request.user, organization=organization
+        )
+    except OrganizationMembership.DoesNotExist:
+        msg = "您不是该组织的成员。"
+        raise PermissionDenied(msg) from None
+
+    if not membership.is_admin_or_owner():
+        msg = "您没有权限访问该页面。"
+        raise PermissionDenied(msg)
+
+    # Get all memberships
+    memberships = (
+        OrganizationMembership.objects.filter(organization=organization)
+        .select_related("user")
+        .order_by("-role", "joined_at")
+    )
+
+    # Count owners
+    owner_count = memberships.filter(role=OrganizationMembership.Role.OWNER).count()
+
+    context = {
+        "organization": organization,
+        "membership": membership,
+        "memberships": memberships,
+        "owner_count": owner_count,
+    }
+
+    return render(request, "accounts/organization_members.html", context)
+
+
+@login_required
+def organization_member_update_role(request, slug, member_id):
+    """
+    Update a member's role (admin only).
+
+    Args:
+        request: HTTP request
+        slug: Organization slug
+        member_id: OrganizationMembership ID
+
+    """
+    organization = get_object_or_404(Organization, slug=slug)
+
+    # Check if user is admin/owner
+    try:
+        user_membership = OrganizationMembership.objects.get(
+            user=request.user, organization=organization
+        )
+    except OrganizationMembership.DoesNotExist:
+        msg = "您不是该组织的成员。"
+        raise PermissionDenied(msg) from None
+
+    if not user_membership.is_admin_or_owner():
+        msg = "您没有权限执行该操作。"
+        raise PermissionDenied(msg)
+
+    if request.method != "POST":
+        return redirect("accounts:organization_members", slug=slug)
+
+    # Get the member to update
+    member = get_object_or_404(
+        OrganizationMembership, id=member_id, organization=organization
+    )
+
+    # Get new role
+    new_role = request.POST.get("role")
+    if new_role not in dict(OrganizationMembership.Role.choices):
+        messages.error(request, "无效的角色。")
+        return redirect("accounts:organization_members", slug=slug)
+
+    # Check if demoting the last owner
+    if (
+        member.role == OrganizationMembership.Role.OWNER
+        and new_role != OrganizationMembership.Role.OWNER
+    ):
+        owner_count = OrganizationMembership.objects.filter(
+            organization=organization, role=OrganizationMembership.Role.OWNER
+        ).count()
+        if owner_count <= 1:
+            messages.error(request, "无法降级该所有者，组织必须至少有一个所有者。")
+            return redirect("accounts:organization_members", slug=slug)
+
+    # Update role
+    member.role = new_role
+    member.save()
+    messages.success(
+        request,
+        f"已将 {member.user.username} 的角色更新为{member.get_role_display()}。",
+    )
+
+    return redirect("accounts:organization_members", slug=slug)
+
+
+@login_required
+def organization_member_remove(request, slug, member_id):
+    """
+    Remove a member from organization (admin only).
+
+    Args:
+        request: HTTP request
+        slug: Organization slug
+        member_id: OrganizationMembership ID
+
+    """
+    organization = get_object_or_404(Organization, slug=slug)
+
+    # Check if user is admin/owner
+    try:
+        user_membership = OrganizationMembership.objects.get(
+            user=request.user, organization=organization
+        )
+    except OrganizationMembership.DoesNotExist:
+        msg = "您不是该组织的成员。"
+        raise PermissionDenied(msg) from None
+
+    if not user_membership.is_admin_or_owner():
+        msg = "您没有权限执行该操作。"
+        raise PermissionDenied(msg)
+
+    if request.method != "POST":
+        return redirect("accounts:organization_members", slug=slug)
+
+    # Get the member to remove
+    member = get_object_or_404(
+        OrganizationMembership, id=member_id, organization=organization
+    )
+
+    # Prevent removing the last owner
+    if member.role == OrganizationMembership.Role.OWNER:
+        owner_count = OrganizationMembership.objects.filter(
+            organization=organization, role=OrganizationMembership.Role.OWNER
+        ).count()
+        if owner_count <= 1:
+            messages.error(request, "无法移除该所有者，组织必须至少有一个所有者。")
+            return redirect("accounts:organization_members", slug=slug)
+
+    username = member.user.username
+    is_self_removal = member.user == request.user
+    member.delete()
+    messages.success(request, f"已将 {username} 从组织中移除。")
+
+    # If user removed themselves, redirect to organization list
+    if is_self_removal:
+        return redirect("accounts:organization_list")
+
+    return redirect("accounts:organization_members", slug=slug)

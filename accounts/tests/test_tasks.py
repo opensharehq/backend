@@ -467,3 +467,150 @@ class TestPasswordResetEmailTask(TestCase):
                 self.assertTrue("+" not in uid or "-" in uid)
                 self.assertTrue("/" not in uid or "_" in uid)
                 break
+
+
+class SyncOrganizationsTaskTests(TestCase):
+    """Test cases for sync user organizations task."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.user = User.objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+
+    @patch("accounts.pipeline._fetch_github_orgs")
+    def test_sync_user_organizations_github(self, mock_fetch):
+        """Test that organization sync task works for GitHub."""
+        from social_django.models import UserSocialAuth
+
+        from accounts.models import Organization, OrganizationMembership
+        from accounts.tasks import sync_user_organizations
+
+        # Create social auth
+        UserSocialAuth.objects.create(
+            user=self.user,
+            provider="github",
+            uid="123456",
+            extra_data={"access_token": "test-token"},
+        )
+
+        # Mock GitHub API response
+        mock_fetch.return_value = [
+            {
+                "id": "org123",
+                "name": "Test Org",
+                "slug": "test-org",
+                "description": "A test organization",
+                "avatar_url": "https://example.com/avatar.png",
+                "website": "https://example.com",
+                "location": "San Francisco",
+                "login": "test-org",
+                "role": OrganizationMembership.Role.ADMIN,
+            }
+        ]
+
+        # Call the task function directly
+        sync_user_organizations.func(self.user.id, "github")
+
+        # Verify organization was created
+        org = Organization.objects.get(provider="github", provider_id="org123")
+        self.assertEqual(org.name, "Test Org")
+        self.assertEqual(org.slug, "test-org")
+
+        # Verify membership was created
+        membership = OrganizationMembership.objects.get(
+            user=self.user, organization=org
+        )
+        self.assertEqual(membership.role, OrganizationMembership.Role.ADMIN)
+
+        # Verify API was called with correct token
+        mock_fetch.assert_called_once_with("test-token")
+
+    def test_sync_user_organizations_no_social_auth(self):
+        """Test that task handles missing social auth gracefully."""
+        from accounts.tasks import sync_user_organizations
+
+        # Call task without creating social auth
+        sync_user_organizations.func(self.user.id, "github")
+
+        # Should not raise exception, just log warning
+
+    def test_sync_user_organizations_nonexistent_user(self):
+        """Test that task handles non-existent user gracefully."""
+        from accounts.tasks import sync_user_organizations
+
+        # Call task with invalid user ID
+        sync_user_organizations.func(99999, "github")
+
+        # Should not raise exception, just log error
+
+    @patch("accounts.pipeline._fetch_github_orgs")
+    def test_sync_user_organizations_updates_existing(self, mock_fetch):
+        """Test that task updates existing organizations."""
+        from social_django.models import UserSocialAuth
+
+        from accounts.models import Organization, OrganizationMembership
+        from accounts.tasks import sync_user_organizations
+
+        # Create existing organization
+        org = Organization.objects.create(
+            name="Old Name",
+            slug="test-org",
+            provider="github",
+            provider_id="org123",
+            provider_login="test-org",
+        )
+
+        # Create social auth
+        UserSocialAuth.objects.create(
+            user=self.user,
+            provider="github",
+            uid="123456",
+            extra_data={"access_token": "test-token"},
+        )
+
+        # Mock updated data
+        mock_fetch.return_value = [
+            {
+                "id": "org123",
+                "name": "New Name",
+                "slug": "test-org",
+                "description": "Updated description",
+                "avatar_url": "",
+                "website": "",
+                "location": "",
+                "login": "test-org",
+                "role": OrganizationMembership.Role.MEMBER,
+            }
+        ]
+
+        # Call task
+        sync_user_organizations.func(self.user.id, "github")
+
+        # Verify organization was updated
+        org.refresh_from_db()
+        self.assertEqual(org.name, "New Name")
+        self.assertEqual(org.description, "Updated description")
+
+    @patch("accounts.pipeline._fetch_github_orgs")
+    def test_sync_user_organizations_handles_errors(self, mock_fetch):
+        """Test that task handles API errors gracefully."""
+        from social_django.models import UserSocialAuth
+
+        from accounts.tasks import sync_user_organizations
+
+        # Create social auth
+        UserSocialAuth.objects.create(
+            user=self.user,
+            provider="github",
+            uid="123456",
+            extra_data={"access_token": "test-token"},
+        )
+
+        # Mock API error
+        mock_fetch.side_effect = Exception("API Error")
+
+        # Call task - should not raise exception
+        sync_user_organizations.func(self.user.id, "github")

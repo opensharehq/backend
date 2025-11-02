@@ -1,0 +1,153 @@
+{% extends "horizontal_base.html" %}
+{% load static %}
+
+{% block title %}我的组织{% endblock title %}
+
+{% block extra_css %}
+    <style>
+        .org-avatar-md {
+            width: 60px;
+            height: 60px;
+            object-fit: cover;
+        }
+        .org-avatar-placeholder-md {
+            width: 60px;
+            height: 60px;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .icon-xl {
+            width: 64px;
+            height: 64px;
+        }
+    </style>
+{% endblock extra_css %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">我的组织</h4>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap gap-2">
+            {% if social_accounts %}
+                <div class="btn-group mb-2 mb-md-0" role="group">
+                    <button type="button"
+                            class="btn btn-primary btn-icon-text dropdown-toggle"
+                            data-bs-toggle="dropdown"
+                            aria-expanded="false">
+                        <i data-lucide="refresh-cw" class="btn-icon-prepend"></i> 同步组织
+                    </button>
+                    <ul class="dropdown-menu">
+                        {% if 'github' in social_accounts %}
+                            <li>
+                                <a class="dropdown-item" href="{% url 'accounts:organization_sync' 'github' %}">
+                                    <i data-lucide="github" class="icon-xs me-2"></i> 从 GitHub 同步
+                                </a>
+                            </li>
+                        {% endif %}
+                        {% if 'gitee' in social_accounts %}
+                            <li>
+                                <a class="dropdown-item" href="{% url 'accounts:organization_sync' 'gitee' %}">
+                                    <i data-lucide="git-branch" class="icon-xs me-2"></i> 从 Gitee 同步
+                                </a>
+                            </li>
+                        {% endif %}
+                        {% if 'huggingface' in social_accounts %}
+                            <li>
+                                <a class="dropdown-item" href="{% url 'accounts:organization_sync' 'huggingface' %}">
+                                    <i data-lucide="sparkles" class="icon-xs me-2"></i> 从 HuggingFace 同步
+                                </a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </div>
+            {% endif %}
+            <a href="{% url 'accounts:profile' %}" class="btn btn-outline-secondary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回个人中心
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        {% if organizations %}
+            {% for org in organizations %}
+                <div class="col-12 col-md-6 col-lg-4 grid-margin stretch-card">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center mb-3">
+                                {% if org.avatar_url %}
+                                    <img src="{{ org.avatar_url }}"
+                                         alt="{{ org.name }}"
+                                         class="rounded me-3 org-avatar-md"
+                                         width="60"
+                                         height="60" />
+                                {% else %}
+                                    <div class="rounded bg-primary text-white d-flex align-items-center justify-content-center me-3 org-avatar-placeholder-md">
+                                        {{ org.name|slice:":1"|upper }}
+                                    </div>
+                                {% endif %}
+                                <div class="flex-grow-1">
+                                    <h5 class="mb-1">{{ org.name }}</h5>
+                                    <small class="text-muted">
+                                        <i data-lucide="at-sign" class="icon-xs"></i> {{ org.slug }}
+                                    </small>
+                                </div>
+                            </div>
+                            {% if org.description %}
+                                <p class="text-muted mb-3">{{ org.description|truncatewords:20 }}</p>
+                            {% endif %}
+                            <div class="d-flex flex-wrap gap-2 mb-3">
+                                <span class="badge bg-info">
+                                    <i data-lucide="git-branch" class="icon-xs"></i> {{ org.get_provider_display }}
+                                </span>
+                                <span class="badge bg-secondary">
+                                    <i data-lucide="users" class="icon-xs"></i> {{ org.memberships.count }} 成员
+                                </span>
+                                <span class="badge {% if org.user_membership.role == 'owner' %}bg-danger{% elif org.user_membership.role == 'admin' %}bg-warning{% else %}bg-primary{% endif %}">
+                                    {{ org.user_membership.get_role_display }}
+                                </span>
+                            </div>
+                            {% if org.location or org.website %}
+                                <div class="mb-3">
+                                    {% if org.location %}
+                                        <small class="text-muted d-block">
+                                            <i data-lucide="map-pin" class="icon-xs"></i> {{ org.location }}
+                                        </small>
+                                    {% endif %}
+                                    {% if org.website %}
+                                        <small class="text-muted d-block">
+                                            <i data-lucide="link" class="icon-xs"></i>
+                                            <a href="{{ org.website }}" target="_blank" class="text-decoration-none">{{ org.website|truncatechars:30 }}</a>
+                                        </small>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                            <div class="d-flex gap-2">
+                                <a href="{% url 'accounts:organization_detail' org.slug %}" class="btn btn-sm btn-primary flex-grow-1">
+                                    <i data-lucide="eye" class="icon-xs"></i> 查看详情
+                                </a>
+                                {% if org.user_membership.is_admin_or_owner %}
+                                    <a href="{% url 'accounts:organization_settings' org.slug %}" class="btn btn-sm btn-outline-secondary">
+                                        <i data-lucide="settings" class="icon-xs"></i>
+                                    </a>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body text-center py-5">
+                        <i data-lucide="building" class="icon-lg text-muted mb-3 icon-xl"></i>
+                        <h5 class="text-muted mb-3">暂无组织</h5>
+                        <p class="text-muted">
+                            您还没有加入任何组织。<br />
+                            当您通过 GitHub、Gitee 或 HuggingFace 登录时，系统会自动同步您的组织信息。
+                        </p>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+{% endblock content %}

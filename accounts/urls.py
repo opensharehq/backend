@@ -8,6 +8,13 @@ from .views import (
     change_password_view,
     disconnect_social_account,
     logout_view,
+    organization_detail,
+    organization_list,
+    organization_member_remove,
+    organization_member_update_role,
+    organization_members,
+    organization_settings,
+    organization_sync,
     password_reset_confirm_view,
     password_reset_done_view,
     password_reset_request_view,
@@ -93,5 +100,33 @@ urlpatterns = [
         "shipping-addresses/<int:address_id>/set-default/",
         shipping_address_set_default_view,
         name="shipping_address_set_default",
+    ),
+    # Organization URLs
+    path("organizations/", organization_list, name="organization_list"),
+    path(
+        "organizations/sync/<str:provider>/",
+        organization_sync,
+        name="organization_sync",
+    ),
+    path("organizations/<slug:slug>/", organization_detail, name="organization_detail"),
+    path(
+        "organizations/<slug:slug>/settings/",
+        organization_settings,
+        name="organization_settings",
+    ),
+    path(
+        "organizations/<slug:slug>/members/",
+        organization_members,
+        name="organization_members",
+    ),
+    path(
+        "organizations/<slug:slug>/members/<int:member_id>/update-role/",
+        organization_member_update_role,
+        name="organization_member_update_role",
+    ),
+    path(
+        "organizations/<slug:slug>/members/<int:member_id>/remove/",
+        organization_member_remove,
+        name="organization_member_remove",
     ),
 ]

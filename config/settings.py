@@ -297,7 +297,20 @@ SOCIAL_AUTH_PIPELINE = (
     "social_core.pipeline.user.user_details",
     # Custom pipeline to update user profile from GitHub
     "accounts.pipeline.update_user_profile_from_github",
+    # Custom pipeline to sync user's organizations from OAuth providers
+    "accounts.pipeline.sync_organizations",
 )
+
+# OAuth Scopes to request organization access
+SOCIAL_AUTH_GITHUB_SCOPE = ["user", "read:org"]
+SOCIAL_AUTH_GITEE_SCOPE = ["user_info", "groups"]
+SOCIAL_AUTH_HUGGINGFACE_SCOPE = ["profile", "read-repos"]
+
+# GitHub OAuth extra arguments to show organization access prompt
+# This will trigger the organization authorization screen where users can grant access to their orgs
+SOCIAL_AUTH_GITHUB_AUTH_EXTRA_ARGUMENTS = {
+    "allow_signup": "true",
+}
 
 # site
 SITE_ID = 1

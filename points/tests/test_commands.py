@@ -5,8 +5,11 @@ from io import StringIO
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 
-from points.models import PointSource, PointTransaction, Tag
+from points.models import PointSource, PointTransaction, Tag, WithdrawalRequest
+
+User = get_user_model()
 
 
 class GrantPointsCommandTests(TestCase):
@@ -355,3 +358,193 @@ class GrantPointsCommandTests(TestCase):
 
         with self.assertRaisesMessage(CommandError, "User not found: nosuchuser"):
             call_command("grant_points", "nosuchuser", "100")
+
+
+class FixWithdrawalTransactionsCommandTests(TestCase):
+    """测试修复提现交易记录命令."""
+
+    def setUp(self):
+        """设置测试数据."""
+        self.user = User.objects.create_user(username="testuser")
+        self.admin = User.objects.create_user(username="admin", is_staff=True)
+
+        # 创建可提现的标签
+        self.tag = Tag.objects.create(name="withdrawable", withdrawable=True)
+
+        # 创建积分来源
+        self.source = PointSource.objects.create(
+            user=self.user, initial_points=1000, remaining_points=1000
+        )
+        self.source.tags.add(self.tag)
+
+    def test_fix_completed_withdrawal_without_transaction(self):
+        """测试修复已完成但没有交易记录的提现申请."""
+        # 创建已完成的提现申请（模拟旧数据）
+        withdrawal = WithdrawalRequest.objects.create(
+            user=self.user,
+            point_source=self.source,
+            points=100,
+            status=WithdrawalRequest.Status.COMPLETED,
+            real_name="测试用户",
+            id_number="123456789012345678",
+            phone_number="13800138000",
+            bank_name="测试银行",
+            bank_account="6222021234567890",
+            processed_by=self.admin,
+            processed_at=timezone.now(),
+        )
+
+        # 确认没有交易记录
+        self.assertEqual(PointTransaction.objects.count(), 0)
+
+        # 运行修复命令
+        out = StringIO()
+        call_command("fix_withdrawal_transactions", stdout=out)
+
+        # 验证创建了交易记录
+        self.assertEqual(PointTransaction.objects.count(), 1)
+
+        transaction = PointTransaction.objects.first()
+        self.assertEqual(transaction.user, self.user)
+        self.assertEqual(transaction.points, -100)
+        self.assertEqual(
+            transaction.transaction_type, PointTransaction.TransactionType.WITHDRAW
+        )
+        self.assertIn(f"#{withdrawal.id}", transaction.description)
+        self.assertIn(self.source, transaction.consumed_sources.all())
+
+        # 验证输出
+        output = out.getvalue()
+        self.assertIn("成功修复 1 个提现申请", output)
+
+    def test_skip_withdrawal_with_existing_transaction(self):
+        """测试跳过已有交易记录的提现申请."""
+        # 创建已完成的提现申请
+        withdrawal = WithdrawalRequest.objects.create(
+            user=self.user,
+            point_source=self.source,
+            points=100,
+            status=WithdrawalRequest.Status.COMPLETED,
+            real_name="测试用户",
+            id_number="123456789012345678",
+            phone_number="13800138000",
+            bank_name="测试银行",
+            bank_account="6222021234567890",
+            processed_by=self.admin,
+            processed_at=timezone.now(),
+        )
+
+        # 创建对应的交易记录
+        PointTransaction.objects.create(
+            user=self.user,
+            points=-100,
+            transaction_type=PointTransaction.TransactionType.WITHDRAW,
+            description=f"提现申请 #{withdrawal.id}",
+        )
+
+        # 运行修复命令
+        out = StringIO()
+        call_command("fix_withdrawal_transactions", stdout=out)
+
+        # 验证没有创建新的交易记录
+        self.assertEqual(PointTransaction.objects.count(), 1)
+
+        # 验证输出
+        output = out.getvalue()
+        self.assertIn("跳过 1 个已有记录的申请", output)
+
+    def test_dry_run_mode(self):
+        """测试预览模式不实际修改数据."""
+        # 创建已完成的提现申请
+        WithdrawalRequest.objects.create(
+            user=self.user,
+            point_source=self.source,
+            points=100,
+            status=WithdrawalRequest.Status.COMPLETED,
+            real_name="测试用户",
+            id_number="123456789012345678",
+            phone_number="13800138000",
+            bank_name="测试银行",
+            bank_account="6222021234567890",
+            processed_by=self.admin,
+            processed_at=timezone.now(),
+        )
+
+        # 运行预览模式
+        out = StringIO()
+        call_command("fix_withdrawal_transactions", "--dry-run", stdout=out)
+
+        # 验证没有创建交易记录
+        self.assertEqual(PointTransaction.objects.count(), 0)
+
+        # 验证输出
+        output = out.getvalue()
+        self.assertIn("预览模式", output)
+        self.assertIn("将修复 1 个提现申请", output)
+
+    def test_fix_multiple_withdrawals(self):
+        """测试修复多个提现申请."""
+        # 创建多个已完成的提现申请
+        for i in range(3):
+            WithdrawalRequest.objects.create(
+                user=self.user,
+                point_source=self.source,
+                points=100 + i * 10,
+                status=WithdrawalRequest.Status.COMPLETED,
+                real_name="测试用户",
+                id_number="123456789012345678",
+                phone_number="13800138000",
+                bank_name="测试银行",
+                bank_account="6222021234567890",
+                processed_by=self.admin,
+                processed_at=timezone.now(),
+            )
+
+        # 运行修复命令
+        out = StringIO()
+        call_command("fix_withdrawal_transactions", stdout=out)
+
+        # 验证创建了3个交易记录
+        self.assertEqual(PointTransaction.objects.count(), 3)
+
+        # 验证输出
+        output = out.getvalue()
+        self.assertIn("成功修复 3 个提现申请", output)
+
+    def test_only_process_completed_withdrawals(self):
+        """测试只处理已完成状态的提现申请."""
+        # 创建不同状态的提现申请
+        WithdrawalRequest.objects.create(
+            user=self.user,
+            point_source=self.source,
+            points=100,
+            status=WithdrawalRequest.Status.PENDING,
+            real_name="测试用户",
+            id_number="123456789012345678",
+            phone_number="13800138000",
+            bank_name="测试银行",
+            bank_account="6222021234567890",
+        )
+
+        WithdrawalRequest.objects.create(
+            user=self.user,
+            point_source=self.source,
+            points=200,
+            status=WithdrawalRequest.Status.REJECTED,
+            real_name="测试用户",
+            id_number="123456789012345678",
+            phone_number="13800138000",
+            bank_name="测试银行",
+            bank_account="6222021234567890",
+        )
+
+        # 运行修复命令
+        out = StringIO()
+        call_command("fix_withdrawal_transactions", stdout=out)
+
+        # 验证没有创建交易记录
+        self.assertEqual(PointTransaction.objects.count(), 0)
+
+        # 验证输出
+        output = out.getvalue()
+        self.assertIn("找到 0 个已完成的提现申请", output)

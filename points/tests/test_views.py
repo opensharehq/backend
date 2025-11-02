@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.messages import get_messages
+from django.test import TestCase
 from django.urls import reverse
 
 from common.test_utils import CacheClearTestCase
@@ -632,3 +634,295 @@ class RechargeViewTests(CacheClearTestCase):
         self.assertContains(response, "100")  # Initial points
         self.assertContains(response, "75")  # Remaining points
         self.assertContains(response, "test_tag")  # Tag name
+
+
+class BatchWithdrawalViewTests(TestCase):
+    """Test batch_withdrawal view."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.User = get_user_model()
+        self.user = self.User.objects.create_user(
+            username="testuser", email="test@example.com", password="password123"
+        )
+        self.withdrawable_tag = Tag.objects.create(
+            name="withdrawable", withdrawable=True
+        )
+        self.non_withdrawable_tag = Tag.objects.create(
+            name="regular", withdrawable=False
+        )
+
+    def test_view_requires_authentication(self):
+        """Test that view requires login."""
+        url = reverse("points:batch_withdrawal")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response.url)
+
+    def test_view_redirects_when_no_withdrawable_sources(self):
+        """Test that view redirects when user has no withdrawable sources."""
+        self.client.login(username="testuser", password="password123")
+
+        url = reverse("points:batch_withdrawal")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse("points:my_points"))
+
+        # Check message
+        messages = list(get_messages(response.wsgi_request))
+        self.assertEqual(len(messages), 1)
+        self.assertIn("没有可提现的积分池", str(messages[0]))
+
+    def test_view_displays_withdrawable_sources(self):
+        """Test that view displays only withdrawable sources."""
+        self.client.login(username="testuser", password="password123")
+
+        # Create withdrawable source
+        withdrawable_source = PointSource.objects.create(
+            user=self.user,
+            initial_points=100,
+            remaining_points=100,
+        )
+        withdrawable_source.tags.add(self.withdrawable_tag)
+
+        # Create non-withdrawable source
+        non_withdrawable_source = PointSource.objects.create(
+            user=self.user,
+            initial_points=200,
+            remaining_points=200,
+        )
+        non_withdrawable_source.tags.add(self.non_withdrawable_tag)
+
+        url = reverse("points:batch_withdrawal")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "批量提现")
+
+        # Check that withdrawable sources are in context
+        self.assertEqual(len(response.context["withdrawable_sources"]), 1)
+        self.assertEqual(
+            response.context["withdrawable_sources"][0].id, withdrawable_source.id
+        )
+
+    def test_post_creates_withdrawal_requests(self):
+        """Test POST request creates withdrawal requests."""
+        self.client.login(username="testuser", password="password123")
+
+        # Create withdrawable sources
+        source1 = PointSource.objects.create(
+            user=self.user,
+            initial_points=100,
+            remaining_points=100,
+        )
+        source1.tags.add(self.withdrawable_tag)
+
+        source2 = PointSource.objects.create(
+            user=self.user,
+            initial_points=200,
+            remaining_points=200,
+        )
+        source2.tags.add(self.withdrawable_tag)
+
+        url = reverse("points:batch_withdrawal")
+        data = {
+            f"points_{source1.id}": "50",
+            f"points_{source2.id}": "100",
+            "real_name": "张三",
+            "id_number": "110101199001011234",
+            "phone_number": "13800138000",
+            "bank_name": "中国银行",
+            "bank_account": "6222020200012345678",
+        }
+
+        response = self.client.post(url, data)
+
+        # Should redirect to withdrawal list
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse("points:withdrawal_list"))
+
+        # Check that withdrawal requests were created
+        from points.models import WithdrawalRequest
+
+        withdrawal_requests = WithdrawalRequest.objects.filter(user=self.user)
+        self.assertEqual(withdrawal_requests.count(), 2)
+
+        # Verify withdrawal details
+        wr1 = WithdrawalRequest.objects.get(point_source=source1)
+        self.assertEqual(wr1.points, 50)
+        self.assertEqual(wr1.real_name, "张三")
+        self.assertEqual(wr1.id_number, "110101199001011234")
+
+        wr2 = WithdrawalRequest.objects.get(point_source=source2)
+        self.assertEqual(wr2.points, 100)
+
+        # Check success message
+        messages = list(get_messages(response.wsgi_request))
+        self.assertEqual(len(messages), 1)
+        self.assertIn("批量提现申请已提交", str(messages[0]))
+        self.assertIn("2 个提现申请", str(messages[0]))
+        self.assertIn("150 积分", str(messages[0]))
+
+    def test_post_with_no_amounts_shows_error(self):
+        """Test POST with no amounts shows error."""
+        self.client.login(username="testuser", password="password123")
+
+        source = PointSource.objects.create(
+            user=self.user,
+            initial_points=100,
+            remaining_points=100,
+        )
+        source.tags.add(self.withdrawable_tag)
+
+        url = reverse("points:batch_withdrawal")
+        data = {
+            "real_name": "张三",
+            "id_number": "110101199001011234",
+            "phone_number": "13800138000",
+            "bank_name": "中国银行",
+            "bank_account": "6222020200012345678",
+        }
+
+        response = self.client.post(url, data)
+
+        # Should not create any withdrawal requests
+        from points.models import WithdrawalRequest
+
+        self.assertEqual(WithdrawalRequest.objects.filter(user=self.user).count(), 0)
+
+        # Should show error
+        self.assertContains(response, "至少需要为一个积分池设置提现数量")
+
+    def test_post_with_invalid_amount_shows_error(self):
+        """Test POST with invalid amount shows error."""
+        self.client.login(username="testuser", password="password123")
+
+        source = PointSource.objects.create(
+            user=self.user,
+            initial_points=100,
+            remaining_points=100,
+        )
+        source.tags.add(self.withdrawable_tag)
+
+        url = reverse("points:batch_withdrawal")
+        data = {
+            f"points_{source.id}": "invalid",
+            "real_name": "张三",
+            "id_number": "110101199001011234",
+            "phone_number": "13800138000",
+            "bank_name": "中国银行",
+            "bank_account": "6222020200012345678",
+        }
+
+        response = self.client.post(url, data)
+
+        # Should show error message
+        messages = list(get_messages(response.wsgi_request))
+        error_messages = [str(m) for m in messages if m.level_tag == "error"]
+        self.assertTrue(
+            any("格式不正确" in msg for msg in error_messages),
+            f"Expected format error, got: {error_messages}",
+        )
+
+    def test_post_with_amount_exceeding_balance_shows_error(self):
+        """Test POST with amount exceeding balance shows error."""
+        self.client.login(username="testuser", password="password123")
+
+        source = PointSource.objects.create(
+            user=self.user,
+            initial_points=100,
+            remaining_points=100,
+        )
+        source.tags.add(self.withdrawable_tag)
+
+        url = reverse("points:batch_withdrawal")
+        data = {
+            f"points_{source.id}": "150",  # Exceeds remaining points
+            "real_name": "张三",
+            "id_number": "110101199001011234",
+            "phone_number": "13800138000",
+            "bank_name": "中国银行",
+            "bank_account": "6222020200012345678",
+        }
+
+        response = self.client.post(url, data)
+
+        # Should show error message
+        messages = list(get_messages(response.wsgi_request))
+        error_messages = [str(m) for m in messages if m.level_tag == "error"]
+        self.assertTrue(
+            any("不能超过剩余积分" in msg for msg in error_messages),
+            f"Expected balance error, got: {error_messages}",
+        )
+
+    def test_post_with_zero_amounts_skips_sources(self):
+        """Test POST with zero amounts skips those sources."""
+        self.client.login(username="testuser", password="password123")
+
+        source1 = PointSource.objects.create(
+            user=self.user,
+            initial_points=100,
+            remaining_points=100,
+        )
+        source1.tags.add(self.withdrawable_tag)
+
+        source2 = PointSource.objects.create(
+            user=self.user,
+            initial_points=200,
+            remaining_points=200,
+        )
+        source2.tags.add(self.withdrawable_tag)
+
+        url = reverse("points:batch_withdrawal")
+        data = {
+            f"points_{source1.id}": "50",
+            f"points_{source2.id}": "0",  # Should be skipped
+            "real_name": "张三",
+            "id_number": "110101199001011234",
+            "phone_number": "13800138000",
+            "bank_name": "中国银行",
+            "bank_account": "6222020200012345678",
+        }
+
+        self.client.post(url, data)
+
+        # Only 1 withdrawal request should be created
+        from points.models import WithdrawalRequest
+
+        withdrawal_requests = WithdrawalRequest.objects.filter(user=self.user)
+        self.assertEqual(withdrawal_requests.count(), 1)
+        self.assertEqual(withdrawal_requests.first().point_source, source1)
+
+    def test_post_with_invalid_form_data_shows_errors(self):
+        """Test POST with invalid form data shows errors."""
+        self.client.login(username="testuser", password="password123")
+
+        source = PointSource.objects.create(
+            user=self.user,
+            initial_points=100,
+            remaining_points=100,
+        )
+        source.tags.add(self.withdrawable_tag)
+
+        url = reverse("points:batch_withdrawal")
+        data = {
+            f"points_{source.id}": "50",
+            "real_name": "",  # Required field
+            "id_number": "invalid",  # Invalid format
+            "phone_number": "12345",  # Invalid format
+            "bank_name": "中国银行",
+            "bank_account": "6222020200012345678",
+        }
+
+        response = self.client.post(url, data)
+
+        # Should not create withdrawal request
+        from points.models import WithdrawalRequest
+
+        self.assertEqual(WithdrawalRequest.objects.filter(user=self.user).count(), 0)
+
+        # Should show form errors
+        self.assertContains(response, "必须是18位")
+        self.assertContains(response, "必须是11位")

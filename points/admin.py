@@ -327,7 +327,6 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         """Display status with color."""
         color_map = {
             WithdrawalRequest.Status.PENDING: "orange",
-            WithdrawalRequest.Status.APPROVED: "blue",
             WithdrawalRequest.Status.REJECTED: "red",
             WithdrawalRequest.Status.COMPLETED: "green",
             WithdrawalRequest.Status.CANCELLED: "gray",
@@ -339,36 +338,36 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
             obj.get_status_display(),
         )
 
-    @admin.action(description="批准选中的提现申请")
+    @admin.action(description="完成选中的提现申请")
     def approve_selected(self, request, queryset):
-        """Approve selected withdrawal requests."""
+        """Complete selected withdrawal requests."""
         pending_requests = queryset.filter(status=WithdrawalRequest.Status.PENDING)
-        approved_count = 0
+        completed_count = 0
         error_count = 0
 
         for withdrawal in pending_requests:
             try:
                 approve_withdrawal(withdrawal, request.user)
-                approved_count += 1
+                completed_count += 1
             except Exception as e:
                 error_count += 1
                 self.message_user(
                     request,
-                    f"批准申请 #{withdrawal.id} 失败: {e!s}",
+                    f"完成申请 #{withdrawal.id} 失败: {e!s}",
                     level="ERROR",
                 )
 
-        if approved_count > 0:
+        if completed_count > 0:
             self.message_user(
                 request,
-                f"成功批准 {approved_count} 个提现申请。",
+                f"成功完成 {completed_count} 个提现申请，已扣除积分并创建交易记录。",
                 level="SUCCESS",
             )
 
         if error_count > 0:
             self.message_user(
                 request,
-                f"{error_count} 个提现申请批准失败。",
+                f"{error_count} 个提现申请完成失败。",
                 level="WARNING",
             )
 

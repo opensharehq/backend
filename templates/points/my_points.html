@@ -11,6 +11,9 @@
             <h4 class="mb-3 mb-md-0">我的积分</h4>
         </div>
         <div class="d-flex align-items-center flex-wrap text-nowrap">
+            <a href="{% url 'points:batch_withdrawal' %}" class="btn btn-success btn-icon-text me-2 mb-2 mb-md-0">
+                <i data-lucide="credit-card" class="btn-icon-prepend"></i> 批量提现
+            </a>
             <a href="{% url 'points:withdrawal_list' %}" class="btn btn-primary btn-icon-text me-2 mb-2 mb-md-0">
                 <i data-lucide="file-text" class="btn-icon-prepend"></i> 提现记录
             </a>

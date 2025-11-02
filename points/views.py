@@ -299,3 +299,106 @@ def recharge(request, point_source_id):
     }
 
     return render(request, "points/recharge.html", context)
+
+
+@login_required
+def batch_withdrawal(request):
+    """
+    Batch withdrawal page for multiple point sources.
+
+    Shows all withdrawable point sources and allows user to create
+    multiple withdrawal requests at once.
+
+    """
+    from points.forms import BatchWithdrawalInfoForm
+    from points.services import create_batch_withdrawal_requests
+
+    # Get all withdrawable point sources for the user
+    withdrawable_sources = [
+        source
+        for source in request.user.point_sources.filter(
+            remaining_points__gt=0
+        ).prefetch_related("tags")
+        if source.is_withdrawable
+    ]
+
+    # Check if user has any withdrawable sources
+    if not withdrawable_sources:
+        messages.warning(request, "您没有可提现的积分池。")
+        return redirect("points:my_points")
+
+    if request.method == "POST":
+        form = BatchWithdrawalInfoForm(request.POST)
+
+        # Collect withdrawal amounts from POST data
+        withdrawal_amounts = {}
+        has_any_amount = False
+
+        for source in withdrawable_sources:
+            field_name = f"points_{source.id}"
+            points_str = request.POST.get(field_name, "").strip()
+
+            if points_str:
+                try:
+                    points = int(points_str)
+                    if points > 0:
+                        # Validate amount doesn't exceed remaining points
+                        if points > source.remaining_points:
+                            messages.error(
+                                request,
+                                f"积分池 #{source.id} 的提现数量不能超过剩余积分 {source.remaining_points}。",
+                            )
+                            form.add_error(
+                                None,
+                                f"积分池 #{source.id} 的提现数量不能超过剩余积分。",
+                            )
+                        else:
+                            withdrawal_amounts[source.id] = points
+                            has_any_amount = True
+                except ValueError:
+                    messages.error(
+                        request, f"积分池 #{source.id} 的提现数量格式不正确。"
+                    )
+                    form.add_error(None, f"积分池 #{source.id} 的提现数量必须是整数。")
+
+        # Validate that at least one amount is provided
+        if not has_any_amount:
+            form.add_error(None, "至少需要为一个积分池设置提现数量。")
+
+        if form.is_valid() and has_any_amount:
+            try:
+                withdrawal_data = WithdrawalData(
+                    real_name=form.cleaned_data["real_name"],
+                    id_number=form.cleaned_data["id_number"],
+                    phone_number=form.cleaned_data["phone_number"],
+                    bank_name=form.cleaned_data["bank_name"],
+                    bank_account=form.cleaned_data["bank_account"],
+                )
+
+                withdrawal_requests = create_batch_withdrawal_requests(
+                    user=request.user,
+                    withdrawal_amounts=withdrawal_amounts,
+                    withdrawal_data=withdrawal_data,
+                )
+
+                messages.success(
+                    request,
+                    f"批量提现申请已提交！共创建了 {len(withdrawal_requests)} 个提现申请，总计 {sum(wr.points for wr in withdrawal_requests)} 积分。请等待审核。",
+                )
+                return redirect("points:withdrawal_list")
+            except (
+                PointSource.DoesNotExist,
+                PointSourceNotWithdrawableError,
+                WithdrawalAmountError,
+                WithdrawalError,
+            ) as e:
+                messages.error(request, str(e))
+    else:
+        form = BatchWithdrawalInfoForm()
+
+    context = {
+        "form": form,
+        "withdrawable_sources": withdrawable_sources,
+    }
+
+    return render(request, "points/batch_withdrawal.html", context)

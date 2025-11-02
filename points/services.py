@@ -399,6 +399,8 @@ def approve_withdrawal(
     """
     批准提现申请并扣除相应积分.
 
+    将申请状态直接变为"已完成", 扣除积分并创建提现交易记录.
+
     这是一个原子操作.
 
     Args:
@@ -416,31 +418,31 @@ def approve_withdrawal(
     """
     from django.utils import timezone
 
-    # 1. 验证申请状态
+    # 验证申请状态
     if withdrawal_request.status != WithdrawalRequest.Status.PENDING:
         msg = f"只能批准待处理状态的申请。当前状态: {withdrawal_request.get_status_display()}"
         raise WithdrawalError(msg)
 
-    # 2. 扣除积分（使用现有的 spend_points 服务）
+    # 扣除积分（使用现有的 spend_points 服务）
     transaction = spend_points(
         user=withdrawal_request.user,
         amount=withdrawal_request.points,
         description=f"提现申请 #{withdrawal_request.id}",
     )
 
-    # 3. 更新提现申请状态
-    withdrawal_request.status = WithdrawalRequest.Status.APPROVED
+    # 更新交易类型为提现
+    transaction.transaction_type = PointTransaction.TransactionType.WITHDRAW
+    transaction.save(update_fields=["transaction_type"])
+
+    # 更新提现申请状态为已完成
+    withdrawal_request.status = WithdrawalRequest.Status.COMPLETED
     withdrawal_request.processed_by = admin_user
     withdrawal_request.processed_at = timezone.now()
     withdrawal_request.admin_note = admin_note
     withdrawal_request.save()
 
-    # 4. 更新交易类型为提现
-    transaction.transaction_type = PointTransaction.TransactionType.WITHDRAW
-    transaction.save(update_fields=["transaction_type"])
-
     logger.info(
-        "提现申请已批准: 申请ID=%s, 用户=%s (ID=%s), 积分=%s, 处理人=%s",
+        "提现申请已完成: 申请ID=%s, 用户=%s (ID=%s), 积分=%s, 处理人=%s",
         withdrawal_request.id,
         withdrawal_request.user.username,
         withdrawal_request.user.id,
@@ -521,3 +523,66 @@ def cancel_withdrawal(withdrawal_request: WithdrawalRequest):
         withdrawal_request.user.username,
         withdrawal_request.user.id,
     )
+
+
+@transaction.atomic
+def create_batch_withdrawal_requests(
+    user: User,
+    withdrawal_amounts: dict[int, int],
+    withdrawal_data: WithdrawalData,
+) -> list[WithdrawalRequest]:
+    """
+    批量创建提现申请.
+
+    这是一个原子操作, 如果任何一个申请创建失败, 所有申请都会回滚。
+
+    Args:
+        user (User): 申请提现的用户。
+        withdrawal_amounts (dict[int, int]): 积分来源ID到提现数量的映射。
+        withdrawal_data (WithdrawalData): 提现申请数据(姓名、身份证、银行信息等)。
+
+    Returns:
+        list[WithdrawalRequest]: 创建的提现申请列表。
+
+    Raises:
+        PointSource.DoesNotExist: 如果任何积分来源不存在。
+        PointSourceNotWithdrawableError: 如果任何积分来源不支持提现。
+        WithdrawalAmountError: 如果任何提现金额不合法。
+
+    """
+    # 验证至少有一个提现请求
+    if not withdrawal_amounts:
+        msg = "至少需要选择一个积分池进行提现。"
+        raise WithdrawalError(msg)
+
+    withdrawal_requests = []
+
+    # 为每个积分池创建提现申请
+    for point_source_id, points in withdrawal_amounts.items():
+        # 跳过提现数量为0或None的项
+        if not points or points <= 0:
+            continue
+
+        # 创建单个提现申请
+        withdrawal_request = create_withdrawal_request(
+            user=user,
+            point_source_id=point_source_id,
+            points=points,
+            withdrawal_data=withdrawal_data,
+        )
+        withdrawal_requests.append(withdrawal_request)
+
+    # 验证至少创建了一个提现申请
+    if not withdrawal_requests:
+        msg = "至少需要为一个积分池设置提现数量。"
+        raise WithdrawalError(msg)
+
+    logger.info(
+        "批量提现申请创建成功: 用户=%s (ID=%s), 申请数量=%s, 总积分=%s",
+        user.username,
+        user.id,
+        len(withdrawal_requests),
+        sum(wr.points for wr in withdrawal_requests),
+    )
+
+    return withdrawal_requests

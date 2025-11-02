@@ -802,3 +802,312 @@ class EdgeCaseTests(TestCase):
         self.assertTrue(
             spend_transaction.transaction_type == PointTransaction.TransactionType.SPEND
         )
+
+
+class BatchWithdrawalTests(TestCase):
+    """Test cases for batch withdrawal service functions."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        from points.models import WithdrawalRequest
+        from points.services import WithdrawalData
+
+        self.User = get_user_model()
+        self.user = self.User.objects.create_user(
+            username="testuser", email="test@example.com", password="password123"
+        )
+        self.WithdrawalData = WithdrawalData
+        self.WithdrawalRequest = WithdrawalRequest
+
+        # Create withdrawable tag
+        self.withdrawable_tag = Tag.objects.create(
+            name="withdrawable", withdrawable=True
+        )
+        self.non_withdrawable_tag = Tag.objects.create(
+            name="non-withdrawable", withdrawable=False
+        )
+
+    def test_create_batch_withdrawal_requests_success(self):
+        """Test creating multiple withdrawal requests at once."""
+        from points.services import create_batch_withdrawal_requests
+
+        # Create two withdrawable point sources
+        source1 = grant_points(
+            user=self.user,
+            points=100,
+            description="Source 1",
+            tag_names=["withdrawable"],
+        )
+        source2 = grant_points(
+            user=self.user,
+            points=200,
+            description="Source 2",
+            tag_names=["withdrawable"],
+        )
+
+        withdrawal_data = self.WithdrawalData(
+            real_name="张三",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="中国银行",
+            bank_account="6222020200012345678",
+        )
+
+        withdrawal_amounts = {
+            source1.id: 50,
+            source2.id: 100,
+        }
+
+        withdrawal_requests = create_batch_withdrawal_requests(
+            user=self.user,
+            withdrawal_amounts=withdrawal_amounts,
+            withdrawal_data=withdrawal_data,
+        )
+
+        # Verify results
+        self.assertEqual(len(withdrawal_requests), 2)
+        self.assertEqual(
+            self.WithdrawalRequest.objects.filter(user=self.user).count(), 2
+        )
+
+        # Verify first request
+        wr1 = self.WithdrawalRequest.objects.get(point_source=source1)
+        self.assertEqual(wr1.points, 50)
+        self.assertEqual(wr1.real_name, "张三")
+        self.assertEqual(wr1.id_number, "110101199001011234")
+        self.assertEqual(wr1.phone_number, "13800138000")
+        self.assertEqual(wr1.bank_name, "中国银行")
+        self.assertEqual(wr1.bank_account, "6222020200012345678")
+        self.assertEqual(wr1.status, self.WithdrawalRequest.Status.PENDING)
+
+        # Verify second request
+        wr2 = self.WithdrawalRequest.objects.get(point_source=source2)
+        self.assertEqual(wr2.points, 100)
+
+    def test_create_batch_withdrawal_requests_empty_amounts(self):
+        """Test that empty withdrawal amounts dict raises error."""
+        from points.services import WithdrawalError, create_batch_withdrawal_requests
+
+        withdrawal_data = self.WithdrawalData(
+            real_name="张三",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="中国银行",
+            bank_account="6222020200012345678",
+        )
+
+        with self.assertRaisesMessage(
+            WithdrawalError, "至少需要选择一个积分池进行提现。"
+        ):
+            create_batch_withdrawal_requests(
+                user=self.user,
+                withdrawal_amounts={},
+                withdrawal_data=withdrawal_data,
+            )
+
+    def test_create_batch_withdrawal_requests_skips_zero_amounts(self):
+        """Test that zero or negative amounts are skipped."""
+        from points.services import WithdrawalError, create_batch_withdrawal_requests
+
+        source1 = grant_points(
+            user=self.user,
+            points=100,
+            description="Source 1",
+            tag_names=["withdrawable"],
+        )
+        source2 = grant_points(
+            user=self.user,
+            points=200,
+            description="Source 2",
+            tag_names=["withdrawable"],
+        )
+
+        withdrawal_data = self.WithdrawalData(
+            real_name="张三",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="中国银行",
+            bank_account="6222020200012345678",
+        )
+
+        # All amounts are zero or negative
+        withdrawal_amounts = {
+            source1.id: 0,
+            source2.id: -10,
+        }
+
+        with self.assertRaisesMessage(
+            WithdrawalError, "至少需要为一个积分池设置提现数量。"
+        ):
+            create_batch_withdrawal_requests(
+                user=self.user,
+                withdrawal_amounts=withdrawal_amounts,
+                withdrawal_data=withdrawal_data,
+            )
+
+    def test_create_batch_withdrawal_requests_partial_amounts(self):
+        """Test that only positive amounts are processed."""
+        from points.services import create_batch_withdrawal_requests
+
+        source1 = grant_points(
+            user=self.user,
+            points=100,
+            description="Source 1",
+            tag_names=["withdrawable"],
+        )
+        source2 = grant_points(
+            user=self.user,
+            points=200,
+            description="Source 2",
+            tag_names=["withdrawable"],
+        )
+        source3 = grant_points(
+            user=self.user,
+            points=300,
+            description="Source 3",
+            tag_names=["withdrawable"],
+        )
+
+        withdrawal_data = self.WithdrawalData(
+            real_name="张三",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="中国银行",
+            bank_account="6222020200012345678",
+        )
+
+        withdrawal_amounts = {
+            source1.id: 50,  # Valid
+            source2.id: 0,  # Should be skipped
+            source3.id: 100,  # Valid
+        }
+
+        withdrawal_requests = create_batch_withdrawal_requests(
+            user=self.user,
+            withdrawal_amounts=withdrawal_amounts,
+            withdrawal_data=withdrawal_data,
+        )
+
+        # Only 2 requests should be created
+        self.assertEqual(len(withdrawal_requests), 2)
+        self.assertEqual(
+            self.WithdrawalRequest.objects.filter(user=self.user).count(), 2
+        )
+
+    def test_create_batch_withdrawal_requests_exceeds_balance(self):
+        """Test that withdrawal amount exceeding balance raises error."""
+        from points.services import (
+            WithdrawalAmountError,
+            create_batch_withdrawal_requests,
+        )
+
+        source = grant_points(
+            user=self.user,
+            points=100,
+            description="Source",
+            tag_names=["withdrawable"],
+        )
+
+        withdrawal_data = self.WithdrawalData(
+            real_name="张三",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="中国银行",
+            bank_account="6222020200012345678",
+        )
+
+        withdrawal_amounts = {
+            source.id: 150,  # Exceeds remaining points
+        }
+
+        with self.assertRaisesMessage(
+            WithdrawalAmountError, "提现积分不能超过剩余积分"
+        ):
+            create_batch_withdrawal_requests(
+                user=self.user,
+                withdrawal_amounts=withdrawal_amounts,
+                withdrawal_data=withdrawal_data,
+            )
+
+    def test_create_batch_withdrawal_requests_non_withdrawable_source(self):
+        """Test that non-withdrawable source raises error."""
+        from points.services import (
+            PointSourceNotWithdrawableError,
+            create_batch_withdrawal_requests,
+        )
+
+        # Create a non-withdrawable source
+        source = grant_points(
+            user=self.user,
+            points=100,
+            description="Source",
+            tag_names=["non-withdrawable"],
+        )
+
+        withdrawal_data = self.WithdrawalData(
+            real_name="张三",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="中国银行",
+            bank_account="6222020200012345678",
+        )
+
+        withdrawal_amounts = {
+            source.id: 50,
+        }
+
+        with self.assertRaisesMessage(
+            PointSourceNotWithdrawableError, "该积分来源不支持提现"
+        ):
+            create_batch_withdrawal_requests(
+                user=self.user,
+                withdrawal_amounts=withdrawal_amounts,
+                withdrawal_data=withdrawal_data,
+            )
+
+    def test_create_batch_withdrawal_requests_atomicity(self):
+        """Test that batch withdrawal is atomic - all or nothing."""
+        from points.services import (
+            PointSourceNotWithdrawableError,
+            create_batch_withdrawal_requests,
+        )
+
+        # Create one withdrawable and one non-withdrawable source
+        source1 = grant_points(
+            user=self.user,
+            points=100,
+            description="Source 1",
+            tag_names=["withdrawable"],
+        )
+        source2 = grant_points(
+            user=self.user,
+            points=200,
+            description="Source 2",
+            tag_names=["non-withdrawable"],  # This will fail
+        )
+
+        withdrawal_data = self.WithdrawalData(
+            real_name="张三",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="中国银行",
+            bank_account="6222020200012345678",
+        )
+
+        withdrawal_amounts = {
+            source1.id: 50,
+            source2.id: 100,  # This will fail
+        }
+
+        # Should raise error
+        with self.assertRaises(PointSourceNotWithdrawableError):
+            create_batch_withdrawal_requests(
+                user=self.user,
+                withdrawal_amounts=withdrawal_amounts,
+                withdrawal_data=withdrawal_data,
+            )
+
+        # No requests should be created due to atomicity
+        self.assertEqual(
+            self.WithdrawalRequest.objects.filter(user=self.user).count(), 0
+        )

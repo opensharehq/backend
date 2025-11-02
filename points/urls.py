@@ -14,6 +14,7 @@ urlpatterns = [
         views.withdrawal_create,
         name="withdrawal_create",
     ),
+    path("withdrawal/batch/", views.batch_withdrawal, name="batch_withdrawal"),
     path("withdrawal/", views.withdrawal_list, name="withdrawal_list"),
     path(
         "withdrawal/<int:withdrawal_id>/",

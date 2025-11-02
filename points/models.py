@@ -168,7 +168,6 @@ class WithdrawalRequest(models.Model):
         """提现状态枚举."""
 
         PENDING = "PENDING", "待处理"
-        APPROVED = "APPROVED", "已批准"
         REJECTED = "REJECTED", "已拒绝"
         COMPLETED = "COMPLETED", "已完成"
         CANCELLED = "CANCELLED", "已取消"

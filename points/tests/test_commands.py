@@ -548,3 +548,248 @@ class FixWithdrawalTransactionsCommandTests(TestCase):
         # 验证输出
         output = out.getvalue()
         self.assertIn("找到 0 个已完成的提现申请", output)
+
+
+class CreateDefaultPointSourcesCommandTests(TestCase):
+    """测试为存量用户创建默认积分池的命令."""
+
+    def setUp(self):
+        """设置测试数据."""
+        # 确保 default 标签存在
+        self.default_tag, _ = Tag.objects.get_or_create(
+            slug="default",
+            defaults={
+                "name": "默认",
+                "description": "用户默认积分池，支持充值和提现",
+                "is_default": True,
+                "withdrawable": True,
+                "allow_recharge": True,
+            },
+        )
+
+    def test_create_default_sources_for_users_without_one(self):
+        """测试为没有默认积分池的用户创建."""
+        # 创建3个没有默认积分池的用户
+        user1 = User.objects.create_user(username="user1")
+        user2 = User.objects.create_user(username="user2")
+        user3 = User.objects.create_user(username="user3")
+
+        # 删除自动创建的默认积分池（通过信号处理器创建的）
+        PointSource.objects.filter(
+            user__in=[user1, user2, user3], tags__slug="default"
+        ).delete()
+
+        # 运行命令
+        out = StringIO()
+        call_command("create_default_point_sources", stdout=out)
+
+        # 验证每个用户都有默认积分池
+        for user in [user1, user2, user3]:
+            point_sources = PointSource.objects.filter(user=user, tags__slug="default")
+            self.assertEqual(point_sources.count(), 1)
+
+            ps = point_sources.first()
+            self.assertEqual(ps.initial_points, 0)
+            self.assertEqual(ps.remaining_points, 0)
+            self.assertTrue(ps.allow_recharge)
+            self.assertIn("管理命令", ps.notes)
+            self.assertIn("存量用户", ps.notes)
+
+        # 验证输出
+        output = out.getvalue()
+        self.assertIn("找到 3 个用户没有默认积分池", output)
+        self.assertIn("成功创建 3 个默认积分池", output)
+        self.assertIn("所有用户现在都拥有默认积分池", output)
+
+    def test_skip_users_with_existing_default_source(self):
+        """测试跳过已有默认积分池的用户."""
+        # 创建用户并手动创建默认积分池
+        user = User.objects.create_user(username="user1")
+        ps = PointSource.objects.create(
+            user=user, initial_points=100, remaining_points=100
+        )
+        ps.tags.add(self.default_tag)
+
+        # 运行命令
+        out = StringIO()
+        call_command("create_default_point_sources", stdout=out)
+
+        # 验证没有创建新的积分池
+        self.assertEqual(PointSource.objects.filter(user=user).count(), 1)
+
+        # 验证输出
+        output = out.getvalue()
+        self.assertIn("所有用户都已经拥有默认积分池", output)
+
+    def test_dry_run_mode(self):
+        """测试预览模式不实际创建数据."""
+        # 创建2个用户
+        user1 = User.objects.create_user(username="user1")
+        user2 = User.objects.create_user(username="user2")
+
+        # 删除自动创建的默认积分池（通过信号处理器创建的）
+        PointSource.objects.filter(
+            user__in=[user1, user2], tags__slug="default"
+        ).delete()
+
+        # 运行预览模式
+        out = StringIO()
+        call_command("create_default_point_sources", "--dry-run", stdout=out)
+
+        # 验证没有创建积分池
+        self.assertEqual(PointSource.objects.count(), 0)
+
+        # 验证输出
+        output = out.getvalue()
+        self.assertIn("【预览模式】", output)
+        self.assertIn("找到 2 个用户没有默认积分池", output)
+        self.assertIn("总计将创建 2 个默认积分池", output)
+        self.assertIn("不带 --dry-run 参数", output)
+
+    def test_default_tag_not_exists(self):
+        """测试 default 标签不存在时的错误处理."""
+        # 创建用户
+        User.objects.create_user(username="user1")
+
+        # 删除 default 标签（这也会删除关联的积分池）
+        Tag.objects.filter(slug="default").delete()
+
+        # 运行命令
+        out = StringIO()
+        call_command("create_default_point_sources", stdout=out)
+
+        # 验证没有创建积分池
+        self.assertEqual(PointSource.objects.count(), 0)
+
+        # 验证输出
+        output = out.getvalue()
+        self.assertIn("错误", output)
+        self.assertIn("未找到 default 标签", output)
+        self.assertIn("先运行 migrate", output)
+
+    def test_batch_processing(self):
+        """测试批量处理功能."""
+        # 使用 bulk_create 创建10个用户（不会触发信号）
+        users = User.objects.bulk_create(
+            [User(username=f"user{i}", password="test123") for i in range(10)]
+        )
+
+        # 运行命令，指定批次大小为3
+        out = StringIO()
+        call_command("create_default_point_sources", "--batch-size=3", stdout=out)
+
+        # 验证所有用户都有默认积分池
+        for user in users:
+            self.assertTrue(
+                PointSource.objects.filter(user=user, tags__slug="default").exists(),
+                f"用户 {user.username} 应该有默认积分池",
+            )
+
+        # 验证输出包含成功创建的信息
+        output = out.getvalue()
+        self.assertIn("成功创建 10 个默认积分池", output)
+
+    def test_mixed_scenario(self):
+        """测试混合场景: 部分用户有默认积分池, 部分没有."""
+        # 创建用户1，有默认积分池
+        user1 = User.objects.create_user(username="user1")
+        # 删除信号自动创建的，然后手动创建一个
+        PointSource.objects.filter(user=user1, tags__slug="default").delete()
+        ps1 = PointSource.objects.create(
+            user=user1, initial_points=50, remaining_points=50
+        )
+        ps1.tags.add(self.default_tag)
+
+        # 创建用户2和3，没有默认积分池
+        user2 = User.objects.create_user(username="user2")
+        user3 = User.objects.create_user(username="user3")
+
+        # 删除自动创建的默认积分池
+        PointSource.objects.filter(
+            user__in=[user2, user3], tags__slug="default"
+        ).delete()
+
+        # 用户2有其他标签的积分池
+        other_tag = Tag.objects.create(name="other", slug="other")
+        ps2 = PointSource.objects.create(
+            user=user2, initial_points=100, remaining_points=100
+        )
+        ps2.tags.add(other_tag)
+
+        # 运行命令
+        out = StringIO()
+        call_command("create_default_point_sources", stdout=out)
+
+        # 验证user1的积分池数量没变
+        self.assertEqual(PointSource.objects.filter(user=user1).count(), 1)
+
+        # 验证user2和user3有了默认积分池
+        self.assertTrue(
+            PointSource.objects.filter(user=user2, tags__slug="default").exists()
+        )
+        self.assertTrue(
+            PointSource.objects.filter(user=user3, tags__slug="default").exists()
+        )
+
+        # user2现在有2个积分池（other 和 default）
+        self.assertEqual(PointSource.objects.filter(user=user2).count(), 2)
+
+        # 验证输出
+        output = out.getvalue()
+        self.assertIn("找到 2 个用户没有默认积分池", output)
+        self.assertIn("成功创建 2 个默认积分池", output)
+
+    def test_dry_run_shows_sample_users(self):
+        """测试预览模式显示示例用户."""
+        # 使用 bulk_create 创建15个用户（不会触发信号）
+        User.objects.bulk_create(
+            [
+                User(
+                    username=f"user{i}",
+                    email=f"user{i}@example.com",
+                    password="test123",
+                )
+                for i in range(15)
+            ]
+        )
+
+        # 运行预览模式
+        out = StringIO()
+        call_command("create_default_point_sources", "--dry-run", stdout=out)
+
+        output = out.getvalue()
+        # 应该显示前10个用户
+        self.assertIn("user0", output)
+        self.assertIn("user9", output)
+        # 应该显示还有其他用户
+        self.assertIn("以及其他 5 个用户", output)
+
+    def test_default_tag_properties(self):
+        """测试创建的积分池继承了 default 标签的属性."""
+        user = User.objects.create_user(username="testuser")
+
+        # 删除自动创建的默认积分池
+        PointSource.objects.filter(user=user, tags__slug="default").delete()
+
+        # 运行命令
+        out = StringIO()
+        call_command("create_default_point_sources", stdout=out)
+
+        # 获取创建的积分池
+        ps = PointSource.objects.get(user=user, tags__slug="default")
+
+        # 验证可充值和可提现
+        self.assertTrue(ps.is_rechargeable)
+        self.assertTrue(ps.is_withdrawable)
+
+    def test_no_users_scenario(self):
+        """测试没有用户时的处理."""
+        # 确保没有用户（除了可能在 setUp 中创建的）
+        User.objects.all().delete()
+
+        # 运行命令
+        out = StringIO()
+        call_command("create_default_point_sources", stdout=out)
+
+        output = out.getvalue()
+        self.assertIn("所有用户都已经拥有默认积分池", output)

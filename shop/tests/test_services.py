@@ -17,7 +17,10 @@ class RedeemItemServiceTests(TestCase):
         self.user = get_user_model().objects.create_user(
             username="testuser", email="test@example.com", password="password123"
         )
-        self.default_tag = Tag.objects.create(name="default", is_default=True)
+        self.default_tag, _ = Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
 
     def test_redeem_item_success(self):
         """Test successful item redemption."""

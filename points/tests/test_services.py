@@ -218,7 +218,10 @@ class SpendPointsTests(TestCase):
 
     def test_spend_points_success(self):
         """Test spending points deducts from sources."""
-        Tag.objects.create(name="default", is_default=True)
+        Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
 
         grant_points(
             user_profile=self.user,
@@ -289,7 +292,7 @@ class SpendPointsTests(TestCase):
 
         # Priority tag points should be used first
         priority_source = PointSource.objects.filter(tags__name="priority").first()
-        default_source = PointSource.objects.filter(tags__name="default").first()
+        default_source = PointSource.objects.filter(tags__slug="default").first()
 
         priority_source.refresh_from_db()
         default_source.refresh_from_db()
@@ -299,7 +302,10 @@ class SpendPointsTests(TestCase):
 
     def test_spend_points_multiple_sources(self):
         """Test spending points across multiple sources."""
-        Tag.objects.create(name="default", is_default=True)
+        Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
 
         # Grant points in multiple batches
         grant_points(
@@ -340,7 +346,10 @@ class SpendPointsTests(TestCase):
     def test_spend_points_fallback_to_any_remaining(self):
         """Test that spend_points falls back to any remaining sources."""
         # Create a default tag and a non-default tag
-        Tag.objects.create(name="default", is_default=True)
+        Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
         Tag.objects.create(name="other")
 
         # Grant points with non-default tag
@@ -361,7 +370,10 @@ class SpendPointsTests(TestCase):
 
     def test_spend_points_with_priority_tag_fallback(self):
         """Test spending with priority tag that doesn't have enough points."""
-        Tag.objects.create(name="default", is_default=True)
+        Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
         Tag.objects.create(name="priority")
 
         # Grant small amount with priority tag
@@ -393,7 +405,10 @@ class SpendPointsTests(TestCase):
 
     def test_spend_points_with_priority_then_default_then_any(self):
         """Test complete fallback chain: priority -> default -> any remaining."""
-        Tag.objects.create(name="default", is_default=True)
+        Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
         Tag.objects.create(name="priority")
         Tag.objects.create(name="other")
 
@@ -434,7 +449,7 @@ class SpendPointsTests(TestCase):
 
         # Verify consumption from each source
         priority_source = PointSource.objects.filter(tags__name="priority").first()
-        default_source = PointSource.objects.filter(tags__name="default").first()
+        default_source = PointSource.objects.filter(tags__slug="default").first()
         other_source = PointSource.objects.filter(tags__name="other").first()
 
         priority_source.refresh_from_db()
@@ -450,7 +465,10 @@ class SpendPointsTests(TestCase):
 
     def test_spend_points_fifo_order(self):
         """Test that points are consumed in FIFO order (oldest first)."""
-        Tag.objects.create(name="default", is_default=True)
+        Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
 
         # Grant points in three batches with time gaps
         source1 = grant_points(
@@ -534,7 +552,10 @@ class TransactionAtomicityTests(TransactionTestCase):
 
     def test_spend_points_atomic_deduction(self):
         """Test that spend_points deducts from multiple sources atomically."""
-        Tag.objects.create(name="default", is_default=True)
+        Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
 
         # Grant points across multiple sources
         grant_points(
@@ -617,7 +638,10 @@ class EdgeCaseTests(TestCase):
 
     def test_spend_points_exact_balance(self):
         """Test spending exact balance (all points)."""
-        Tag.objects.create(name="default", is_default=True)
+        Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
 
         grant_points(
             user_profile=self.user,
@@ -642,7 +666,10 @@ class EdgeCaseTests(TestCase):
 
     def test_spend_points_one_point(self):
         """Test spending minimum amount (1 point)."""
-        Tag.objects.create(name="default", is_default=True)
+        Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
 
         grant_points(
             user_profile=self.user,
@@ -679,7 +706,10 @@ class EdgeCaseTests(TestCase):
 
     def test_spend_points_consumed_sources_tracking(self):
         """Test that consumed sources are properly tracked in transaction."""
-        Tag.objects.create(name="default", is_default=True)
+        Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
 
         # Create multiple sources
         source1 = grant_points(
@@ -716,7 +746,10 @@ class EdgeCaseTests(TestCase):
 
     def test_spend_points_priority_tag_not_exist(self):
         """Test spending with priority tag that doesn't exist."""
-        Tag.objects.create(name="default", is_default=True)
+        Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
 
         grant_points(
             user_profile=self.user,
@@ -778,7 +811,10 @@ class EdgeCaseTests(TestCase):
 
     def test_spend_points_transaction_record(self):
         """Test that spend_points creates correct transaction record."""
-        Tag.objects.create(name="default", is_default=True)
+        Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
 
         grant_points(
             user_profile=self.user,

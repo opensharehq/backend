@@ -70,7 +70,10 @@ class RedemptionAdminTests(TestCase):
             email="test@example.com",
             password="password123",
         )
-        self.default_tag = Tag.objects.create(name="default", is_default=True)
+        self.default_tag, _ = Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
 
     def test_has_shipping_address_in_list_display(self):
         """Test that has_shipping_address is shown in list display."""

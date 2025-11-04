@@ -20,7 +20,10 @@ class RedeemConfirmAddressSelectionTests(TestCase):
             email="test@example.com",
             password="password123",
         )
-        self.default_tag = Tag.objects.create(name="default", is_default=True)
+        self.default_tag, _ = Tag.objects.get_or_create(
+            slug="default",
+            defaults={"name": "默认", "is_default": True},
+        )
         self.client.login(username="testuser", password="password123")
 
     def test_shipping_item_shows_address_selection(self):

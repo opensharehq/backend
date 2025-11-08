@@ -243,10 +243,7 @@ SOCIAL_AUTH_USER_MODEL = "accounts.User"
 
 SOCIAL_AUTH_URL_NAMESPACE = "social"
 SOCIAL_AUTH_ADMIN_USER_SEARCH_FIELDS = ["username", "first_name", "email"]
-SOCIAL_AUTH_REDIRECT_IS_HTTPS = env.bool(
-    "SOCIAL_AUTH_REDIRECT_IS_HTTPS",
-    default=not DEBUG,
-)
+SOCIAL_AUTH_REDIRECT_IS_HTTPS = True
 
 
 # email backend
@@ -307,10 +304,6 @@ SOCIAL_AUTH_PIPELINE = (
     "accounts.pipeline.update_user_profile_from_github",
 )
 
-# OAuth Scopes to request organization access
-SOCIAL_AUTH_GITHUB_SCOPE = ["user", "read:org"]
-SOCIAL_AUTH_GITEE_SCOPE = ["user_info", "groups"]
-SOCIAL_AUTH_HUGGINGFACE_SCOPE = ["profile", "read-repos"]
 
 # GitHub OAuth extra arguments to show organization access prompt
 # This will trigger the organization authorization screen where users can grant access to their orgs

@@ -70,8 +70,8 @@
     <div class="text-center my-3">
         <span class="text-muted">或</span>
     </div>
-    <!-- GitHub OAuth 注册 -->
-    <div class="mb-4">
+    <!-- 第三方 OAuth 注册 -->
+    <div class="mb-4 d-grid gap-2">
         <a href="{% url 'social:begin' 'github' %}" class="btn btn-outline-dark btn-icon-text w-100">
             <svg class="btn-icon-prepend" fill="currentColor" viewBox="-3 0 262 262" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid">
                 <g id="SVGRepo_bgCarrier" stroke-width="0"></g>
@@ -81,6 +81,14 @@
                 </g>
             </svg>
             使用 GitHub 注册
+        </a>
+        <a href="{% url 'social:begin' 'gitee' %}" class="btn btn-outline-danger btn-icon-text w-100">
+            <i class="btn-icon-prepend" data-lucide="git-branch"></i>
+            使用 Gitee 注册
+        </a>
+        <a href="{% url 'social:begin' 'huggingface' %}" class="btn btn-outline-primary btn-icon-text w-100">
+            <i class="btn-icon-prepend" data-lucide="brain"></i>
+            使用 HuggingFace 注册
         </a>
     </div>
     <p class="mt-3 text-secondary">

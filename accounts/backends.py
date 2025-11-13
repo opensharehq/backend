@@ -19,7 +19,7 @@ class GiteeOAuth2(BaseOAuth2):
     USER_DATA_URL = "https://gitee.com/api/v5/user"
 
     # Default scopes for user authentication
-    DEFAULT_SCOPE = ["user_info", "emails"]
+    DEFAULT_SCOPE = ["user_info"]
     SCOPE_SEPARATOR = " "
 
     # User ID key in the API response

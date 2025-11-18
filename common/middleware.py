@@ -22,7 +22,7 @@ class CanonicalHostRedirectMiddleware:
 
         if hostname == self.source_host:
             return HttpResponsePermanentRedirect(
-                self._build_redirect_url(request, host_port, request.is_secure())
+                self._build_redirect_url(request, host_port, True)
             )
 
         return self.get_response(request)

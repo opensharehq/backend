@@ -1,21 +1,22 @@
+"""Middleware for redirecting requests to the canonical host."""
+
 from urllib.parse import urlsplit, urlunsplit
 
 from django.http import HttpResponsePermanentRedirect
 
 
 class CanonicalHostRedirectMiddleware:
-    """
-    Redirects requests from open-share.cn to www.open-share.cn to enforce
-    a single canonical host, keeping scheme, path, query, and non-standard ports.
-    """
+    """Redirect requests to the canonical domain while preserving scheme, path, query, and ports."""
 
-    source_host = "open-share.cn"
-    target_host = "www.open-share.cn"
+    source_host = "www.open-share.cn"
+    target_host = "open-share.cn"
 
     def __init__(self, get_response):
+        """Initialize the middleware with the given get_response callable."""
         self.get_response = get_response
 
     def __call__(self, request):
+        """Process the request and redirect if the host matches the source host."""
         host_header = request.get_host()
         hostname, _, host_port = host_header.partition(":")
         hostname = hostname.lower()
@@ -35,11 +36,12 @@ class CanonicalHostRedirectMiddleware:
 
     def _determine_port(self, host_port: str, request) -> str:
         """Pick the client-visible port when the Host header or trusted proxy supplies it."""
-
         if host_port:
             return host_port
 
-        forwarded_port = request.headers.get("X-Forwarded-Port", "").split(",")[0].strip()
+        forwarded_port = (
+            request.headers.get("X-Forwarded-Port", "").split(",")[0].strip()
+        )
         if forwarded_port:
             return forwarded_port
 

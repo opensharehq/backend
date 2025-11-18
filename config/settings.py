@@ -175,6 +175,11 @@ CSRF_TRUSTED_ORIGINS = [
     "https://www.open-share.cn",
 ]
 
+# Respect proxy-provided headers so Django can reconstruct the original request
+USE_X_FORWARDED_HOST = True
+USE_X_FORWARDED_PORT = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 

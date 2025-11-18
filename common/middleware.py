@@ -20,12 +20,6 @@ class CanonicalHostRedirectMiddleware:
         hostname, _, host_port = host_header.partition(":")
         hostname = hostname.lower()
 
-        # 强制 HTTPS 重定向
-        if not request.is_secure():
-            return HttpResponsePermanentRedirect(
-                self._build_redirect_url(request, host_port, is_secure=True)
-            )
-
         if hostname == self.source_host:
             return HttpResponsePermanentRedirect(
                 self._build_redirect_url(request, host_port, request.is_secure())
@@ -36,12 +30,17 @@ class CanonicalHostRedirectMiddleware:
     def _build_redirect_url(self, request, host_port: str, is_secure: bool) -> str:
         scheme, _netloc, path, query, fragment = urlsplit(request.build_absolute_uri())
         scheme = "https" if is_secure else scheme
-        port = host_port or request.get_port()
-
-        # Preserve non-default ports (useful in staging), but drop default HTTP/S ports.
-        if port not in {"80", "443"}:
-            netloc = f"{self.target_host}:{port}"
-        else:
-            netloc = self.target_host
-
+        netloc = self.target_host
         return urlunsplit((scheme, netloc, path, query, fragment))
+
+    def _determine_port(self, host_port: str, request) -> str:
+        """Pick the client-visible port when the Host header or trusted proxy supplies it."""
+
+        if host_port:
+            return host_port
+
+        forwarded_port = request.headers.get("X-Forwarded-Port", "").split(",")[0].strip()
+        if forwarded_port:
+            return forwarded_port
+
+        return ""

@@ -1,0 +1,205 @@
+name: ai-duplicate-detection
+
+on:
+  issues:
+    types: [opened, reopened, edited]
+
+jobs:
+  detect_duplicates:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Collect similar issues
+        id: gather_candidates
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          result-encoding: string
+          script: |
+            const issue = context.payload.issue;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const cleanedText = `${issue.title} ${issue.body || ''}`
+              .toLowerCase()
+              .replace(/[^a-z0-9\u4e00-\u9fa5\s]+/gi, ' ');
+
+            const keywords = Array.from(
+              new Set(
+                cleanedText
+                  .split(/\s+/)
+                  .filter(Boolean)
+                  .filter(token => token.length > 2)
+              )
+            ).slice(0, 10);
+
+            const query = [
+              `repo:${owner}/${repo}`,
+              'type:issue',
+              keywords.length ? keywords.join(' ') : issue.title,
+            ].join(' ');
+
+            const search = await github.rest.search.issuesAndPullRequests({
+              q: query,
+              per_page: 20,
+              sort: 'updated',
+              order: 'desc',
+            });
+
+            const candidates = (search.data.items || [])
+              .filter(item => item.number !== issue.number)
+              .map(item => ({
+                number: item.number,
+                title: item.title,
+                state: item.state,
+                url: item.html_url,
+                body: (item.body || '').slice(0, 800),
+                labels: (item.labels || []).map(label =>
+                  typeof label === 'string' ? label : label.name
+                ),
+                updated_at: item.updated_at,
+              }));
+
+            return JSON.stringify({ query, candidates });
+
+      - name: Detect duplicates with Codex
+        id: run_codex
+        env:
+          CANDIDATE_DATA: ${{ steps.gather_candidates.outputs.result }}
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          responses-api-endpoint: ${{ secrets.RESPONSES_API_ENDPOINT }}
+          prompt: |
+            You are a GitHub issue duplicate detector.
+            Repository: ${{ github.repository }}
+
+            New issue:
+            - number: #${{ github.event.issue.number }}
+            - title: ${{ github.event.issue.title }}
+            - body: ${{ github.event.issue.body || '' }}
+
+            Candidate issues (JSON, may be truncated):
+            ${{ env.CANDIDATE_DATA }}
+
+            Tasks:
+            1) Decide whether any candidate describes the same root problem or request as the new issue. Prefer precision: mark as duplicate only when the overlap is clear (same stack trace, symptoms, repro steps, or feature request).
+            2) Produce ONE line of JSON with keys:
+               - duplicates: array of {number,title,url,state,confidence,reason}
+               - comment: Chinese markdown to post to the new issue; empty string if no duplicates.
+            3) If duplicates exist, the comment must:
+               - List each duplicate with link and its state.
+               - Briefly summarize why it matches.
+               - Ask the reporter to close this issue and follow up on the duplicate issue.
+
+            Output JSON only. No backticks or extra text.
+
+      - name: Comment and label
+        if: steps.run_codex.outputs.final-message != ''
+        uses: actions/github-script@v7
+        env:
+          CODEX_RESULT: ${{ steps.run_codex.outputs['final-message'] }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const marker = '<!-- ai-duplicate-detector -->';
+
+            const parseResult = () => {
+              try {
+                return JSON.parse(process.env.CODEX_RESULT || '{}');
+              } catch (error) {
+                core.warning(`Codex output was not valid JSON: ${error.message}`);
+                return {};
+              }
+            };
+
+            const result = parseResult();
+            const duplicates = Array.isArray(result.duplicates)
+              ? result.duplicates
+              : [];
+
+            if (duplicates.length === 0) {
+              core.info('No duplicates identified.');
+              return;
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.payload.issue.number;
+
+            // avoid posting multiple duplicate comments on edits
+            const existingComments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number, per_page: 100 }
+            );
+
+            const alreadyCommented = existingComments.some(comment =>
+              (comment.body || '').includes(marker)
+            );
+
+            if (alreadyCommented) {
+              core.info('Duplicate notice already posted.');
+              return;
+            }
+
+            const fallbackList = duplicates
+              .map(d => {
+                const state = d.state || 'open';
+                const reason = d.reason ? ` - ${d.reason}` : '';
+                return `- #${d.number} (${state}) ${d.url}${reason}`;
+              })
+              .join('\n');
+
+            const fallbackComment = [
+              '👋 The issue you reported is similar to the following issues:',
+              fallbackList,
+              '',
+              'Please follow up on the duplicate issue and consider closing this issue. If you do not think it is a duplicate, please provide the differences so that we can continue to determine if it is a duplicate.',
+            ].join('\n');
+
+            const commentBody = `${marker}\n${(result.comment || fallbackComment).trim()}`;
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body: commentBody,
+            });
+
+            const label = 'duplicate';
+
+            const ensureLabel = async () => {
+              try {
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number,
+                  labels: [label],
+                });
+              } catch (error) {
+                if (![404, 422].includes(error.status)) throw error;
+
+                try {
+                  await github.rest.issues.createLabel({
+                    owner,
+                    repo,
+                    name: label,
+                    color: 'cfd3d7',
+                    description: 'This issue duplicates an existing one',
+                  });
+                } catch (createError) {
+                  if (![422].includes(createError.status)) throw createError;
+                }
+
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number,
+                  labels: [label],
+                });
+              }
+            };
+
+            await ensureLabel();

@@ -403,13 +403,6 @@ class AccountMergeRequestForm(forms.Form):
             msg = "请输入目标账号的邮箱或用户名（至少一项）"
             raise forms.ValidationError(msg)
 
-        if self.user.is_staff or self.user.is_superuser:
-            msg = "管理员账号不支持发起合并"
-            raise forms.ValidationError(msg)
-        if not self.user.is_active:
-            msg = "当前账号已被停用，无法发起合并"
-            raise forms.ValidationError(msg)
-
         UserModel = get_user_model()
         qs = UserModel.objects.filter(is_active=True)
         if username and email:
@@ -422,17 +415,24 @@ class AccountMergeRequestForm(forms.Form):
         try:
             target = qs.get()
         except UserModel.DoesNotExist:
-            msg = "未找到匹配的目标账号，请检查用户名或邮箱"
+            msg = "未找到匹配的目标账号，请检查用户名或邮箱是否正确"
             raise forms.ValidationError(msg) from None
         except UserModel.MultipleObjectsReturned:
             msg = "匹配到多个账号，请同时提供用户名和邮箱以精确匹配"
             raise forms.ValidationError(msg) from None
 
+        if self.user.is_staff or self.user.is_superuser:
+            msg = "管理员账号不支持发起合并"
+            raise forms.ValidationError(msg)
+        if not self.user.is_active:
+            msg = "当前账号已被停用，无法发起合并"
+            raise forms.ValidationError(msg)
+
         if target == self.user:
             msg = "不能合并到自己的账号"
             raise forms.ValidationError(msg)
         if target.is_staff or target.is_superuser:
-            msg = "不支持将账号合并到管理员账号"
+            msg = "目标账号为管理员，无法合并"
             raise forms.ValidationError(msg)
 
         # Only one pending request per source

@@ -86,6 +86,41 @@ class AccountMergeFormTests(CacheClearTestCase):
         assert not form.is_valid()
         assert "待处理申请过多" in form.errors["__all__"][0]
 
+    def test_form_reports_target_not_found(self):
+        """Shows explicit message when target account is missing."""
+        form = AccountMergeRequestForm(
+            user=self.source, data={"target_username": "ghost"}
+        )
+        assert not form.is_valid()
+        assert "未找到匹配的目标账号" in form.errors["__all__"][0]
+
+    def test_form_blocks_admin_target(self):
+        """Merging into admin account is rejected with specific text."""
+        admin_user = self.User.objects.create_superuser(
+            username="admin", email="admin@example.com", password="pwd123456"
+        )
+        form = AccountMergeRequestForm(
+            user=self.source,
+            data={
+                "target_username": admin_user.username,
+                "target_email": admin_user.email,
+            },
+        )
+        assert not form.is_valid()
+        assert "目标账号为管理员" in form.errors["__all__"][0]
+
+    def test_form_requires_username_email_match(self):
+        """Username exists but mismatched email should report not found."""
+        form = AccountMergeRequestForm(
+            user=self.source,
+            data={
+                "target_username": self.target.username,
+                "target_email": "wrong@example.com",
+            },
+        )
+        assert not form.is_valid()
+        assert "未找到匹配的目标账号" in form.errors["__all__"][0]
+
     def test_form_blocks_self_merge(self):
         """User cannot merge into self."""
         form = AccountMergeRequestForm(

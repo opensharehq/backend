@@ -1,9 +1,11 @@
 """User models for accounts app."""
 
+import uuid
+
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.core.cache import cache
 from django.db import models
-from django.db.models import Sum
+from django.db.models import Q, Sum
 
 TOTAL_POINTS_CACHE_KEY_TEMPLATE = "fullsite:accounts:user_total_points:{user_id}"
 TOTAL_POINTS_CACHE_TIMEOUT = 300
@@ -43,6 +45,14 @@ class User(AbstractUser):
     """Custom user model extending AbstractUser."""
 
     is_active = models.BooleanField(default=True)
+    merged_into = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="merged_children",
+        verbose_name="合并到",
+    )
 
     objects = CustomUserManager()
 
@@ -366,3 +376,117 @@ class OrganizationMembership(models.Model):
     def is_admin_or_owner(self):
         """Check if the member has admin or owner privileges."""
         return self.role in [self.Role.OWNER, self.Role.ADMIN]
+
+
+class AccountMergeRequest(models.Model):
+    """User-initiated account merge request awaiting confirmation."""
+
+    class Status(models.TextChoices):
+        """Lifecycle status for merge requests."""
+
+        PENDING = "PENDING", "待处理"
+        ACCEPTED = "ACCEPTED", "已同意"
+        REJECTED = "REJECTED", "已拒绝"
+        EXPIRED = "EXPIRED", "已过期"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="merge_requests_sent",
+        verbose_name="源账号",
+    )
+    target_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="merge_requests_received",
+        verbose_name="目标账号",
+    )
+    target_email_input = models.EmailField(blank=True, verbose_name="目标邮箱输入")
+    target_username_input = models.CharField(
+        max_length=150, blank=True, verbose_name="目标用户名输入"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+        verbose_name="状态",
+    )
+    approve_token = models.CharField(
+        max_length=128, unique=True, db_index=True, verbose_name="确认令牌"
+    )
+    expires_at = models.DateTimeField(verbose_name="过期时间")
+    processed_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
+    processed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="processed_merge_requests",
+        verbose_name="处理人",
+    )
+    asset_snapshot = models.JSONField(default=dict, verbose_name="资产快照")
+    message = models.ForeignKey(
+        "site_messages.Message",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="account_merge_requests",
+        verbose_name="关联消息",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        """Meta configuration for AccountMergeRequest."""
+
+        verbose_name = "账号合并申请"
+        verbose_name_plural = verbose_name
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source_user"],
+                condition=Q(status="PENDING"),
+                name="unique_pending_merge_per_source",
+            ),
+        ]
+
+    def __str__(self):
+        """Show source and target with status for quick audit."""
+        return f"{self.source_user} → {self.target_user} ({self.status})"
+
+    @property
+    def is_expired(self):
+        """Return whether request has passed expiry."""
+        from django.utils import timezone
+
+        return self.expires_at <= timezone.now()
+
+
+class AccountMergeLog(models.Model):
+    """Audit log for merge execution results."""
+
+    request = models.ForeignKey(
+        AccountMergeRequest,
+        on_delete=models.CASCADE,
+        related_name="logs",
+        verbose_name="合并请求",
+    )
+    table_name = models.CharField(max_length=64, verbose_name="表名")
+    migrated_count = models.PositiveIntegerField(default=0, verbose_name="迁移数量")
+    skipped_count = models.PositiveIntegerField(default=0, verbose_name="跳过数量")
+    conflict_count = models.PositiveIntegerField(default=0, verbose_name="冲突数量")
+    notes = models.TextField(blank=True, verbose_name="备注")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        """Meta configuration for AccountMergeLog."""
+
+        verbose_name = "账号合并日志"
+        verbose_name_plural = verbose_name
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        """Return readable summary."""
+        return f"{self.table_name}: +{self.migrated_count}/~{self.conflict_count}"

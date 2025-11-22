@@ -1260,6 +1260,11 @@ def organization_delete(request, slug):
         msg = "您没有权限执行该操作。"
         raise PermissionDenied(msg)
 
+    confirmation = request.POST.get("confirm_slug", "").strip()
+    if confirmation != organization.slug:
+        messages.error(request, "请输入正确的组织标识以确认删除。")
+        return redirect("accounts:organization_settings", slug=slug)
+
     org_name = organization.name
 
     if organization.avatar:

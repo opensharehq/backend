@@ -740,9 +740,18 @@ class OrganizationDeleteViewTests(TestCase):
         org_id = self.org.id
         self.client.login(username="admin", password="password123")
         response = self.client.post(
-            reverse("accounts:organization_delete", args=[self.org.slug])
+            reverse("accounts:organization_delete", args=[self.org.slug]),
+            {"confirm_slug": self.org.slug},
+            follow=True,
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse("accounts:organization_list"))
+        messages = list(response.context["messages"])
+        self.assertTrue(
+            any(
+                message.message == f"组织 {self.org.name} 已删除。"
+                for message in messages
+            )
+        )
         self.assertFalse(Organization.objects.filter(id=org_id).exists())
         self.assertEqual(
             OrganizationMembership.objects.filter(organization_id=org_id).count(), 0
@@ -755,16 +764,44 @@ class OrganizationDeleteViewTests(TestCase):
         self.assertTrue(owner.check_password("password123"))
         self.assertTrue(self.client.login(username="owner", password="password123"))
         response = self.client.post(
-            reverse("accounts:organization_delete", args=[self.org.slug])
+            reverse("accounts:organization_delete", args=[self.org.slug]),
+            {"confirm_slug": self.org.slug},
+            follow=True,
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse("accounts:organization_list"))
+        messages = list(response.context["messages"])
+        self.assertTrue(
+            any(
+                message.message == f"组织 {self.org.name} 已删除。"
+                for message in messages
+            )
+        )
         self.assertFalse(Organization.objects.filter(id=org_id).exists())
         self.assertEqual(
             OrganizationMembership.objects.filter(organization_id=org_id).count(), 0
         )
 
-    def test_get_request_redirects_to_settings(self):
-        """Test that GET request is rejected for non-POST methods."""
+    def test_delete_rejected_with_incorrect_confirmation(self):
+        """Test that deletion is blocked when confirmation slug does not match."""
+        org_id = self.org.id
+        self.client.login(username="admin", password="password123")
+        response = self.client.post(
+            reverse("accounts:organization_delete", args=[self.org.slug]),
+            {"confirm_slug": "wrong-slug"},
+            follow=True,
+        )
+        self.assertRedirects(
+            response, reverse("accounts:organization_settings", args=[self.org.slug])
+        )
+        messages = list(response.context["messages"])
+        self.assertTrue(
+            any("组织标识" in message.message for message in messages),
+            "Expected an error message about confirmation mismatch.",
+        )
+        self.assertTrue(Organization.objects.filter(id=org_id).exists())
+
+    def test_get_request_is_forbidden(self):
+        """Test that GET request is forbidden for delete view."""
         self.client.login(username="admin", password="password123")
         response = self.client.get(
             reverse("accounts:organization_delete", args=[self.org.slug])

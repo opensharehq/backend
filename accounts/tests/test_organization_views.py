@@ -669,3 +669,73 @@ class OrganizationMemberRemoveViewTests(TestCase):
         self.assertFalse(
             OrganizationMembership.objects.filter(id=self.owner_membership.id).exists()
         )
+
+
+class OrganizationDeleteViewTests(TestCase):
+    """Test cases for organization delete view."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.admin_user = User.objects.create_user(
+            username="admin", email="admin@example.com", password="password123"
+        )
+        self.member_user = User.objects.create_user(
+            username="member", email="member@example.com", password="password123"
+        )
+        self.org = Organization.objects.create(
+            name="Test Organization",
+            slug="test-org",
+        )
+        OrganizationMembership.objects.create(
+            user=self.admin_user,
+            organization=self.org,
+            role=OrganizationMembership.Role.ADMIN,
+        )
+        OrganizationMembership.objects.create(
+            user=self.member_user,
+            organization=self.org,
+            role=OrganizationMembership.Role.MEMBER,
+        )
+
+    def test_delete_requires_login(self):
+        """Test that deleting organization requires login."""
+        response = self.client.post(
+            reverse("accounts:organization_delete", args=[self.org.slug])
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response.url)
+        self.assertTrue(Organization.objects.filter(id=self.org.id).exists())
+
+    def test_delete_requires_admin(self):
+        """Test that only admins/owners can delete organization."""
+        self.client.login(username="member", password="password123")
+        response = self.client.post(
+            reverse("accounts:organization_delete", args=[self.org.slug])
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Organization.objects.filter(id=self.org.id).exists())
+
+    def test_delete_success_by_admin(self):
+        """Test that admin can delete organization."""
+        org_id = self.org.id
+        self.client.login(username="admin", password="password123")
+        response = self.client.post(
+            reverse("accounts:organization_delete", args=[self.org.slug])
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Organization.objects.filter(id=org_id).exists())
+        self.assertEqual(
+            OrganizationMembership.objects.filter(organization_id=org_id).count(), 0
+        )
+
+    def test_get_request_redirects_to_settings(self):
+        """Test that GET request redirects to settings page."""
+        self.client.login(username="admin", password="password123")
+        response = self.client.get(
+            reverse("accounts:organization_delete", args=[self.org.slug])
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            reverse("accounts:organization_settings", args=[self.org.slug]),
+        )

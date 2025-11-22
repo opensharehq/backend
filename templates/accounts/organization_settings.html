@@ -169,4 +169,26 @@
             </div>
         </div>
     </div>
+    <div class="row">
+        <div class="col-12 col-lg-8 offset-lg-2 grid-margin stretch-card">
+            <div class="card border-danger">
+                <div class="card-body">
+                    <h6 class="card-title mb-3 text-danger d-flex align-items-center gap-2">
+                        <i data-lucide="alert-triangle" class="icon-sm"></i> 危险操作
+                    </h6>
+                    <p class="text-muted mb-4">
+                        删除组织后，所有成员关系将被移除且无法恢复。请谨慎操作。
+                    </p>
+                    <form method="post"
+                          action="{% url 'accounts:organization_delete' organization.slug %}"
+                          onsubmit="return confirm('确定要删除组织 {{ organization.name }} 吗？此操作无法撤销。');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-danger">
+                            <i data-lucide="trash-2" class="btn-icon-prepend"></i> 删除组织
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
 {% endblock content %}

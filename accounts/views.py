@@ -1230,3 +1230,41 @@ def organization_member_remove(request, slug, member_id):
         return redirect("accounts:organization_list")
 
     return redirect("accounts:organization_members", slug=slug)
+
+
+@login_required
+def organization_delete(request, slug):
+    """
+    Delete an organization (admin/owner only).
+
+    Args:
+        request: HTTP request
+        slug: Organization slug
+
+    """
+    organization = get_object_or_404(Organization, slug=slug)
+
+    try:
+        membership = OrganizationMembership.objects.get(
+            user=request.user, organization=organization
+        )
+    except OrganizationMembership.DoesNotExist:
+        msg = "您不是该组织的成员。"
+        raise PermissionDenied(msg) from None
+
+    if not membership.is_admin_or_owner():
+        msg = "您没有权限执行该操作。"
+        raise PermissionDenied(msg)
+
+    if request.method != "POST":
+        messages.info(request, "请通过删除表单提交请求。")
+        return redirect("accounts:organization_settings", slug=slug)
+
+    org_name = organization.name
+
+    if organization.avatar:
+        organization.avatar.delete(save=False)
+
+    organization.delete()
+    messages.success(request, f"组织 {org_name} 已删除。")
+    return redirect("accounts:organization_list")

@@ -4,7 +4,13 @@ import secrets
 from datetime import timedelta
 
 from django.contrib import messages
-from django.contrib.auth import get_user_model, login, logout, update_session_auth_hash
+from django.contrib.auth import (
+    authenticate,
+    get_user_model,
+    login,
+    logout,
+    update_session_auth_hash,
+)
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import PermissionDenied
@@ -57,7 +63,47 @@ def accounts_index(request):
 
 def sign_in_view(request):
     """Display sign-in page with email, username, and GitHub auth options."""
-    return render(request, "sign_in.html")
+    error_message = None
+    if request.user.is_authenticated:
+        return redirect("accounts:profile")
+
+    if request.method == "POST":
+        login_id = request.POST.get("login-id") or ""
+        password = request.POST.get("password") or ""
+
+        UserModel = get_user_model()
+        candidate_user = UserModel.objects.filter(username=login_id).first()
+        if not candidate_user and "@" in login_id:
+            candidate_user = UserModel.objects.filter(email=login_id).first()
+
+        if candidate_user and candidate_user.merged_into_id:
+            target = candidate_user.merged_into
+            target_label = target.email or target.username
+            error_message = f"该账号已合并到 {target_label}，请使用目标账号登录"
+            messages.error(request, error_message)
+            return render(request, "sign_in.html", {"error_message": error_message})
+
+        user = authenticate(request, username=login_id, password=password)
+        if not user and "@" in login_id:
+            alt_user = UserModel.objects.filter(email=login_id).first()
+            if alt_user:
+                user = authenticate(
+                    request, username=alt_user.username, password=password
+                )
+
+        if not user:
+            error_message = "用户名或密码错误，请重试"
+            messages.error(request, error_message)
+        elif not user.is_active:
+            error_message = "账号已被停用，请联系管理员"
+            messages.error(request, error_message)
+        else:
+            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+            messages.success(request, "登录成功")
+            next_url = request.GET.get("next") or reverse("accounts:profile")
+            return redirect(next_url)
+
+    return render(request, "sign_in.html", {"error_message": error_message})
 
 
 def sign_up_view(request):

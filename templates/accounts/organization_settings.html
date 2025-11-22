@@ -181,7 +181,7 @@
                     </p>
                     <form method="post"
                           action="{% url 'accounts:organization_delete' organization.slug %}"
-                          onsubmit="return confirm('确定要删除组织 {{ organization.name }} 吗？此操作无法撤销。');">
+                          onsubmit="return confirm('确定要删除组织 {{ organization.name|escapejs }} 吗？此操作无法撤销。');">
                         {% csrf_token %}
                         <button type="submit" class="btn btn-outline-danger">
                             <i data-lucide="trash-2" class="btn-icon-prepend"></i> 删除组织

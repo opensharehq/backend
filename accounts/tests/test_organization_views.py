@@ -723,6 +723,18 @@ class OrganizationDeleteViewTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertTrue(Organization.objects.filter(id=self.org.id).exists())
 
+    def test_delete_forbidden_for_non_member_user(self):
+        """Test that a logged-in user without membership cannot delete organization."""
+        outsider = User.objects.create_user(
+            username="outsider", email="outsider@example.com", password="password123"
+        )
+        self.client.force_login(outsider)
+        response = self.client.post(
+            reverse("accounts:organization_delete", args=[self.org.slug])
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Organization.objects.filter(id=self.org.id).exists())
+
     def test_delete_success_by_admin(self):
         """Test that admin can delete organization."""
         org_id = self.org.id

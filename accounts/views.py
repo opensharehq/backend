@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model, login, logout, update_session_au
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.forms import inlineformset_factory
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.encoding import force_str
@@ -1266,10 +1267,11 @@ def organization_delete(request, slug):
         return redirect("accounts:organization_settings", slug=slug)
 
     org_name = organization.name
+    avatar_file = organization.avatar if organization.avatar else None
 
-    if organization.avatar:
-        organization.avatar.delete(save=False)
-
-    organization.delete()
+    with transaction.atomic():
+        organization.delete()
+        if avatar_file:
+            transaction.on_commit(lambda f=avatar_file: f.delete(save=False))
     messages.success(request, f"组织 {org_name} 已删除。")
     return redirect("accounts:organization_list")

@@ -110,7 +110,7 @@
                             <div>
                                 <small class="text-muted">成员数</small>
                                 <div>
-                                    <i data-lucide="users" class="icon-xs"></i> {{ memberships.count }}
+                                    <i data-lucide="users" class="icon-xs"></i> {{ memberships_count }}
                                 </div>
                             </div>
                             {% if organization.location %}
@@ -144,7 +144,7 @@
             <div class="card">
                 <div class="card-body">
                     <h6 class="card-title">
-                        <i data-lucide="users" class="icon-sm"></i> 成员列表 ({{ memberships.count }})
+                        <i data-lucide="users" class="icon-sm"></i> 成员列表 ({{ memberships_count }})
                     </h6>
                     <div class="table-responsive">
                         <table class="table table-hover">

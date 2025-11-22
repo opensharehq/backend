@@ -679,6 +679,9 @@ class OrganizationDeleteViewTests(TestCase):
         self.admin_user = User.objects.create_user(
             username="admin", email="admin@example.com", password="password123"
         )
+        self.owner_user = User.objects.create_user(
+            username="owner", email="owner@example.com", password="password123"
+        )
         self.member_user = User.objects.create_user(
             username="member", email="member@example.com", password="password123"
         )
@@ -690,6 +693,11 @@ class OrganizationDeleteViewTests(TestCase):
             user=self.admin_user,
             organization=self.org,
             role=OrganizationMembership.Role.ADMIN,
+        )
+        OrganizationMembership.objects.create(
+            user=self.owner_user,
+            organization=self.org,
+            role=OrganizationMembership.Role.OWNER,
         )
         OrganizationMembership.objects.create(
             user=self.member_user,
@@ -728,14 +736,25 @@ class OrganizationDeleteViewTests(TestCase):
             OrganizationMembership.objects.filter(organization_id=org_id).count(), 0
         )
 
+    def test_delete_success_by_owner(self):
+        """Test that owner can delete organization."""
+        org_id = self.org.id
+        owner = User.objects.get(username="owner")
+        self.assertTrue(owner.check_password("password123"))
+        self.assertTrue(self.client.login(username="owner", password="password123"))
+        response = self.client.post(
+            reverse("accounts:organization_delete", args=[self.org.slug])
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Organization.objects.filter(id=org_id).exists())
+        self.assertEqual(
+            OrganizationMembership.objects.filter(organization_id=org_id).count(), 0
+        )
+
     def test_get_request_redirects_to_settings(self):
-        """Test that GET request redirects to settings page."""
+        """Test that GET request is rejected for non-POST methods."""
         self.client.login(username="admin", password="password123")
         response = self.client.get(
             reverse("accounts:organization_delete", args=[self.org.slug])
         )
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(
-            response.url,
-            reverse("accounts:organization_settings", args=[self.org.slug]),
-        )
+        self.assertEqual(response.status_code, 405)

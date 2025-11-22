@@ -9,6 +9,7 @@ from django.forms import inlineformset_factory
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
+from django.views.decorators.http import require_POST
 from social_django.models import UserSocialAuth
 
 from points.services import InsufficientPointsError
@@ -860,16 +861,18 @@ def organization_detail(request, slug):
         raise PermissionDenied(msg) from None
 
     # Get all memberships
-    memberships = (
+    memberships = list(
         OrganizationMembership.objects.filter(organization=organization)
         .select_related("user")
         .order_by("-role", "joined_at")
     )
+    memberships_count = len(memberships)
 
     context = {
         "organization": organization,
         "membership": membership,
         "memberships": memberships,
+        "memberships_count": memberships_count,
         "is_admin": membership.is_admin_or_owner(),
     }
 
@@ -1233,6 +1236,7 @@ def organization_member_remove(request, slug, member_id):
 
 
 @login_required
+@require_POST
 def organization_delete(request, slug):
     """
     Delete an organization (admin/owner only).
@@ -1255,10 +1259,6 @@ def organization_delete(request, slug):
     if not membership.is_admin_or_owner():
         msg = "您没有权限执行该操作。"
         raise PermissionDenied(msg)
-
-    if request.method != "POST":
-        messages.info(request, "请通过删除表单提交请求。")
-        return redirect("accounts:organization_settings", slug=slug)
 
     org_name = organization.name
 

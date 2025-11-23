@@ -130,18 +130,17 @@ def _migrate_redemptions(merge_request, source, target):
 
 def _migrate_shipping_addresses(merge_request, source, target):
     """Move shipping addresses with deduplication."""
-    existing_address_keys = set(
-        ShippingAddress.objects.filter(user=target)
-        .values_list(
-            "receiver_name",
-            "phone",
-            "province",
-            "city",
-            "district",
-            "address",
-        )
-        .order_by()
-    )
+    existing_addresses = {
+        (
+            addr.receiver_name,
+            addr.phone,
+            addr.province,
+            addr.city,
+            addr.district,
+            addr.address,
+        ): addr
+        for addr in ShippingAddress.objects.select_for_update().filter(user=target)
+    }
     migrated = 0
     skipped = 0
     for address in ShippingAddress.objects.select_for_update().filter(user=source):
@@ -153,13 +152,17 @@ def _migrate_shipping_addresses(merge_request, source, target):
             address.district,
             address.address,
         )
-        if key in existing_address_keys:
+        if key in existing_addresses:
+            destination = existing_addresses[key]
+            Redemption.objects.filter(shipping_address=address).update(
+                shipping_address=destination
+            )
             skipped += 1
             address.delete()
             continue
         address.user = target
         address.save(update_fields=["user"])
-        existing_address_keys.add(key)
+        existing_addresses[key] = address
         migrated += 1
     _log(
         merge_request,

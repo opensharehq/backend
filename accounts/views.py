@@ -15,15 +15,13 @@ from django.contrib.auth import (
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import PermissionDenied
-from django.db import IntegrityError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.forms import inlineformset_factory
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.encoding import force_str
 from django.utils.http import url_has_allowed_host_and_scheme, urlsafe_base64_decode
-from django.utils.http import urlsafe_base64_decode
 from django.views.decorators.http import require_POST
 from social_django.models import UserSocialAuth
 
@@ -76,27 +74,30 @@ def sign_in_view(request):
         password = request.POST.get("password") or ""
 
         UserModel = get_user_model()
-        candidate_user = UserModel.objects.filter(username=login_id).first()
-        if not candidate_user and "@" in login_id:
-            candidate_user = UserModel.objects.filter(email=login_id).first()
-
-        if candidate_user and candidate_user.merged_into_id:
-            target = candidate_user.merged_into
-            target_label = target.email or target.username
-            error_message = f"该账号已合并到 {target_label}，请使用目标账号登录"
-            messages.error(request, error_message)
-            return render(request, "sign_in.html", {"error_message": error_message})
+        username_match = UserModel.objects.filter(username=login_id).first()
+        email_user = None
+        if "@" in login_id:
+            email_qs = UserModel.objects.filter(email=login_id)
+            email_user = email_qs.filter(is_active=True).first() or email_qs.first()
 
         user = authenticate(request, username=login_id, password=password)
-        if not user and "@" in login_id:
-            alt_user = UserModel.objects.filter(email=login_id).first()
-            if alt_user:
-                user = authenticate(
-                    request, username=alt_user.username, password=password
-                )
+        if not user and email_user:
+            user = authenticate(
+                request, username=email_user.username, password=password
+            )
+
+        candidate_user = username_match or email_user
 
         if not user:
-            if candidate_user and not candidate_user.is_active:
+            if (
+                username_match
+                and username_match.merged_into_id
+                and login_id == username_match.username
+            ):
+                target = username_match.merged_into
+                target_label = target.email or target.username
+                error_message = f"该账号已合并到 {target_label}，请使用目标账号登录"
+            elif candidate_user and not candidate_user.is_active:
                 error_message = "账号已被停用，请联系管理员"
             else:
                 error_message = "用户名或密码错误，请重试"

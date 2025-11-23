@@ -42,8 +42,15 @@
     <form method="post" id="loginForm" class="forms-sample mb-4">
         {% csrf_token %}
         <div class="mb-3">
-            <label for="login-id" class="form-label">邮箱地址或用户名</label>
-            <input type="text" class="form-control" id="login-id" name="login-id" placeholder="请输入邮箱地址或用户名" required>
+            <label for="login-id" class="form-label">邮箱地址或用户名 (email / username)</label>
+            <input
+                type="text"
+                class="form-control"
+                id="login-id"
+                name="login-id"
+                placeholder="请输入邮箱地址或用户名 (email / username)"
+                required
+            >
         </div>
         <div class="mb-3">
             <label for="password" class="form-label">密码</label>

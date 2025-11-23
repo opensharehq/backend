@@ -1,7 +1,7 @@
 """Authentication flow tests for username/email sign-in."""
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 
@@ -84,18 +84,19 @@ class SignInViewTests(TestCase):
 
     def test_safe_next_relative_redirects(self):
         """Relative next path should be honored after login."""
-        target = "/profile/"
+        target = "/dashboard/"
         resp = self.client.post(
             reverse("accounts:sign_in") + f"?next={target}",
             {"login-id": self.user.username, "password": self.password},
             follow=True,
         )
-        assert resp.redirect_chain[-1][0].endswith(target)
+        assert resp.redirect_chain[-1][0] == target
         assert resp.wsgi_request.user.is_authenticated
 
+    @override_settings(ALLOWED_HOSTS=["testserver"])
     def test_safe_next_same_host_absolute_redirects(self):
         """Absolute URL on same host should be allowed."""
-        target = "http://testserver/profile/"
+        target = "http://testserver/dashboard/"
         resp = self.client.post(
             reverse("accounts:sign_in") + f"?next={target}",
             {"login-id": self.user.username, "password": self.password},

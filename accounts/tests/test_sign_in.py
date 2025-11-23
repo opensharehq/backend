@@ -70,3 +70,32 @@ class SignInViewTests(TestCase):
 
         assert not resp.wsgi_request.user.is_authenticated
         assert "已合并到" in resp.content.decode()
+
+    def test_malicious_next_is_rejected(self):
+        """Open redirects are blocked and fallback to profile."""
+        resp = self.client.post(
+            reverse("accounts:sign_in") + "?next=https://evil.com/phish",
+            {"login-id": self.user.username, "password": self.password},
+            follow=True,
+        )
+        # final redirected path should be profile, not external
+        assert resp.redirect_chain[-1][0].endswith(reverse("accounts:profile"))
+        assert resp.wsgi_request.user.is_authenticated
+
+    def test_inactive_account_shows_disabled_message(self):
+        """Inactive users receive specific hint instead of generic failure."""
+        inactive = self.User.objects.create_user(
+            username="inactive_user",
+            email="inactive@example.com",
+            password=self.password,
+            is_active=False,
+        )
+
+        resp = self.client.post(
+            reverse("accounts:sign_in"),
+            {"login-id": inactive.username, "password": self.password},
+            follow=True,
+        )
+
+        assert not resp.wsgi_request.user.is_authenticated
+        assert "已被停用" in resp.content.decode()

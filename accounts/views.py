@@ -3,6 +3,7 @@
 import secrets
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import (
     authenticate,
@@ -20,7 +21,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.encoding import force_str
-from django.utils.http import urlsafe_base64_decode
+from django.utils.http import url_has_allowed_host_and_scheme, urlsafe_base64_decode
 from social_django.models import UserSocialAuth
 
 from messages import services as inbox_services
@@ -92,7 +93,10 @@ def sign_in_view(request):
                 )
 
         if not user:
-            error_message = "用户名或密码错误，请重试"
+            if candidate_user and not candidate_user.is_active:
+                error_message = "账号已被停用，请联系管理员"
+            else:
+                error_message = "用户名或密码错误，请重试"
             messages.error(request, error_message)
         elif not user.is_active:
             error_message = "账号已被停用，请联系管理员"
@@ -100,7 +104,17 @@ def sign_in_view(request):
         else:
             login(request, user, backend="django.contrib.auth.backends.ModelBackend")
             messages.success(request, "登录成功")
-            next_url = request.GET.get("next") or reverse("accounts:profile")
+            raw_next = request.GET.get("next")
+            next_url = (
+                raw_next
+                if raw_next
+                and url_has_allowed_host_and_scheme(
+                    url=raw_next,
+                    allowed_hosts=settings.ALLOWED_HOSTS,
+                    require_https=request.is_secure(),
+                )
+                else reverse("accounts:profile")
+            )
             return redirect(next_url)
 
     return render(request, "sign_in.html", {"error_message": error_message})

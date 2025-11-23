@@ -1,12 +1,13 @@
 """Views for the points app."""
 
 import json
+from collections import defaultdict
 from datetime import timedelta
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import Sum
+from django.db.models import F, Sum
 from django.db.models.functions import TruncDate
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -42,54 +43,75 @@ def _user_tags(user):
     return Tag.objects.filter(point_sources__user=user).distinct().order_by("name")
 
 
-def _collect_daily_changes(user, tag, start_date):
-    changes: dict = {}
+def _build_tag_trends(user, tags, start_date):
+    """
+    Build per-tag trend datasets via two aggregates and one balance lookup.
 
-    earn_sources = (
-        user.point_sources.filter(tags=tag, created_at__date__gte=start_date)
-        .annotate(date=TruncDate("created_at"))
-        .values("date")
-        .annotate(total_points=Sum("initial_points"))
-        .order_by("date")
+    Keeps query count O(1) regardless of标签数量。
+    """
+    tag_ids = list(tags.values_list("id", flat=True))
+
+    earn_rows = (
+        user.point_sources.filter(created_at__date__gte=start_date, tags__in=tag_ids)
+        .annotate(
+            date=TruncDate("created_at"), tag_id=F("tags__id"), tag_name=F("tags__name")
+        )
+        .values("tag_id", "tag_name", "date")
+        .annotate(total=Sum("initial_points"))
     )
-    for item in earn_sources:
-        changes[item["date"]] = changes.get(item["date"], 0) + item["total_points"]
 
-    spend_transactions = (
+    spend_rows = (
         user.point_transactions.filter(
             created_at__date__gte=start_date,
             transaction_type="SPEND",
-            consumed_sources__tags=tag,
+            consumed_sources__tags__in=tag_ids,
         )
-        .annotate(date=TruncDate("created_at"))
-        .values("date")
-        .annotate(total_points=Sum("points"))
-        .order_by("date")
+        .annotate(
+            date=TruncDate("created_at"),
+            tag_id=F("consumed_sources__tags__id"),
+            tag_name=F("consumed_sources__tags__name"),
+        )
+        .values("tag_id", "tag_name", "date")
+        .annotate(total=Sum("points"))
     )
-    for item in spend_transactions:
-        changes[item["date"]] = changes.get(item["date"], 0) + item["total_points"]
 
-    return changes
+    balances = {
+        row["tags__id"]: row["total"]
+        for row in user.point_sources.filter(remaining_points__gt=0, tags__in=tag_ids)
+        .values("tags__id")
+        .annotate(total=Sum("remaining_points"))
+    }
 
+    daily = defaultdict(lambda: defaultdict(int))
+    tag_names = {}
 
-def _build_tag_trend(user, tag, start_date):
-    daily_changes = _collect_daily_changes(user, tag, start_date)
-    current_tag_points = sum(
-        source.remaining_points for source in user.point_sources.filter(tags=tag)
-    )
-    total_change = sum(daily_changes.values())
-    starting_points = current_tag_points - total_change
+    for row in earn_rows:
+        daily[row["tag_id"]][row["date"]] += row["total"]
+        tag_names[row["tag_id"]] = row["tag_name"]
 
-    trend_data = []
-    cumulative = starting_points
-    for offset in range(TREND_DAYS):
-        current_date = start_date + timedelta(days=offset)
-        cumulative += daily_changes.get(current_date, 0)
-        trend_data.append(cumulative)
+    for row in spend_rows:
+        daily[row["tag_id"]][row["date"]] += row["total"]
+        tag_names[row["tag_id"]] = row["tag_name"]
 
-    if current_tag_points > 0 or total_change != 0:
-        return {"label": tag.name, "data": trend_data}
-    return None
+    datasets = []
+    for tag in tags:
+        tag_id = tag.id
+        tag_daily = daily.get(tag_id, {})
+        current_points = balances.get(tag_id, 0)
+        total_change = sum(tag_daily.values())
+        starting_points = current_points - total_change
+
+        cumulative = starting_points
+        trend_data = []
+        for offset in range(TREND_DAYS):
+            current_date = start_date + timedelta(days=offset)
+            cumulative += tag_daily.get(current_date, 0)
+            trend_data.append(cumulative)
+
+        if current_points > 0 or total_change != 0:
+            datasets.append({"label": tag.name, "data": trend_data})
+
+    return datasets
 
 
 @login_required
@@ -122,11 +144,8 @@ def my_points(request):
 
     start_date, _ = _trend_date_range()
     trend_labels = _build_trend_labels(start_date)
-    trend_datasets = []
-    for tag in _user_tags(user):
-        dataset = _build_tag_trend(user, tag, start_date)
-        if dataset:
-            trend_datasets.append(dataset)
+    user_tags = _user_tags(user)
+    trend_datasets = _build_tag_trends(user, user_tags, start_date)
 
     context = {
         "total_points": user.total_points,

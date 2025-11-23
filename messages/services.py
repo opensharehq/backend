@@ -158,14 +158,11 @@ def mark_as_read(user, message_ids=None):
     if message_ids:
         queryset = queryset.filter(message_id__in=message_ids)
 
-    count = queryset.count()
-
-    # 批量更新
     from django.utils import timezone
 
-    queryset.update(is_read=True, read_at=timezone.now())
+    updated = queryset.update(is_read=True, read_at=timezone.now())
 
-    return count
+    return updated
 
 
 @transaction.atomic
@@ -185,10 +182,9 @@ def mark_as_unread(user, message_ids):
         user=user, is_read=True, is_deleted=False, message_id__in=message_ids
     )
 
-    count = queryset.count()
-    queryset.update(is_read=False, read_at=None)
+    updated = queryset.update(is_read=False, read_at=None)
 
-    return count
+    return updated
 
 
 @transaction.atomic
@@ -208,10 +204,9 @@ def delete_messages(user, message_ids):
         user=user, is_deleted=False, message_id__in=message_ids
     )
 
-    count = queryset.count()
-    queryset.update(is_deleted=True)
+    updated = queryset.update(is_deleted=True)
 
-    return count
+    return updated
 
 
 def get_message_stats(user):

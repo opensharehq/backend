@@ -131,11 +131,10 @@ INSTALLED_APPS = [
     "messages.apps.SiteMessagesConfig",
 ]
 
-MIDDLEWARE = [
+_BASE_MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "common.middleware.CanonicalHostRedirectMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
-    "django.middleware.cache.UpdateCacheMiddleware",
     "django.middleware.gzip.GZipMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.http.ConditionalGetMiddleware",
@@ -144,10 +143,18 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "django.middleware.cache.FetchFromCacheMiddleware",
     "django.contrib.flatpages.middleware.FlatpageFallbackMiddleware",
     "django.contrib.redirects.middleware.RedirectFallbackMiddleware",
 ]
+
+if REDIS_URL:
+    MIDDLEWARE = [
+        "django.middleware.cache.UpdateCacheMiddleware",
+        *_BASE_MIDDLEWARE,
+        "django.middleware.cache.FetchFromCacheMiddleware",
+    ]
+else:
+    MIDDLEWARE = _BASE_MIDDLEWARE
 
 ROOT_URLCONF = "config.urls"
 
@@ -258,7 +265,7 @@ AUTH_USER_MODEL = "accounts.User"
 SOCIAL_AUTH_USER_MODEL = "accounts.User"
 
 SOCIAL_AUTH_URL_NAMESPACE = "social"
-SOCIAL_AUTH_ADMIN_USER_SEARCH_FIELDS = ["username", "first_name", "email"]
+SOCIAL_AUTH_ADMIN_USER_SEARCH_FIELDzS = ["username", "first_name", "email"]
 SOCIAL_AUTH_REDIRECT_IS_HTTPS = True
 
 
@@ -489,22 +496,27 @@ if TESTING:
 
     LOGGING["root"]["level"] = "ERROR"
 
-if not TESTING:
-    INTERNAL_IPS = [
-        # ...
-        "127.0.0.1",
-        # ...
-    ]
-    INSTALLED_APPS = [
-        *INSTALLED_APPS,
-        "debug_toolbar",
-    ]
-    gzip_index = MIDDLEWARE.index("django.middleware.gzip.GZipMiddleware")
-    MIDDLEWARE = [
-        *MIDDLEWARE[: gzip_index + 1],
-        "debug_toolbar.middleware.DebugToolbarMiddleware",
-        *MIDDLEWARE[gzip_index + 1 :],
-    ]
+if DEBUG and not TESTING:
+    try:
+        import debug_toolbar  # noqa: F401
+    except ImportError:
+        pass
+    else:
+        INTERNAL_IPS = [
+            # ...
+            "127.0.0.1",
+            # ...
+        ]
+        INSTALLED_APPS = [
+            *INSTALLED_APPS,
+            "debug_toolbar",
+        ]
+        gzip_index = MIDDLEWARE.index("django.middleware.gzip.GZipMiddleware")
+        MIDDLEWARE = [
+            *MIDDLEWARE[: gzip_index + 1],
+            "debug_toolbar.middleware.DebugToolbarMiddleware",
+            *MIDDLEWARE[gzip_index + 1 :],
+        ]
 
 
 # security config

@@ -38,7 +38,10 @@ urlpatterns = [
     path("<str:username>/", public_profile_view, name="public_profile"),
 ]
 
-if not settings.TESTING:
-    from debug_toolbar.toolbar import debug_toolbar_urls
-
-    urlpatterns = [*urlpatterns, *debug_toolbar_urls()]
+if settings.DEBUG and not settings.TESTING:
+    try:
+        from debug_toolbar.toolbar import debug_toolbar_urls
+    except ImportError:
+        pass
+    else:
+        urlpatterns = [*urlpatterns, *debug_toolbar_urls()]

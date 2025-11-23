@@ -43,8 +43,10 @@ jobs:
           path: |
             .uv-cache
             .uv_cache
-          key: ${{ runner.os }}-uv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+            .venv
+          key: ${{ runner.os }}-uv-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
           restore-keys: |
+            ${{ runner.os }}-uv-${{ matrix.python-version }}-
             ${{ runner.os }}-uv-
 
       - name: Install dependencies
@@ -63,7 +65,7 @@ jobs:
             --durations 10
           uv run coverage combine
           uv run coverage xml
-          uv run coverage report --fail-under=90
+          uv run coverage report --fail-under=100
           uv run coverage report --skip-covered --skip-empty
 
       - name: Generate coverage HTML report
@@ -73,6 +75,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report
+          name: coverage-report-${{ matrix.python-version }}
           path: htmlcov/
           retention-days: 7

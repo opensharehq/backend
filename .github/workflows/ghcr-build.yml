@@ -20,11 +20,13 @@ env:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       PYTHONUTF8: "1"
       PYTHONIOENCODING: utf-8
+      DJANGO_LOG_LEVEL: ERROR
 
     steps:
       - name: Checkout
@@ -42,15 +44,34 @@ jobs:
             .venv
             .uv-cache
             .uv_cache
-          key: ${{ runner.os }}-uv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          key: ${{ runner.os }}-uv-build-${{ hashFiles('pyproject.toml', 'uv.lock') }}
           restore-keys: |
+            ${{ runner.os }}-uv-build-
             ${{ runner.os }}-uv-
 
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Run tests
-        run: uv run manage.py test --parallel --keepdb
+      - name: Run Ruff check
+        run: uvx ruff check .
+
+      - name: Run Ruff format check
+        run: uvx ruff format --check .
+
+      - name: Run tests with coverage
+        run: |
+          uv run coverage erase
+          uv run coverage run \
+            --concurrency=multiprocessing \
+            --parallel-mode \
+            manage.py test \
+            --parallel \
+            --keepdb \
+            --timing \
+            --durations 10
+          uv run coverage combine
+          uv run coverage xml
+          uv run coverage report --fail-under=90
 
   build-and-push:
     runs-on: ubuntu-latest

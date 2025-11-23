@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ghcr-build-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write
@@ -45,8 +49,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      # - name: Run tests
-      #   run: uv run manage.py test --parallel --keepdb
+      - name: Run tests
+        run: uv run manage.py test --parallel --keepdb
 
   build-and-push:
     runs-on: ubuntu-latest

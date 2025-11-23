@@ -7,6 +7,10 @@ on:
       - develop
   pull_request:
 
+concurrency:
+  group: django-tests-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -14,6 +18,9 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      matrix:
+        python-version: ["3.12"]
     env:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
@@ -27,6 +34,8 @@ jobs:
 
       - name: Set up Python with uv
         uses: astral-sh/setup-uv@v2
+        with:
+          python-version: ${{ matrix.python-version }}
 
       - name: Cache uv dependencies
         uses: actions/cache@v4
@@ -53,16 +62,12 @@ jobs:
             --timing \
             --durations 10
           uv run coverage combine
-          uv run coverage report
+          uv run coverage xml
+          uv run coverage report --fail-under=90
           uv run coverage report --skip-covered --skip-empty
 
       - name: Generate coverage HTML report
         run: uv run coverage html
-
-      - name: Check coverage threshold
-        run: |
-          # 检查覆盖率是否达到 90%，使用 --fail-under 参数
-          uv run coverage report --fail-under=90
 
       - name: Upload coverage HTML report
         if: always()

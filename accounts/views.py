@@ -16,12 +16,15 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError
+from django.db import transaction
 from django.forms import inlineformset_factory
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.encoding import force_str
 from django.utils.http import url_has_allowed_host_and_scheme, urlsafe_base64_decode
+from django.utils.http import urlsafe_base64_decode
+from django.views.decorators.http import require_POST
 from social_django.models import UserSocialAuth
 
 from messages import services as inbox_services
@@ -1177,16 +1180,18 @@ def organization_detail(request, slug):
         raise PermissionDenied(msg) from None
 
     # Get all memberships
-    memberships = (
+    memberships = list(
         OrganizationMembership.objects.filter(organization=organization)
         .select_related("user")
         .order_by("-role", "joined_at")
     )
+    memberships_count = len(memberships)
 
     context = {
         "organization": organization,
         "membership": membership,
         "memberships": memberships,
+        "memberships_count": memberships_count,
         "is_admin": membership.is_admin_or_owner(),
     }
 
@@ -1547,3 +1552,44 @@ def organization_member_remove(request, slug, member_id):
         return redirect("accounts:organization_list")
 
     return redirect("accounts:organization_members", slug=slug)
+
+
+@login_required
+@require_POST
+def organization_delete(request, slug):
+    """
+    Delete an organization (admin/owner only).
+
+    Args:
+        request: HTTP request
+        slug: Organization slug
+
+    """
+    organization = get_object_or_404(Organization, slug=slug)
+
+    try:
+        membership = OrganizationMembership.objects.get(
+            user=request.user, organization=organization
+        )
+    except OrganizationMembership.DoesNotExist:
+        msg = "您不是该组织的成员。"
+        raise PermissionDenied(msg) from None
+
+    if not membership.is_admin_or_owner():
+        msg = "您没有权限执行该操作。"
+        raise PermissionDenied(msg)
+
+    confirmation = request.POST.get("confirm_slug", "").strip()
+    if confirmation != organization.slug:
+        messages.error(request, "请输入正确的组织标识以确认删除。")
+        return redirect("accounts:organization_settings", slug=slug)
+
+    org_name = organization.name
+    avatar_file = organization.avatar if organization.avatar else None
+
+    with transaction.atomic():
+        organization.delete()
+        if avatar_file:
+            transaction.on_commit(lambda f=avatar_file: f.delete(save=False))
+    messages.success(request, f"组织 {org_name} 已删除。")
+    return redirect("accounts:organization_list")

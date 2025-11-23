@@ -13,6 +13,7 @@ from .views import (
     merge_request_view,
     merge_review_view,
     organization_create,
+    organization_delete,
     organization_detail,
     organization_list,
     organization_member_add,
@@ -118,6 +119,11 @@ urlpatterns = [
         "organizations/<slug:slug>/settings/",
         organization_settings,
         name="organization_settings",
+    ),
+    path(
+        "organizations/<slug:slug>/delete/",
+        organization_delete,
+        name="organization_delete",
     ),
     path(
         "organizations/<slug:slug>/members/",

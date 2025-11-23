@@ -2,8 +2,9 @@ name: Django Tests
 
 on:
   push:
-    branches-ignore:
+    branches:
       - main
+      - develop
   pull_request:
 
 permissions:
@@ -12,26 +13,25 @@ permissions:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       PYTHONUTF8: "1"
       PYTHONIOENCODING: utf-8
+      DJANGO_LOG_LEVEL: ERROR
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up uv
+      - name: Set up Python with uv
         uses: astral-sh/setup-uv@v2
-        with:
-          python-version: "3.12"
 
-      - name: Cache uv environment
+      - name: Cache uv dependencies
         uses: actions/cache@v4
         with:
           path: |
-            .venv
             .uv-cache
             .uv_cache
           key: ${{ runner.os }}-uv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
@@ -44,7 +44,30 @@ jobs:
       - name: Run tests with coverage
         run: |
           uv run coverage erase
-          # 仅显示 error 级日志
-          DJANGO_LOG_LEVEL=ERROR uv run coverage run --concurrency=multiprocessing --parallel-mode manage.py test --parallel --keepdb --timing --durations 10
+          uv run coverage run \
+            --concurrency=multiprocessing \
+            --parallel-mode \
+            manage.py test \
+            --parallel \
+            --keepdb \
+            --timing \
+            --durations 10
           uv run coverage combine
           uv run coverage report
+          uv run coverage report --skip-covered --skip-empty
+
+      - name: Generate coverage HTML report
+        run: uv run coverage html
+
+      - name: Check coverage threshold
+        run: |
+          # 检查覆盖率是否达到 90%，使用 --fail-under 参数
+          uv run coverage report --fail-under=90
+
+      - name: Upload coverage HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: htmlcov/
+          retention-days: 7

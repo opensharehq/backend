@@ -7,6 +7,7 @@ from django.contrib.auth.forms import (
     SetPasswordForm,
     UserCreationForm,
 )
+from django.utils import timezone
 
 from .models import (
     AccountMergeRequest,
@@ -398,6 +399,16 @@ class AccountMergeRequestForm(forms.Form):
         cleaned = super().clean()
         username = cleaned.get("target_username")
         email = cleaned.get("target_email")
+
+        now = timezone.now()
+        # expire stale pending requests globally to avoid blocking new submissions
+        AccountMergeRequest.objects.filter(
+            status=AccountMergeRequest.Status.PENDING, expires_at__lte=now
+        ).update(
+            status=AccountMergeRequest.Status.EXPIRED,
+            processed_at=now,
+            processed_by=None,
+        )
 
         if not username and not email:
             msg = "请输入目标账号的邮箱或用户名（至少一项）"

@@ -86,6 +86,45 @@ class AccountMergeFormTests(CacheClearTestCase):
         assert not form.is_valid()
         assert "待处理申请过多" in form.errors["__all__"][0]
 
+    def test_form_allows_new_after_pending_expired(self):
+        """Expired pending requests should not block new submission."""
+        AccountMergeRequest.objects.create(
+            id=uuid4(),
+            source_user=self.source,
+            target_user=self.target,
+            target_username_input=self.target.username,
+            status=AccountMergeRequest.Status.PENDING,
+            approve_token="token-expired",
+            expires_at=timezone.now() - timedelta(days=1),
+            asset_snapshot={},
+        )
+
+        form = AccountMergeRequestForm(
+            user=self.source, data={"target_username": self.target.username}
+        )
+        assert form.is_valid()
+
+    def test_target_quota_ignores_expired(self):
+        """Expired requests should not count toward target pending limit."""
+        for _ in range(3):
+            AccountMergeRequest.objects.create(
+                id=uuid4(),
+                source_user=self.User.objects.create_user(
+                    username=f"sx{_}", email=f"sx{_}@ex.com", password="pwd123456"
+                ),
+                target_user=self.target,
+                target_username_input=self.target.username,
+                status=AccountMergeRequest.Status.PENDING,
+                approve_token=f"token-exp-{_}",
+                expires_at=timezone.now() - timedelta(days=1),
+                asset_snapshot={},
+            )
+
+        form = AccountMergeRequestForm(
+            user=self.source, data={"target_username": self.target.username}
+        )
+        assert form.is_valid()
+
     def test_form_reports_target_not_found(self):
         """Shows explicit message when target account is missing."""
         form = AccountMergeRequestForm(

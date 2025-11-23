@@ -82,6 +82,29 @@ class SignInViewTests(TestCase):
         assert resp.redirect_chain[-1][0].endswith(reverse("accounts:profile"))
         assert resp.wsgi_request.user.is_authenticated
 
+    def test_safe_next_relative_redirects(self):
+        """Relative next path should be honored after login."""
+        target = "/profile/"
+        resp = self.client.post(
+            reverse("accounts:sign_in") + f"?next={target}",
+            {"login-id": self.user.username, "password": self.password},
+            follow=True,
+        )
+        assert resp.redirect_chain[-1][0].endswith(target)
+        assert resp.wsgi_request.user.is_authenticated
+
+    def test_safe_next_same_host_absolute_redirects(self):
+        """Absolute URL on same host should be allowed."""
+        target = "http://testserver/profile/"
+        resp = self.client.post(
+            reverse("accounts:sign_in") + f"?next={target}",
+            {"login-id": self.user.username, "password": self.password},
+            follow=True,
+            HTTP_HOST="testserver",
+        )
+        assert resp.redirect_chain[-1][0] == target
+        assert resp.wsgi_request.user.is_authenticated
+
     def test_inactive_account_shows_disabled_message(self):
         """Inactive users receive specific hint instead of generic failure."""
         inactive = self.User.objects.create_user(

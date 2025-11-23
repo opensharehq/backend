@@ -294,8 +294,6 @@ SOCIAL_AUTH_GITLAB_KEY = env("SOCIAL_AUTH_GITLAB_KEY")
 SOCIAL_AUTH_GITLAB_SECRET = env("SOCIAL_AUTH_GITLAB_SECRET")
 SOCIAL_AUTH_GITLAB_SCOPE = env("SOCIAL_AUTH_GITLAB_SCOPE")
 
-SOCIAL_AUTH_GITEA_KEY = env("SOCIAL_AUTH_GITEA_KEY")
-SOCIAL_AUTH_GITEA_SECRET = env("SOCIAL_AUTH_GITEA_SECRET")
 SOCIAL_AUTH_GITEA_SCOPE = env("SOCIAL_AUTH_GITEA_SCOPE")
 SOCIAL_AUTH_GITEA_API_URL = env("SOCIAL_AUTH_GITEA_API_URL")
 
@@ -472,6 +470,25 @@ LOGGING = {
         "level": "INFO",
     },
 }
+
+if TESTING:
+    noisy_handlers = ("console", "console_debug", "file", "points_file", "shop_file")
+    for handler_name in noisy_handlers:
+        LOGGING["handlers"][handler_name]["level"] = "ERROR"
+
+    noisy_loggers = (
+        "django",
+        "django.db.backends",
+        "points",
+        "points.services",
+        "shop",
+        "shop.services",
+    )
+    for logger_name in noisy_loggers:
+        LOGGING["loggers"][logger_name]["level"] = "ERROR"
+
+    LOGGING["root"]["level"] = "ERROR"
+
 if not TESTING:
     INTERNAL_IPS = [
         # ...

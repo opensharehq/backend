@@ -22,7 +22,7 @@ migrate:
 
 test:
     @uv run coverage erase
-    @uv run coverage run --concurrency=multiprocessing --parallel-mode manage.py test --parallel --timing --durations 10
+    @DJANGO_LOG_LEVEL=ERROR uv run coverage run --concurrency=multiprocessing --parallel-mode manage.py test --parallel --timing --durations 10
     @uv run coverage combine
     @uv run coverage report
 

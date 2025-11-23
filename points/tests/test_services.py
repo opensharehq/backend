@@ -6,8 +6,16 @@ from django.test import TestCase, TransactionTestCase
 from points.models import PointSource, PointTransaction, Tag
 from points.services import (
     InsufficientPointsError,
+    PointSourceNotWithdrawableError,
+    WithdrawalAmountError,
+    WithdrawalData,
+    WithdrawalError,
     _normalize_user,
+    approve_withdrawal,
+    cancel_withdrawal,
+    create_withdrawal_request,
     grant_points,
+    reject_withdrawal,
     spend_points,
 )
 
@@ -1147,3 +1155,183 @@ class BatchWithdrawalTests(TestCase):
         self.assertEqual(
             self.WithdrawalRequest.objects.filter(user=self.user).count(), 0
         )
+
+
+class WithdrawalLifecycleTests(TestCase):
+    """Cover single withdrawal creation and lifecycle helpers."""
+
+    def setUp(self):
+        """Create users, tag and point source for withdrawal scenarios."""
+        self.user = get_user_model().objects.create_user(username="withdraw-user")
+        self.admin = get_user_model().objects.create_user(
+            username="withdraw-admin", is_staff=True
+        )
+        self.withdrawable_tag = Tag.objects.create(
+            name="withdrawable", slug="withdrawable", withdrawable=True
+        )
+        self.point_source = PointSource.objects.create(
+            user=self.user, initial_points=200, remaining_points=200
+        )
+        self.point_source.tags.add(self.withdrawable_tag)
+        self.withdrawal_data = WithdrawalData(
+            real_name="李四",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="中国银行",
+            bank_account="6222020200012345678",
+        )
+
+    def test_create_withdrawal_request_success(self):
+        """Valid request persists applicant data and stays pending."""
+        request = create_withdrawal_request(
+            user=self.user,
+            point_source_id=self.point_source.id,
+            points=80,
+            withdrawal_data=self.withdrawal_data,
+        )
+
+        self.assertEqual(request.points, 80)
+        self.assertEqual(request.status, request.Status.PENDING)
+        self.assertEqual(request.real_name, "李四")
+        self.assertEqual(request.bank_name, "中国银行")
+
+    def test_create_withdrawal_request_missing_source(self):
+        """Raises when point source does not belong to user."""
+        with self.assertRaisesMessage(
+            PointSource.DoesNotExist, "积分来源不存在或不属于您。"
+        ):
+            create_withdrawal_request(
+                user=self.user,
+                point_source_id=9999,
+                points=10,
+                withdrawal_data=self.withdrawal_data,
+            )
+
+    def test_create_withdrawal_request_not_withdrawable(self):
+        """Non-withdrawable sources are rejected early."""
+        non_withdrawable = PointSource.objects.create(
+            user=self.user, initial_points=50, remaining_points=50
+        )
+        Tag.objects.create(name="locked", slug="locked", withdrawable=False)
+
+        with self.assertRaisesMessage(
+            PointSourceNotWithdrawableError, "该积分来源不支持提现。"
+        ):
+            create_withdrawal_request(
+                user=self.user,
+                point_source_id=non_withdrawable.id,
+                points=10,
+                withdrawal_data=self.withdrawal_data,
+            )
+
+    def test_create_withdrawal_request_invalid_amount(self):
+        """Amount must be a positive integer."""
+        with self.assertRaisesMessage(WithdrawalAmountError, "提现积分必须是正整数。"):
+            create_withdrawal_request(
+                user=self.user,
+                point_source_id=self.point_source.id,
+                points=0,
+                withdrawal_data=self.withdrawal_data,
+            )
+
+    def test_create_withdrawal_request_exceeds_balance(self):
+        """Reject when requested points exceed remaining balance."""
+        with self.assertRaisesMessage(
+            WithdrawalAmountError, "提现积分不能超过剩余积分"
+        ):
+            create_withdrawal_request(
+                user=self.user,
+                point_source_id=self.point_source.id,
+                points=500,
+                withdrawal_data=self.withdrawal_data,
+            )
+
+    def test_approve_withdrawal_happy_path(self):
+        """Approving deducts points and marks request completed."""
+        request = create_withdrawal_request(
+            user=self.user,
+            point_source_id=self.point_source.id,
+            points=60,
+            withdrawal_data=self.withdrawal_data,
+        )
+
+        transaction = approve_withdrawal(
+            withdrawal_request=request,
+            admin_user=self.admin,
+            admin_note="ok",
+        )
+
+        request.refresh_from_db()
+        self.point_source.refresh_from_db()
+
+        self.assertEqual(request.status, request.Status.COMPLETED)
+        self.assertEqual(request.processed_by, self.admin)
+        self.assertEqual(request.admin_note, "ok")
+        self.assertEqual(transaction.transaction_type, "WITHDRAW")
+        self.assertEqual(transaction.points, -60)
+        self.assertEqual(self.user.total_points, 140)
+
+    def test_approve_withdrawal_requires_pending(self):
+        """Only pending requests can be approved."""
+        request = create_withdrawal_request(
+            user=self.user,
+            point_source_id=self.point_source.id,
+            points=20,
+            withdrawal_data=self.withdrawal_data,
+        )
+        request.status = request.Status.REJECTED
+        request.save(update_fields=["status"])
+
+        with self.assertRaisesMessage(WithdrawalError, "只能批准待处理状态的申请"):
+            approve_withdrawal(request, admin_user=self.admin)
+
+    def test_reject_withdrawal_updates_status(self):
+        """Rejecting sets status, admin info and timestamp."""
+        request = create_withdrawal_request(
+            user=self.user,
+            point_source_id=self.point_source.id,
+            points=30,
+            withdrawal_data=self.withdrawal_data,
+        )
+
+        reject_withdrawal(
+            withdrawal_request=request, admin_user=self.admin, admin_note="reason"
+        )
+
+        request.refresh_from_db()
+        self.assertEqual(request.status, request.Status.REJECTED)
+        self.assertEqual(request.processed_by, self.admin)
+        self.assertEqual(request.admin_note, "reason")
+        self.assertIsNotNone(request.processed_at)
+
+    def test_reject_withdrawal_requires_pending(self):
+        """Rejecting non-pending requests raises error."""
+        request = create_withdrawal_request(
+            user=self.user,
+            point_source_id=self.point_source.id,
+            points=30,
+            withdrawal_data=self.withdrawal_data,
+        )
+        request.status = request.Status.COMPLETED
+        request.save(update_fields=["status"])
+
+        with self.assertRaisesMessage(WithdrawalError, "只能拒绝待处理状态的申请"):
+            reject_withdrawal(request, admin_user=self.admin)
+
+    def test_cancel_withdrawal_flow(self):
+        """Users can cancel pending requests; others raise errors."""
+        request = create_withdrawal_request(
+            user=self.user,
+            point_source_id=self.point_source.id,
+            points=20,
+            withdrawal_data=self.withdrawal_data,
+        )
+
+        cancel_withdrawal(request)
+
+        request.refresh_from_db()
+        self.assertEqual(request.status, request.Status.CANCELLED)
+        self.assertIsNotNone(request.processed_at)
+
+        with self.assertRaisesMessage(WithdrawalError, "只能取消待处理状态的申请"):
+            cancel_withdrawal(request)

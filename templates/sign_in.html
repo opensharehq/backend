@@ -33,6 +33,12 @@
         <span class="text-muted">或</span>
     </div>
     <!-- 邮箱/用户名登录 -->
+    {% if error_message %}
+        <div class="alert alert-danger d-flex align-items-center" role="alert">
+            <i data-lucide="alert-circle" class="icon-sm me-2"></i>
+            <div>{{ error_message }}</div>
+        </div>
+    {% endif %}
     <form method="post" id="loginForm" class="forms-sample mb-4">
         {% csrf_token %}
         <div class="mb-3">
@@ -61,25 +67,3 @@
         <a href="{% url 'accounts:sign_up' %}">立即注册</a>
     </p>
 {% endblock auth_content %}
-
-{% block extra_js %}
-    <script>
-        document.getElementById('loginForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const loginId = document.getElementById('login-id').value;
-            const password = document.getElementById('password').value;
-
-            // 检测是邮箱还是用户名
-            const isEmail = loginId.includes('@');
-            const backend = isEmail ? 'email' : 'username';
-            const fieldName = isEmail ? 'email' : 'username';
-
-            // 设置正确的 action URL 和字段名
-            this.action = "{% url 'social:begin' 'email' %}".replace('email', backend);
-            document.getElementById('login-id').name = fieldName;
-
-            // 提交表单
-            this.submit();
-        });
-    </script>
-{% endblock extra_js %}

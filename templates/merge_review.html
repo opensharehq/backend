@@ -1,0 +1,134 @@
+{% extends "horizontal_base.html" %}
+
+{% block title %}合并确认{% endblock title %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-8 grid-margin stretch-card">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <div>
+                        <h4 class="mb-1">合并请求详情</h4>
+                        <p class="text-muted mb-0">源账号提交的资产清单与风险提示</p>
+                    </div>
+                    <span class="badge {% if merge_request.status == 'PENDING' %}bg-warning text-dark{% elif merge_request.status == 'ACCEPTED' %}bg-success{% elif merge_request.status == 'REJECTED' %}bg-danger{% else %}bg-secondary{% endif %}">
+                        {{ merge_request.get_status_display }}
+                    </span>
+                </div>
+                <div class="alert alert-secondary" role="alert">
+                    <div class="d-flex">
+                        <i data-lucide="info" class="icon-sm me-2"></i>
+                        <div>
+                            合并通过后：源账号的积分、商城记录、组织成员关系及社交绑定将迁移到当前账号，源账号会被停用且不可撤销。
+                        </div>
+                    </div>
+                </div>
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <div class="border rounded p-3 h-100">
+                            <p class="text-muted tx-13 mb-1">源账号</p>
+                            <h6 class="mb-1">{{ merge_request.source_user.username }}</h6>
+                            <p class="text-muted mb-0">{{ merge_request.source_user.email|default:"未留邮箱" }}</p>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="border rounded p-3 h-100">
+                            <p class="text-muted tx-13 mb-1">有效期至</p>
+                            <h6 class="mb-1">{{ merge_request.expires_at|date:"Y-m-d H:i" }}</h6>
+                            <p class="text-muted mb-0">提交时间：{{ merge_request.created_at|date:"Y-m-d H:i" }}</p>
+                        </div>
+                    </div>
+                </div>
+                <h6 class="card-title">资产快照</h6>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="card border shadow-none h-100">
+                            <div class="card-body">
+                                <p class="text-muted tx-13 mb-1">积分余额</p>
+                                <h4 class="mb-0">{{ merge_request.asset_snapshot.total_points|default:0 }}</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card border shadow-none h-100">
+                            <div class="card-body">
+                                <p class="text-muted tx-13 mb-1">积分池 / 兑换</p>
+                                <h4 class="mb-0">{{ merge_request.asset_snapshot.point_source_count|default:0 }} / {{ merge_request.asset_snapshot.redemption_count|default:0 }}</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card border shadow-none h-100">
+                            <div class="card-body">
+                                <p class="text-muted tx-13 mb-1">组织成员关系</p>
+                                <h4 class="mb-0">{{ merge_request.asset_snapshot.organization_count|default:0 }}</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card border shadow-none h-100">
+                            <div class="card-body">
+                                <p class="text-muted tx-13 mb-1">提现记录</p>
+                                <h4 class="mb-0">{{ merge_request.asset_snapshot.withdrawal_count|default:0 }}</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card border shadow-none h-100">
+                            <div class="card-body">
+                                <p class="text-muted tx-13 mb-1">社交绑定</p>
+                                {% if merge_request.asset_snapshot.social_providers %}
+                                    <div class="d-flex flex-wrap gap-2">
+                                        {% for provider in merge_request.asset_snapshot.social_providers %}
+                                            <span class="badge bg-light text-primary border border-primary text-uppercase">{{ provider }}</span>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    <p class="text-muted mb-0">暂无绑定</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <p class="text-muted mb-2"><strong>风险提示：</strong> 确认后无法撤销，社交账号如与当前账号重复将跳过迁移；组织成员冲突时将保留更高权限。</p>
+                </div>
+                {% if merge_request.status == 'PENDING' %}
+                    <div class="d-flex gap-2 mt-3">
+                        <form method="post" action="{{ agree_url }}">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-success">
+                                <i data-lucide="check" class="icon-sm me-1"></i> 同意并合并
+                            </button>
+                        </form>
+                        <form method="post" action="{{ reject_url }}">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-danger">
+                                <i data-lucide="x" class="icon-sm me-1"></i> 拒绝
+                            </button>
+                        </form>
+                    </div>
+                {% else %}
+                    <div class="alert alert-info mt-3" role="alert">
+                        该申请已处理，无需再次操作。
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4 grid-margin stretch-card">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="card-title">合并规则</h6>
+                <ul class="text-muted small ps-3">
+                    <li>积分、兑换记录、组织成员关系、收货地址、提现记录将迁移到当前账号。</li>
+                    <li>如社交账号或组织成员已存在，将跳过或升级为更高权限。</li>
+                    <li>目标账号保留用户名和邮箱，源账号合并后被停用，不支持反向迁移。</li>
+                    <li>合并过程全程记录，可在管理员后台查看审计日志。</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock content %}

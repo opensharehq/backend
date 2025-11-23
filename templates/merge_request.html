@@ -1,0 +1,141 @@
+{% extends "horizontal_base.html" %}
+
+{% block title %}账号合并{% endblock title %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+    <div>
+        <h4 class="mb-1">账号合并</h4>
+        <p class="text-muted mb-0">发起或查看账号合并请求，提交后需由目标账号确认，结果不可撤销。</p>
+    </div>
+</div>
+<div class="row">
+    <div class="col-lg-5 grid-margin stretch-card">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="card-title d-flex align-items-center mb-3">
+                    <i data-lucide="git-merge" class="icon-sm me-2"></i>
+                    发起合并申请
+                </h6>
+                <div class="alert alert-warning" role="alert">
+                    <div class="d-flex">
+                        <i data-lucide="alert-triangle" class="icon-sm me-2"></i>
+                        <div>
+                            <strong>提示：</strong> 申请一旦提交不可撤销，目标账号同意后源账号将被停用。
+                        </div>
+                    </div>
+                </div>
+                <form method="post" class="mt-3">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label">目标用户名</label>
+                        {{ form.target_username }}
+                        {% if form.target_username.errors %}
+                            <div class="text-danger small">{{ form.target_username.errors|striptags }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">目标邮箱</label>
+                        {{ form.target_email }}
+                        {% if form.target_email.errors %}
+                            <div class="text-danger small">{{ form.target_email.errors|striptags }}</div>
+                        {% endif %}
+                    </div>
+                    {% if form.non_field_errors %}
+                        <div class="alert alert-danger" role="alert">
+                            {{ form.non_field_errors|striptags }}
+                        </div>
+                    {% endif %}
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i data-lucide="send" class="icon-sm me-1"></i> 提交申请
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-7 grid-margin stretch-card">
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <h6 class="card-title mb-0">我发起的申请</h6>
+                    <span class="text-muted tx-13">最多同时存在 1 个待处理</span>
+                </div>
+                {% if sent_requests %}
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                                <tr>
+                                    <th>目标账号</th>
+                                    <th>状态</th>
+                                    <th>过期时间</th>
+                                    <th>提交时间</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in sent_requests %}
+                                    <tr>
+                                        <td>{{ item.target_user.username }}</td>
+                                        <td>
+                                            <span class="badge {% if item.status == 'PENDING' %}bg-warning text-dark{% elif item.status == 'ACCEPTED' %}bg-success{% elif item.status == 'REJECTED' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                                {{ item.get_status_display }}
+                                            </span>
+                                        </td>
+                                        <td>{{ item.expires_at|date:"Y-m-d H:i" }}</td>
+                                        <td>{{ item.created_at|date:"Y-m-d H:i" }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted mb-0">暂无记录</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+<div class="row">
+    <div class="col-12 grid-margin stretch-card">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <h6 class="card-title mb-0">待我处理</h6>
+                    <span class="text-muted tx-13">点击进入详情查看资产快照</span>
+                </div>
+                {% if incoming_requests %}
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                                <tr>
+                                    <th>源账号</th>
+                                    <th>状态</th>
+                                    <th>过期时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in incoming_requests %}
+                                    <tr>
+                                        <td>{{ item.source_user.username }}</td>
+                                        <td>
+                                            <span class="badge {% if item.status == 'PENDING' %}bg-warning text-dark{% elif item.status == 'ACCEPTED' %}bg-success{% elif item.status == 'REJECTED' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                                {{ item.get_status_display }}
+                                            </span>
+                                        </td>
+                                        <td>{{ item.expires_at|date:"Y-m-d H:i" }}</td>
+                                        <td>
+                                            <a href="{% url 'accounts:merge_review' item.approve_token %}" class="btn btn-sm btn-outline-primary">查看</a>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted mb-0">暂无需要处理的申请</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock content %}

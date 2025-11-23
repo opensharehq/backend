@@ -4,6 +4,8 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
 from .models import (
+    AccountMergeLog,
+    AccountMergeRequest,
     Education,
     Organization,
     OrganizationMembership,
@@ -210,6 +212,95 @@ class ShippingAddressAdmin(admin.ModelAdmin):
                 "fields": ("is_default", "created_at", "updated_at"),
             },
         ),
+    )
+
+
+class AccountMergeLogInline(admin.TabularInline):
+    """Inline read-only view of merge logs."""
+
+    model = AccountMergeLog
+    extra = 0
+    can_delete = False
+    readonly_fields = (
+        "table_name",
+        "migrated_count",
+        "skipped_count",
+        "conflict_count",
+        "notes",
+        "created_at",
+    )
+
+
+@admin.register(AccountMergeRequest)
+class AccountMergeRequestAdmin(admin.ModelAdmin):
+    """Admin for merge requests (read-only operations)."""
+
+    list_display = (
+        "id",
+        "source_user",
+        "target_user",
+        "status",
+        "expires_at",
+        "processed_at",
+    )
+    list_filter = ("status", "expires_at")
+    search_fields = (
+        "id",
+        "source_user__username",
+        "source_user__email",
+        "target_user__username",
+        "target_user__email",
+    )
+    readonly_fields = (
+        "id",
+        "source_user",
+        "target_user",
+        "target_email_input",
+        "target_username_input",
+        "status",
+        "approve_token",
+        "expires_at",
+        "processed_at",
+        "processed_by",
+        "asset_snapshot",
+        "message",
+        "created_at",
+        "updated_at",
+    )
+    inlines = [AccountMergeLogInline]
+
+    def has_add_permission(self, request):
+        """Disallow manual creation via admin to ensure审计."""
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """Block editing existing requests (read-only view)."""
+        if obj is None:
+            return super().has_change_permission(request, obj)
+        return False
+
+
+@admin.register(AccountMergeLog)
+class AccountMergeLogAdmin(admin.ModelAdmin):
+    """Standalone view of merge logs."""
+
+    list_display = (
+        "request",
+        "table_name",
+        "migrated_count",
+        "skipped_count",
+        "conflict_count",
+        "created_at",
+    )
+    search_fields = ("request__id", "table_name")
+    readonly_fields = (
+        "request",
+        "table_name",
+        "migrated_count",
+        "skipped_count",
+        "conflict_count",
+        "notes",
+        "created_at",
     )
 
 

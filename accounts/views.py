@@ -1,23 +1,38 @@
 """Views for user authentication and profile management."""
 
+import secrets
+from datetime import timedelta
+
+from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth import get_user_model, login, logout, update_session_auth_hash
+from django.contrib.auth import (
+    authenticate,
+    get_user_model,
+    login,
+    logout,
+    update_session_auth_hash,
+)
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.forms import inlineformset_factory
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
 from django.utils.encoding import force_str
-from django.utils.http import urlsafe_base64_decode
+from django.utils.http import url_has_allowed_host_and_scheme, urlsafe_base64_decode
 from django.views.decorators.http import require_POST
 from social_django.models import UserSocialAuth
 
+from messages import services as inbox_services
+from messages.models import Message as InboxMessage
 from points.services import InsufficientPointsError
 from shop.models import Redemption, ShopItem
 from shop.services import RedemptionError, redeem_item
 
 from .forms import (
+    AccountMergeRequestForm,
     ChangeEmailForm,
     CustomPasswordChangeForm,
     EducationForm,
@@ -29,6 +44,7 @@ from .forms import (
     WorkExperienceForm,
 )
 from .models import (
+    AccountMergeRequest,
     Education,
     Organization,
     OrganizationMembership,
@@ -36,6 +52,7 @@ from .models import (
     UserProfile,
     WorkExperience,
 )
+from .services import AccountMergeError, perform_merge
 from .tasks import send_password_reset_email
 
 
@@ -48,7 +65,63 @@ def accounts_index(request):
 
 def sign_in_view(request):
     """Display sign-in page with email, username, and GitHub auth options."""
-    return render(request, "sign_in.html")
+    error_message = None
+    if request.user.is_authenticated:
+        return redirect("accounts:profile")
+
+    if request.method == "POST":
+        login_id = request.POST.get("login-id") or ""
+        password = request.POST.get("password") or ""
+
+        UserModel = get_user_model()
+        username_match = UserModel.objects.filter(username=login_id).first()
+        email_user = None
+        if "@" in login_id:
+            email_qs = UserModel.objects.filter(email=login_id)
+            email_user = email_qs.filter(is_active=True).first() or email_qs.first()
+
+        user = authenticate(request, username=login_id, password=password)
+        if not user and email_user:
+            user = authenticate(
+                request, username=email_user.username, password=password
+            )
+
+        candidate_user = username_match or email_user
+
+        if not user:
+            if (
+                username_match
+                and username_match.merged_into_id
+                and login_id == username_match.username
+            ):
+                target = username_match.merged_into
+                target_label = target.email or target.username
+                error_message = f"该账号已合并到 {target_label}，请使用目标账号登录"
+            elif candidate_user and not candidate_user.is_active:
+                error_message = "账号已被停用，请联系管理员"
+            else:
+                error_message = "用户名或密码错误，请重试"
+            messages.error(request, error_message)
+        elif not user.is_active:
+            error_message = "账号已被停用，请联系管理员"
+            messages.error(request, error_message)
+        else:
+            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+            messages.success(request, "登录成功")
+            raw_next = request.GET.get("next")
+            next_url = (
+                raw_next
+                if raw_next
+                and url_has_allowed_host_and_scheme(
+                    url=raw_next,
+                    allowed_hosts=settings.ALLOWED_HOSTS,
+                    require_https=request.is_secure(),
+                )
+                else reverse("accounts:profile")
+            )
+            return redirect(next_url)
+
+    return render(request, "sign_in.html", {"error_message": error_message})
 
 
 def sign_up_view(request):
@@ -386,6 +459,252 @@ def change_email_view(request):
         "change_email.html",
         {"form": form, "current_email": request.user.email},
     )
+
+
+def _build_asset_snapshot(user):
+    """Gather key asset counts for auditing and messaging."""
+    providers = list(
+        UserSocialAuth.objects.filter(user=user).values_list("provider", flat=True)
+    )
+    return {
+        "total_points": user.total_points,
+        "point_source_count": user.point_sources.count(),
+        "redemption_count": Redemption.objects.filter(user_profile=user).count(),
+        "organization_count": user.organizations.count(),
+        "social_providers": providers,
+        "withdrawal_count": user.withdrawal_requests.count(),
+    }
+
+
+def _generate_unique_token():
+    """Generate a unique approval token for merge links."""
+    while True:
+        token = secrets.token_urlsafe(32)
+        if not AccountMergeRequest.objects.filter(approve_token=token).exists():
+            return token
+
+
+def _send_merge_request_message(merge_request, request):
+    """Send inbox notification to the target user with action links."""
+    source = merge_request.source_user
+    target = merge_request.target_user
+    review_url = request.build_absolute_uri(
+        reverse("accounts:merge_review", args=[merge_request.approve_token])
+    )
+    agree_url = request.build_absolute_uri(
+        reverse("accounts:merge_agree", args=[merge_request.approve_token])
+    )
+    reject_url = request.build_absolute_uri(
+        reverse("accounts:merge_reject", args=[merge_request.approve_token])
+    )
+
+    snapshot = merge_request.asset_snapshot or {}
+    providers = snapshot.get("social_providers") or []
+    content_lines = [
+        f"来自 **{source.username}** ({source.email or '未留邮箱'}) 的账号合并申请。",
+        "",
+        "资产快照：",
+        f"- 积分：{snapshot.get('total_points', 0)}",
+        f"- 积分池：{snapshot.get('point_source_count', 0)}",
+        f"- 兑换记录：{snapshot.get('redemption_count', 0)}",
+        f"- 组织成员关系：{snapshot.get('organization_count', 0)}",
+        f"- 提现记录：{snapshot.get('withdrawal_count', 0)}",
+        f"- 社交绑定：{', '.join(providers) if providers else '无'}",
+        "",
+        f"有效期：{merge_request.expires_at:%Y-%m-%d %H:%M}",
+        "",
+        f"[同意合并]({agree_url})  |  [拒绝]({reject_url})",
+        f"查看详情：{review_url}",
+    ]
+
+    message = inbox_services.send_message(
+        title="账号合并申请",
+        content="\n".join(content_lines),
+        message_type=InboxMessage.MessageType.SECURITY,
+        recipients=[target],
+    )
+    merge_request.message = message
+    merge_request.save(update_fields=["message"])
+
+
+def _notify_merge_result(merge_request, *, accepted, request, reason=None):
+    """Send result notifications to both source and target users."""
+    source = merge_request.source_user
+    target = merge_request.target_user
+    status_text = "合并已完成" if accepted else (reason or "合并已被拒绝")
+    processed_at = merge_request.processed_at or timezone.now()
+    content = "\n".join(
+        [
+            f"账号合并申请结果：{status_text}",
+            "",
+            f"源账号：{source.username} ({source.email or '未留邮箱'})",
+            f"目标账号：{target.username} ({target.email or '未留邮箱'})",
+            f"处理时间：{timezone.localtime(processed_at):%Y-%m-%d %H:%M}",
+        ]
+    )
+    inbox_services.send_message(
+        title="账号合并结果通知",
+        content=content,
+        message_type=InboxMessage.MessageType.SECURITY,
+        recipients=[source, target],
+    )
+
+
+def _expire_request_if_needed(merge_request, actor, request):
+    """Mark request expired and notify when token is stale."""
+    if (
+        merge_request.status != AccountMergeRequest.Status.PENDING
+        or not merge_request.is_expired
+    ):
+        return False
+
+    merge_request.status = AccountMergeRequest.Status.EXPIRED
+    merge_request.processed_at = timezone.now()
+    merge_request.processed_by = actor
+    merge_request.save(update_fields=["status", "processed_at", "processed_by"])
+    _notify_merge_result(
+        merge_request,
+        accepted=False,
+        request=request,
+        reason="申请已过期，未做任何变更",
+    )
+    return True
+
+
+@login_required
+def merge_request_view(request):
+    """Create a merge request and list existing requests."""
+    if request.method == "POST":
+        form = AccountMergeRequestForm(user=request.user, data=request.POST)
+        if form.is_valid():
+            target_user = form.target_user
+            token = _generate_unique_token()
+            snapshot = _build_asset_snapshot(request.user)
+            expires_at = timezone.now() + timedelta(days=7)
+
+            try:
+                merge_request = AccountMergeRequest.objects.create(
+                    source_user=request.user,
+                    target_user=target_user,
+                    target_email_input=form.cleaned_data.get("target_email", ""),
+                    target_username_input=form.cleaned_data.get("target_username", ""),
+                    status=AccountMergeRequest.Status.PENDING,
+                    approve_token=token,
+                    expires_at=expires_at,
+                    asset_snapshot=snapshot,
+                )
+            except IntegrityError:
+                messages.error(request, "存在待处理的申请，请勿重复提交")
+                return redirect("accounts:merge_request")
+
+            _send_merge_request_message(merge_request, request)
+            messages.success(request, "申请已提交，请等待目标账号确认")
+            return redirect("accounts:merge_request")
+    else:
+        form = AccountMergeRequestForm(user=request.user)
+
+    sent_requests = AccountMergeRequest.objects.filter(
+        source_user=request.user
+    ).order_by("-created_at")
+    incoming_requests = AccountMergeRequest.objects.filter(
+        target_user=request.user
+    ).order_by("-created_at")
+
+    return render(
+        request,
+        "merge_request.html",
+        {
+            "form": form,
+            "sent_requests": sent_requests,
+            "incoming_requests": incoming_requests,
+        },
+    )
+
+
+@login_required
+def merge_review_view(request, token):
+    """Display merge details for the target user to review."""
+    merge_request = get_object_or_404(AccountMergeRequest, approve_token=token)
+    if merge_request.target_user != request.user:
+        msg = "您无权查看此合并请求"
+        raise PermissionDenied(msg)
+
+    _expire_request_if_needed(merge_request, request.user, request)
+
+    return render(
+        request,
+        "merge_review.html",
+        {
+            "merge_request": merge_request,
+            "agree_url": reverse("accounts:merge_agree", args=[token]),
+            "reject_url": reverse("accounts:merge_reject", args=[token]),
+        },
+    )
+
+
+@login_required
+def merge_agree_view(request, token):
+    """Handle acceptance of a merge request by the target user."""
+    merge_request = get_object_or_404(AccountMergeRequest, approve_token=token)
+    if merge_request.target_user != request.user:
+        msg = "您无权处理此合并请求"
+        raise PermissionDenied(msg)
+
+    if merge_request.status == AccountMergeRequest.Status.ACCEPTED:
+        messages.info(request, "该申请已处理完成")
+        return redirect("accounts:merge_review", token=token)
+
+    if _expire_request_if_needed(merge_request, request.user, request):
+        messages.error(request, "申请已过期，无法合并")
+        return redirect("accounts:merge_review", token=token)
+
+    if request.method != "POST":
+        return redirect("accounts:merge_review", token=token)
+
+    try:
+        perform_merge(merge_request)
+    except AccountMergeError as exc:  # pragma: no cover - defensive
+        messages.error(request, str(exc))
+        return redirect("accounts:merge_review", token=token)
+
+    _notify_merge_result(merge_request, accepted=True, request=request)
+    messages.success(request, "合并完成，源账号已停用")
+    return redirect("accounts:merge_review", token=token)
+
+
+@login_required
+def merge_reject_view(request, token):
+    """Reject a merge request as the target user."""
+    merge_request = get_object_or_404(AccountMergeRequest, approve_token=token)
+    if merge_request.target_user != request.user:
+        msg = "您无权处理此合并请求"
+        raise PermissionDenied(msg)
+
+    if merge_request.status == AccountMergeRequest.Status.ACCEPTED:
+        messages.info(request, "该申请已完成合并，无法拒绝")
+        return redirect("accounts:merge_review", token=token)
+
+    if _expire_request_if_needed(merge_request, request.user, request):
+        messages.error(request, "申请已过期")
+        return redirect("accounts:merge_review", token=token)
+
+    if request.method != "POST":
+        return redirect("accounts:merge_review", token=token)
+
+    if merge_request.status == AccountMergeRequest.Status.PENDING:
+        merge_request.status = AccountMergeRequest.Status.REJECTED
+        merge_request.processed_by = request.user
+        merge_request.processed_at = timezone.now()
+        merge_request.save(update_fields=["status", "processed_by", "processed_at"])
+        _notify_merge_result(
+            merge_request,
+            accepted=False,
+            request=request,
+            reason="目标账号已拒绝合并请求",
+        )
+        messages.info(request, "已拒绝该合并申请")
+
+    return redirect("accounts:merge_review", token=token)
 
 
 def password_reset_request_view(request):

@@ -11,8 +11,8 @@ manage *args:
     @uv run manage.py {{args}}
 
 fmt:
-    @uvx ruff check   # Lint all files in the current directory.
-    @uvx ruff format  # Format all files in the current directory.
+    @uvx ruff check  --fix   # Lint all files in the current directory.
+    @uvx ruff format # Format all files in the current directory.
     @uv run -m pre_commit run  djlint-django --all-files
 
 

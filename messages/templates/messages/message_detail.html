@@ -132,10 +132,10 @@
         </div>
     </div>
     <!-- 引入 marked.js 用于 Markdown 渲染 -->
+    {{ user_message.message.content|json_script:"markdown-content" }}
     <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
     <script>
         // Markdown 内容
-        {{ user_message.message.content|json_script:"markdown-content" }}
         const content = JSON.parse(document.getElementById('markdown-content').textContent);
 
         // 配置 marked

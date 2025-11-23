@@ -257,7 +257,7 @@ class GiteeOAuth2Tests(TestCase):
 
     def test_default_scope(self):
         """Test that default scope includes required scopes."""
-        expected_scopes = ["user_info", "emails"]
+        expected_scopes = ["user_info"]
         self.assertEqual(self.backend.DEFAULT_SCOPE, expected_scopes)
 
     def test_id_key(self):

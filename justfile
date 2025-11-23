@@ -25,6 +25,7 @@ test:
     @DJANGO_LOG_LEVEL=ERROR uv run coverage run --concurrency=multiprocessing --parallel-mode manage.py test --parallel --timing --durations 10
     @uv run coverage combine
     @uv run coverage report
+    @uv run coverage report --skip-covered --skip-empty
 
 docker-build IMAGE='fullsite':
     docker build --tag {{IMAGE}} .

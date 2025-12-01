@@ -18,7 +18,16 @@
         <title>OpenShare - 开源贡献激励平台</title>
         <script src="//unpkg.com/alpinejs" defer></script>
 
-   
+        <!-- baidu tongji -->
+        <script>
+            var _hmt = _hmt || [];
+            (function() {
+                var hm = document.createElement("script");
+                hm.src = "https://hm.baidu.com/hm.js?8e8cb168aaff7c12e89fea66b7c9d2c2";
+                var s = document.getElementsByTagName("script")[0]; 
+                s.parentNode.insertBefore(hm, s);
+            })();
+        </script>
 
         <!-- NobleUI Core CSS -->
         <link
@@ -603,6 +612,11 @@
                             class="btn btn-link text-dark text-decoration-none d-none d-md-inline"
                             >优势</a
                         >
+                        <a
+                            href="http://about.open-share.cn/"
+                            class="btn btn-link text-dark text-decoration-none d-none d-md-inline"
+                            >关于我们</a
+                        >
                         {% if user.is_authenticated %}
                         <!-- Logged in user -->
                         <div class="user-dropdown">
@@ -1146,6 +1160,9 @@
                 <hr class="my-4 bg-white opacity-25" />
                 <div class="text-center text-white-50">
                     <p class="mb-0">© 2025 OpenShare. All rights reserved.</p>
+                </div>
+                <div class="text-center text-white-50">
+                    <a href="https://beian.miit.gov.cn/" class="mb-0">浙ICP备2025189350号-1</a>
                 </div>
             </div>
         </footer>

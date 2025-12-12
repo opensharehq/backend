@@ -1,5 +1,7 @@
 """Authentication flow tests for username/email sign-in."""
 
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -123,3 +125,31 @@ class SignInViewTests(TestCase):
 
         assert not resp.wsgi_request.user.is_authenticated
         assert "已被停用" in resp.content.decode()
+
+    def test_authenticated_user_redirects_from_sign_in(self):
+        """Authenticated users hitting sign-in should be redirected."""
+        self.client.force_login(self.user)
+        resp = self.client.get(reverse("accounts:sign_in"))
+        self.assertRedirects(resp, reverse("accounts:profile"))
+
+    @mock.patch(
+        "django.contrib.auth.backends.ModelBackend.user_can_authenticate",
+        return_value=True,
+    )
+    def test_active_authentication_blocked_for_inactive_user(self, _mock_auth):
+        """Even if authentication returns inactive user, view shows disabled message."""
+        inactive = self.User.objects.create_user(
+            username="inactive_auth_user",
+            email="inactive_auth@example.com",
+            password=self.password,
+            is_active=False,
+        )
+
+        resp = self.client.post(
+            reverse("accounts:sign_in"),
+            {"login-id": inactive.username, "password": self.password},
+            follow=True,
+        )
+
+        self.assertFalse(resp.wsgi_request.user.is_authenticated)
+        self.assertIn("已被停用", resp.content.decode())

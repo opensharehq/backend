@@ -1,7 +1,11 @@
 """Tests for Organization views."""
 
+import tempfile
+from unittest import mock as unittest_mock
+
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from accounts.models import Organization, OrganizationMembership
@@ -59,6 +63,107 @@ class OrganizationListViewTests(TestCase):
         response = self.client.get(reverse("accounts:organization_list"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "暂无组织")
+
+
+@override_settings(
+    DEFAULT_FILE_STORAGE="django.core.files.storage.FileSystemStorage",
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
+    },
+    MEDIA_ROOT=tempfile.gettempdir(),
+)
+class OrganizationCreateViewTests(TestCase):
+    """Coverage for organization_create view branches."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="creator", email="creator@example.com", password="password123"
+        )
+        self.client.login(username="creator", password="password123")
+
+    def test_get_renders_blank_form(self):
+        """GET should render default blank form object."""
+        response = self.client.get(reverse("accounts:organization_create"))
+        self.assertEqual(response.status_code, 200)
+        form = response.context["form"]
+        self.assertEqual(form.name, "")
+        self.assertEqual(form.slug, "")
+
+    def test_post_validates_slug_and_required_fields(self):
+        """Invalid payload populates error dict including regex/uniqueness checks."""
+        Organization.objects.create(name="Existing", slug="existing")
+        # Missing values trigger required field errors
+        response = self.client.post(
+            reverse("accounts:organization_create"),
+            {
+                "name": "",
+                "slug": "",
+                "description": "",
+                "website": "",
+                "location": "",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        form = response.context["form"]
+        self.assertIn("组织名称不能为空。", form.errors["name"])
+        self.assertIn("URL 别名不能为空。", form.errors["slug"])
+
+        # Invalid format hit regex validation
+        response = self.client.post(
+            reverse("accounts:organization_create"),
+            {
+                "name": "Bad Slug",
+                "slug": "bad slug!",
+                "description": "",
+                "website": "",
+                "location": "",
+            },
+        )
+        form = response.context["form"]
+        self.assertIn(
+            "URL 别名只能包含字母、数字、连字符和下划线。", form.errors["slug"]
+        )
+
+        # Duplicate slug triggers uniqueness error
+        response = self.client.post(
+            reverse("accounts:organization_create"),
+            {
+                "name": "Another",
+                "slug": "existing",
+                "description": "",
+                "website": "",
+                "location": "",
+            },
+        )
+        form = response.context["form"]
+        self.assertIn("URL 别名已存在。", form.errors["slug"])
+
+    def test_post_success_with_avatar_and_membership(self):
+        """Valid submission creates organization, avatar and owner membership."""
+        avatar = SimpleUploadedFile("logo.png", b"imagebytes")
+        response = self.client.post(
+            reverse("accounts:organization_create"),
+            {
+                "name": "Created Org",
+                "slug": "created-org",
+                "description": "desc",
+                "website": "https://example.com",
+                "location": "Earth",
+                "avatar": avatar,
+            },
+        )
+        self.assertRedirects(
+            response, reverse("accounts:organization_detail", args=["created-org"])
+        )
+        org = Organization.objects.get(slug="created-org")
+        self.assertTrue(org.avatar)
+        membership = OrganizationMembership.objects.get(
+            user=self.user, organization=org
+        )
+        self.assertEqual(membership.role, OrganizationMembership.Role.OWNER)
 
 
 class OrganizationDetailViewTests(TestCase):
@@ -807,3 +912,251 @@ class OrganizationDeleteViewTests(TestCase):
             reverse("accounts:organization_delete", args=[self.org.slug])
         )
         self.assertEqual(response.status_code, 405)
+
+
+@override_settings(
+    DEFAULT_FILE_STORAGE="django.core.files.storage.FileSystemStorage",
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
+    },
+    MEDIA_ROOT=tempfile.gettempdir(),
+)
+class OrganizationEdgeCaseCoverageTests(TestCase):
+    """Additional coverage for edge branches in organization views."""
+
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username="owner2", email="owner2@example.com", password="password123"
+        )
+        self.outsider = User.objects.create_user(
+            username="outsider", email="out@example.com", password="password123"
+        )
+        self.org = Organization.objects.create(name="Edge Org", slug="edge-org")
+        self.owner_membership = OrganizationMembership.objects.create(
+            user=self.owner,
+            organization=self.org,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        self.client.login(username="owner2", password="password123")
+
+    def test_settings_missing_name_slug_errors(self):
+        """Blank name/slug should populate errors dictionary."""
+        response = self.client.post(
+            reverse("accounts:organization_settings", args=[self.org.slug]),
+            {"name": "", "slug": "", "description": ""},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("组织名称不能为空", response.content.decode())
+        self.assertIn("URL 别名不能为空", response.content.decode())
+
+    def test_settings_permission_denied_for_non_member(self):
+        """Non-members cannot access settings."""
+        self.client.logout()
+        self.client.login(username="outsider", password="password123")
+        response = self.client.get(
+            reverse("accounts:organization_settings", args=[self.org.slug])
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_settings_remove_avatar_branch(self):
+        """Removing avatar should clear the field."""
+        self.org.avatar = SimpleUploadedFile("avatar.png", b"data")
+        self.org.save()
+        response = self.client.post(
+            reverse("accounts:organization_settings", args=[self.org.slug]),
+            {
+                "name": "Edge Org",
+                "slug": "edge-org",
+                "description": "",
+                "website": "",
+                "location": "",
+                "remove_avatar": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.org.refresh_from_db()
+        self.assertFalse(self.org.avatar)
+
+    def test_settings_replace_avatar_deletes_old_file(self):
+        """Uploading a new avatar should delete the previous one."""
+        self.org.avatar = SimpleUploadedFile("old.png", b"old")
+        self.org.save()
+        with unittest_mock.patch(
+            "django.db.models.fields.files.FieldFile.delete"
+        ) as delete_mock:
+            response = self.client.post(
+                reverse("accounts:organization_settings", args=[self.org.slug]),
+                {
+                    "name": "Edge Org",
+                    "slug": "edge-org",
+                    "description": "",
+                    "website": "",
+                    "location": "",
+                    "avatar": SimpleUploadedFile("new.png", b"new"),
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+        delete_mock.assert_called()
+        self.org.refresh_from_db()
+        # Storage may add a prefix/suffix, but filename should change from the old one
+        self.assertNotEqual(self.org.avatar.name, "old.png")
+        self.assertIn("new", self.org.avatar.name)
+
+    def test_members_permission_checks(self):
+        """Members view denies access to outsiders."""
+        self.client.logout()
+        self.client.login(username="outsider", password="password123")
+        response = self.client.get(
+            reverse("accounts:organization_members", args=[self.org.slug])
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_member_add_permission_denied_for_non_member(self):
+        """Non-members cannot add members."""
+        self.client.logout()
+        self.client.login(username="outsider", password="password123")
+        response = self.client.post(
+            reverse("accounts:organization_member_add", args=[self.org.slug]),
+            {"username": "outsider", "role": "member"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_member_update_invalid_role_and_get_redirect(self):
+        """Invalid role triggers error; GET redirects to members."""
+        other = User.objects.create_user(
+            username="edge", email="edge@example.com", password="password123"
+        )
+        member = OrganizationMembership.objects.create(
+            user=other, organization=self.org, role=OrganizationMembership.Role.MEMBER
+        )
+        response = self.client.post(
+            reverse(
+                "accounts:organization_member_update_role",
+                args=[self.org.slug, member.id],
+            ),
+            {"role": "invalid"},
+        )
+        self.assertEqual(response.status_code, 302)
+        member.refresh_from_db()
+        self.assertEqual(member.role, OrganizationMembership.Role.MEMBER)
+        response = self.client.get(
+            reverse(
+                "accounts:organization_member_update_role",
+                args=[self.org.slug, member.id],
+            )
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def test_member_update_permission_denied_for_outsider(self):
+        """Outsiders cannot update roles."""
+        other = User.objects.create_user(
+            username="edge2", email="edge2@example.com", password="password123"
+        )
+        member = OrganizationMembership.objects.create(
+            user=other, organization=self.org, role=OrganizationMembership.Role.MEMBER
+        )
+        self.client.logout()
+        self.client.login(username="outsider", password="password123")
+        response = self.client.post(
+            reverse(
+                "accounts:organization_member_update_role",
+                args=[self.org.slug, member.id],
+            ),
+            {"role": "admin"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_member_remove_get_redirect_and_permission(self):
+        """GET should redirect; outsiders forbidden."""
+        other = User.objects.create_user(
+            username="edge3", email="edge3@example.com", password="password123"
+        )
+        member = OrganizationMembership.objects.create(
+            user=other, organization=self.org, role=OrganizationMembership.Role.MEMBER
+        )
+        response = self.client.get(
+            reverse(
+                "accounts:organization_member_remove",
+                args=[self.org.slug, member.id],
+            )
+        )
+        self.assertEqual(response.status_code, 302)
+        self.client.logout()
+        self.client.login(username="outsider", password="password123")
+        response = self.client.post(
+            reverse(
+                "accounts:organization_member_remove",
+                args=[self.org.slug, member.id],
+            )
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_member_remove_last_owner_blocked(self):
+        """Cannot remove the final owner."""
+        response = self.client.post(
+            reverse(
+                "accounts:organization_member_remove",
+                args=[self.org.slug, self.owner_membership.id],
+            )
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            OrganizationMembership.objects.filter(id=self.owner_membership.id).exists()
+        )
+
+    def test_member_remove_self_redirects_to_list(self):
+        """Self-removal should redirect to organization list."""
+        second_owner = User.objects.create_user(
+            username="owner3", email="owner3@example.com", password="password123"
+        )
+        OrganizationMembership.objects.create(
+            user=second_owner,
+            organization=self.org,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        response = self.client.post(
+            reverse(
+                "accounts:organization_member_remove",
+                args=[self.org.slug, self.owner_membership.id],
+            )
+        )
+        self.assertRedirects(response, reverse("accounts:organization_list"))
+        self.assertFalse(
+            OrganizationMembership.objects.filter(id=self.owner_membership.id).exists()
+        )
+
+    def test_delete_org_deletes_avatar_on_commit(self):
+        """Deletion with avatar should schedule file deletion."""
+        from unittest import mock as unittest_mock
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        avatar = SimpleUploadedFile("avatar2.png", b"bytes")
+        self.org.avatar = avatar
+        self.org.save()
+        with unittest_mock.patch(
+            "accounts.views.transaction.on_commit"
+        ) as on_commit_mock:
+            response = self.client.post(
+                reverse("accounts:organization_delete", args=[self.org.slug]),
+                {"confirm_slug": "edge-org"},
+            )
+        self.assertRedirects(response, reverse("accounts:organization_list"))
+        self.assertFalse(Organization.objects.filter(slug="edge-org").exists())
+        on_commit_mock.assert_called()
+        delete_callback = on_commit_mock.call_args[0][0]
+        # Execute the scheduled callback to ensure it calls delete without error.
+        delete_callback()
+
+    def test_delete_org_permission_denied_for_outsider(self):
+        """Outsiders cannot delete an organization."""
+        self.client.logout()
+        self.client.login(username="outsider", password="password123")
+        response = self.client.post(
+            reverse("accounts:organization_delete", args=[self.org.slug]),
+            {"confirm_slug": "edge-org"},
+        )
+        self.assertEqual(response.status_code, 403)

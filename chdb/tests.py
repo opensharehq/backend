@@ -1,6 +1,7 @@
 """ClickHouse 数据库集成测试."""
 
 import threading
+from unittest import mock
 from unittest.mock import MagicMock, Mock
 
 from django.test import TestCase
@@ -260,3 +261,51 @@ class ConvenienceFunctionsTests(ClickHouseMonkeyPatchedTestCase):
         insert("test_table", data, ["id", "name"])
 
         self.client_mock.insert.assert_called_once()
+
+
+class ClickHouseDBErrorHandlingTests(TestCase):
+    """Ensure error branches log but still propagate exceptions."""
+
+    def tearDown(self):
+        """Reset singleton cache between tests."""
+        ClickHouseDB._instance = None
+
+    def test_reset_connection_handles_close_exceptions(self):
+        """reset_connection should swallow close errors and clear instance."""
+
+        class BrokenClient:
+            def close(self):
+                msg = "cannot close"
+                raise RuntimeError(msg)
+
+        ClickHouseDB._instance = BrokenClient()
+        ClickHouseDB.reset_connection()
+        self.assertIsNone(ClickHouseDB._instance)
+
+    def test_methods_propagate_client_errors(self):
+        """query/command/insert/query_df/query_arrow should re-raise client errors."""
+        client = mock.Mock()
+        client.query.side_effect = RuntimeError("q")
+        client.command.side_effect = RuntimeError("c")
+        client.insert.side_effect = RuntimeError("i")
+        client.query_df.side_effect = RuntimeError("df")
+        client.query_arrow.side_effect = RuntimeError("arrow")
+
+        with mock.patch.object(ClickHouseDB, "get_instance", return_value=client):
+            with self.assertRaises(RuntimeError):
+                ClickHouseDB.query("select 1")
+            with self.assertRaises(RuntimeError):
+                ClickHouseDB.command("cmd")
+            with self.assertRaises(RuntimeError):
+                ClickHouseDB.insert("tbl", [])
+            with self.assertRaises(RuntimeError):
+                ClickHouseDB.query_df("select 1")
+            with self.assertRaises(RuntimeError):
+                ClickHouseDB.query_arrow("select 1")
+
+    def test_ping_returns_false_on_error(self):
+        """Ping returns False when client raises an exception."""
+        client = mock.Mock()
+        client.ping.side_effect = RuntimeError("ping fail")
+        with mock.patch.object(ClickHouseDB, "get_instance", return_value=client):
+            self.assertFalse(ClickHouseDB.ping())

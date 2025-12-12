@@ -12,6 +12,9 @@ class MessageError(Exception):
     """消息操作异常基类."""
 
 
+BROADCAST_BATCH_SIZE = 1000
+
+
 @transaction.atomic
 def send_message(  # noqa: PLR0913
     title,
@@ -67,7 +70,7 @@ def send_message(  # noqa: PLR0913
     # 创建用户消息关联
     if is_broadcast:
         # 广播消息发送给所有用户（分批处理避免内存耗尽）
-        batch_size = 1000
+        batch_size = BROADCAST_BATCH_SIZE
         user_messages = []
         users = User.objects.filter(is_active=True).iterator(chunk_size=batch_size)
 

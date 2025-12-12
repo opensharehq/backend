@@ -847,3 +847,28 @@ class PointQuerySetAliasTests(TestCase):
         """Test TransactionType enum has correct labels."""
         self.assertEqual(PointTransaction.TransactionType.EARN.label, "获得")
         self.assertEqual(PointTransaction.TransactionType.SPEND.label, "消费")
+
+
+class WithdrawalRequestStrTests(TestCase):
+    """Ensure WithdrawalRequest string representation includes key details."""
+
+    def test_str_includes_username_points_and_status(self):
+        user = User.objects.create_user(
+            username="withdraw_user", email="wd@example.com", password="pwd12345"
+        )
+        source = user.point_sources.create(initial_points=10, remaining_points=10)
+        request = user.withdrawal_requests.create(
+            point_source=source,
+            points=5,
+            real_name="测试",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="Test Bank",
+            bank_account="6222020200012345678",
+            status="PENDING",
+        )
+
+        text = str(request)
+        self.assertIn("withdraw_user", text)
+        self.assertIn("5", text)
+        self.assertIn(request.get_status_display(), text)

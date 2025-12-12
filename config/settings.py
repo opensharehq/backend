@@ -541,3 +541,10 @@ if not DEBUG:
     CSRF_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Strict"
     CSRF_COOKIE_SAMESITE = "Strict"
+
+# Tests run without HTTPS, so disable SSL redirects and secure-only cookies to avoid
+# interfering with client requests in the test suite.
+if TESTING:
+    SECURE_SSL_REDIRECT = False
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False

@@ -47,3 +47,13 @@ class SettingsHelpersTests(SimpleTestCase):
 
         self.assertEqual(backend, "django.core.mail.backends.console.EmailBackend")
         self.assertEqual(settings_dict, {})
+
+    def test_determine_email_backend_uses_mailgun_when_configured(self):
+        """Mailgun credentials should switch backend and provide API config."""
+        backend, settings_dict = determine_email_backend("key-123", "mg.example.com")
+
+        self.assertEqual(backend, "anymail.backends.mailgun.EmailBackend")
+        self.assertEqual(
+            settings_dict,
+            {"MAILGUN_API_KEY": "key-123", "MAILGUN_SENDER_DOMAIN": "mg.example.com"},
+        )

@@ -87,3 +87,6 @@ docstring-code-line-length = "dynamic"
 
 [lint.mccabe]
 max-complexity = 20
+
+[lint.per-file-ignores]
+"**/tests/**/*.py" = ["D", "EM101", "RUF002"]

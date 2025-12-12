@@ -1,8 +1,11 @@
 """测试 points app 的信号处理器."""
 
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase, TransactionTestCase
 
+from points import signals
 from points.models import PointSource, Tag
 
 User = get_user_model()
@@ -76,6 +79,17 @@ class CreateDefaultPointSourceSignalTests(TransactionTestCase):
         final_count = PointSource.objects.filter(user=user).count()
         self.assertEqual(initial_count, final_count)
 
+    def test_create_default_point_source_logs_on_commit_error(self):
+        """当 transaction.on_commit 抛错时，信号应记录异常但不传播。"""
+        user = User.objects.create_user(username="commit-error-user", password="pwd")
+        with mock.patch(
+            "points.signals.transaction.on_commit", side_effect=Exception("boom")
+        ):
+            with self.assertLogs("points.signals", level="ERROR"):
+                signals.create_default_point_source_for_new_user(
+                    sender=User, instance=user, created=True
+                )
+
 
 class DefaultTagMigrationTests(TestCase):
     """测试 default 标签的创建."""
@@ -104,3 +118,15 @@ class DefaultTagMigrationTests(TestCase):
 
         # 验证只有一个
         self.assertEqual(default_tags.count(), 1)
+
+
+class CreateDefaultPointSourceInternalTests(TestCase):
+    """直接测试内部默认积分池创建逻辑的异常分支。"""
+
+    def test_create_default_point_source_handles_exceptions(self):
+        user = User.objects.create_user(username="exception-user", password="pwd")
+        with mock.patch(
+            "points.signals.Tag.objects.filter", side_effect=Exception("db down")
+        ):
+            with self.assertLogs("points.signals", level="ERROR"):
+                signals._create_default_point_source(user)

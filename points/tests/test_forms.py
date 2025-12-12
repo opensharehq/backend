@@ -2,7 +2,7 @@
 
 from django import forms
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 from points.forms import BatchWithdrawalInfoForm, WithdrawalRequestForm
 from points.models import PointSource, Tag
@@ -148,6 +148,56 @@ class WithdrawalRequestFormTests(TestCase):
         self.assertTrue(form.is_valid())
         self.assertEqual(form.cleaned_data["bank_account"], "62220202000123456789")
 
+    def test_cleaners_allow_missing_optional_fields(self):
+        """Explicitly exercise early return branches for optional identifiers."""
+        form = WithdrawalRequestForm(point_source=self.point_source)
+        form.cleaned_data = {"id_number": None}
+        self.assertIsNone(form.clean_id_number())
+
+        form.cleaned_data = {"phone_number": None}
+        self.assertIsNone(form.clean_phone_number())
+
+        form.cleaned_data = {"bank_account": None}
+        self.assertIsNone(form.clean_bank_account())
+
+    def test_cleaners_direct_calls_cover_edge_cases(self):
+        """Call validators directly to hit uncovered return/validation lines."""
+        form = WithdrawalRequestForm(point_source=self.point_source)
+
+        # empty id number returns as-is without validation
+        form.cleaned_data = {"id_number": ""}
+        self.assertEqual(form.clean_id_number(), "")
+
+        # invalid pattern triggers specific error
+        form.cleaned_data = {"id_number": "12345678901234567A"}
+        with self.assertRaisesMessage(forms.ValidationError, "身份证号格式不正确。"):
+            form.clean_id_number()
+
+        # missing phone number returns immediately
+        form.cleaned_data = {"phone_number": ""}
+        self.assertEqual(form.clean_phone_number(), "")
+
+        # phone with invalid length
+        form.cleaned_data = {"phone_number": "123"}
+        with self.assertRaisesMessage(forms.ValidationError, "手机号必须是11位。"):
+            form.clean_phone_number()
+
+        # phone not starting with 1
+        form.cleaned_data = {"phone_number": "23800138000"}
+        with self.assertRaisesMessage(forms.ValidationError, "手机号必须以1开头。"):
+            form.clean_phone_number()
+
+        # bank account too long
+        form.cleaned_data = {"bank_account": "1" * 30}
+        with self.assertRaisesMessage(
+            forms.ValidationError, "银行账号长度不正确（应为10-25位）。"
+        ):
+            form.clean_bank_account()
+
+        # bank account missing returns early
+        form.cleaned_data = {"bank_account": ""}
+        self.assertEqual(form.clean_bank_account(), "")
+
 
 class BatchWithdrawalInfoFormTests(TestCase):
     """Validate shared identity fields used in batch withdrawals."""
@@ -184,3 +234,89 @@ class BatchWithdrawalInfoFormTests(TestCase):
         )
         self.assertTrue(valid_form.is_valid())
         self.assertEqual(valid_form.cleaned_data["bank_account"], "6222020200012345")
+
+    def test_init_sets_point_help_when_points_field_present(self):
+        """构造函数在存在 points 字段时也能安全设置辅助提示文本。"""
+        dummy_source = type("obj", (), {"remaining_points": 42})
+
+        # 临时为表单增加 points 字段以命中分支
+        from django import forms
+
+        original = BatchWithdrawalInfoForm.base_fields
+        BatchWithdrawalInfoForm.base_fields = {
+            **original,
+            "points": forms.IntegerField(required=False),
+        }
+        try:
+            form = BatchWithdrawalInfoForm(point_source=dummy_source)
+            self.assertIn("points", form.fields)
+            self.assertEqual(form.fields["points"].widget.attrs["max"], 42)
+            self.assertIn("42", form.fields["points"].help_text)
+        finally:
+            BatchWithdrawalInfoForm.base_fields = original
+
+    def test_clean_points_branch_validations(self):
+        """覆盖 BatchWithdrawalInfoForm.clean_points 的所有校验分支。"""
+        dummy_source = type("obj", (), {"remaining_points": 10})
+        from django import forms
+
+        original = BatchWithdrawalInfoForm.base_fields
+        BatchWithdrawalInfoForm.base_fields = {
+            **original,
+            "points": forms.IntegerField(required=False),
+        }
+        try:
+            form = BatchWithdrawalInfoForm(point_source=dummy_source)
+            form.cleaned_data = {"points": None}
+            with self.assertRaisesMessage(
+                forms.ValidationError, "请输入提现积分数量。"
+            ):
+                form.clean_points()
+
+            form.cleaned_data = {"points": 0}
+            with self.assertRaisesMessage(forms.ValidationError, "提现积分必须大于0。"):
+                form.clean_points()
+
+            form.cleaned_data = {"points": 11}
+            with self.assertRaisesMessage(
+                forms.ValidationError, "提现积分不能超过可用积分。可用积分: 10"
+            ):
+                form.clean_points()
+
+            form.cleaned_data = {"points": 5}
+            self.assertEqual(form.clean_points(), 5)
+        finally:
+            BatchWithdrawalInfoForm.base_fields = original
+
+
+class WithdrawalRequestFormBranchCoverageTests(SimpleTestCase):
+    """Directly invoke clean_* methods to cover early-return and error branches."""
+
+    def test_clean_id_number_optional_and_pattern(self):
+        form = WithdrawalRequestForm()
+        form.cleaned_data = {"id_number": ""}
+        self.assertEqual(form.clean_id_number(), "")
+
+        form.cleaned_data = {"id_number": "12345678901234567Z"}
+        with self.assertRaisesMessage(forms.ValidationError, "身份证号格式不正确。"):
+            form.clean_id_number()
+
+    def test_clean_phone_number_optional_and_prefix(self):
+        form = WithdrawalRequestForm()
+        form.cleaned_data = {"phone_number": ""}
+        self.assertEqual(form.clean_phone_number(), "")
+
+        form.cleaned_data = {"phone_number": "23800138000"}
+        with self.assertRaisesMessage(forms.ValidationError, "手机号必须以1开头。"):
+            form.clean_phone_number()
+
+    def test_clean_bank_account_optional_and_length(self):
+        form = WithdrawalRequestForm()
+        form.cleaned_data = {"bank_account": ""}
+        self.assertEqual(form.clean_bank_account(), "")
+
+        form.cleaned_data = {"bank_account": "1" * 30}
+        with self.assertRaisesMessage(
+            forms.ValidationError, "银行账号长度不正确（应为10-25位）。"
+        ):
+            form.clean_bank_account()

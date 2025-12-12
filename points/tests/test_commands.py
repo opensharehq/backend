@@ -1,12 +1,16 @@
 """Tests for points management commands."""
 
 from io import StringIO
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
+from points.management.commands.create_default_point_sources import (
+    Command as CreateDefaultSourcesCommand,
+)
 from points.models import PointSource, PointTransaction, Tag, WithdrawalRequest
 
 User = get_user_model()
@@ -197,6 +201,117 @@ class GrantPointsCommandTests(TestCase):
         transaction = PointTransaction.objects.first()
         self.assertEqual(transaction.description, "管理员发放")
         self.assertIn("Description: 管理员发放", out.getvalue())
+
+
+class CreateDefaultPointSourcesCommandEdgeTests(TestCase):
+    """Cover error-handling branches of create_default_point_sources command."""
+
+    def setUp(self):
+        self.command = CreateDefaultSourcesCommand()
+        self.command.stdout = StringIO()
+        Tag.objects.get_or_create(slug="default", defaults={"name": "默认"})
+        self.users = [
+            User.objects.create_user(username=f"user{i}", password="pwd")
+            for i in range(2)
+        ]
+        self.user = User.objects.create_user(
+            username="testuser", email="test@example.com", password="pwd"
+        )
+
+    def test_process_batch_collects_user_errors(self):
+        """If某个用户创建默认积分池失败，错误应被收集并返回。"""
+        default_tag = Tag.objects.get(slug="default")
+        with mock.patch.object(
+            PointSource.objects, "create", side_effect=Exception("boom")
+        ):
+            created, errors = self.command._process_batch(
+                self.users, default_tag, 0, len(self.users)
+            )
+
+        self.assertEqual(created, 0)
+        self.assertEqual(len(errors), len(self.users))
+        self.assertTrue(any("boom" in err for err in errors))
+        # ensure branch wrote errors to stdout
+        self.assertTrue(
+            any(
+                "错误" in line
+                for line in getattr(self.command, "stdout", StringIO())
+                .getvalue()
+                .splitlines()
+            )
+        )
+
+    def test_process_batch_handles_batch_exception(self):
+        """整批事务失败时，所有用户都应被标记为错误。"""
+        dummy_tag = Tag.objects.get(slug="default")
+
+        class ExplodingContext:
+            def __enter__(self):
+                raise Exception("tx failed")
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with mock.patch(
+            "points.management.commands.create_default_point_sources.transaction.atomic",
+            return_value=ExplodingContext(),
+        ):
+            created, errors = self.command._process_batch(
+                self.users, dummy_tag, 0, len(self.users)
+            )
+
+        self.assertEqual(created, 0)
+        self.assertEqual(len(errors), len(self.users))
+        self.assertTrue(all("批次失败" in err or "tx failed" in err for err in errors))
+        self.assertIn("批次处理失败", self.command.stdout.getvalue())
+
+    def test_process_batch_reports_progress_every_ten(self):
+        """当创建数达到整十时应输出进度百分比。"""
+        default_tag = Tag.objects.get(slug="default")
+        self.command.stdout = StringIO()
+        batch_users = [
+            User.objects.create_user(username=f"progress{i}") for i in range(10)
+        ]
+
+        created, errors = self.command._process_batch(
+            batch_users, default_tag, created_count=0, total_users=len(batch_users)
+        )
+
+        self.assertEqual(created, 10)
+        self.assertFalse(errors)
+        self.assertIn("已创建 10/10 (100%)", self.command.stdout.getvalue())
+
+    def test_show_results_displays_errors_and_remaining_users(self):
+        """_show_results 覆盖错误展示和剩余用户提醒分支。"""
+        out = StringIO()
+        self.command.stdout = out
+        many_errors = [f"err {i}" for i in range(12)]
+
+        with mock.patch(
+            "points.management.commands.create_default_point_sources.User.objects.exclude"
+        ) as exclude_mock:
+            exclude_mock.return_value.count.return_value = 3
+            self.command._show_results(created_count=1, errors=many_errors)
+
+        output = out.getvalue()
+        self.assertIn("失败: 12 个用户", output)
+        self.assertIn("以及其他 2 个错误", output)
+        self.assertIn("仍有 3 个用户没有默认积分池", output)
+
+    def test_show_results_success_when_all_users_handled(self):
+        """当没有错误且所有用户都有默认积分池时显示成功提示。"""
+        out = StringIO()
+        self.command.stdout = out
+
+        with mock.patch(
+            "points.management.commands.create_default_point_sources.User.objects.exclude"
+        ) as exclude_mock:
+            exclude_mock.return_value.count.return_value = 0
+            self.command._show_results(created_count=5, errors=[])
+
+        output = out.getvalue()
+        self.assertIn("成功创建 5 个默认积分池", output)
+        self.assertIn("所有用户现在都拥有默认积分池", output)
 
     def test_command_default_tags(self):
         """Test that default tag is '默认' when not provided."""

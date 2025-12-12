@@ -11,7 +11,12 @@ from django.urls import reverse
 
 from common.test_utils import CacheClearTestCase
 from points.models import PointSource, Tag
-from points.services import grant_points, spend_points
+from points.services import (
+    WithdrawalAmountError,
+    WithdrawalError,
+    grant_points,
+    spend_points,
+)
 
 
 class MyPointsViewTests(CacheClearTestCase):
@@ -926,3 +931,178 @@ class BatchWithdrawalViewTests(TestCase):
         # Should show form errors
         self.assertContains(response, "必须是18位")
         self.assertContains(response, "必须是11位")
+
+
+class WithdrawalViewEdgeCaseTests(TestCase):
+    """Cover edge-case branches in withdrawal-related views."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="withdraw_user", email="wd@example.com", password="pwd12345"
+        )
+        self.client.login(username="withdraw_user", password="pwd12345")
+        self.withdrawable_tag = Tag.objects.create(name="wd", withdrawable=True)
+        self.non_withdrawable_tag = Tag.objects.create(name="nw", withdrawable=False)
+
+    def _create_source(self, remaining=10, withdrawable=True):
+        source = PointSource.objects.create(
+            user=self.user,
+            initial_points=remaining,
+            remaining_points=remaining,
+        )
+        source.tags.add(
+            self.withdrawable_tag if withdrawable else self.non_withdrawable_tag
+        )
+        return source
+
+    def test_withdrawal_create_rejects_non_withdrawable_source(self):
+        source = self._create_source(withdrawable=False)
+        url = reverse("points:withdrawal_create", args=[source.id])
+        response = self.client.get(url)
+
+        self.assertRedirects(response, reverse("points:my_points"))
+
+    def test_withdrawal_create_rejects_empty_points(self):
+        source = self._create_source(remaining=0)
+        url = reverse("points:withdrawal_create", args=[source.id])
+        response = self.client.get(url)
+        self.assertRedirects(response, reverse("points:my_points"))
+
+    def test_withdrawal_create_get_shows_form(self):
+        source = self._create_source(remaining=20)
+        url = reverse("points:withdrawal_create", args=[source.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "提现积分数量")
+
+    @patch("points.views.create_withdrawal_request")
+    def test_withdrawal_create_posts_successfully(self, create_request_mock):
+        source = self._create_source(remaining=20)
+        create_request_mock.return_value = source.withdrawal_requests.create(
+            user=self.user,
+            points=5,
+            real_name="测试",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="银行",
+            bank_account="6222020200012345678",
+        )
+
+        url = reverse("points:withdrawal_create", args=[source.id])
+        response = self.client.post(
+            url,
+            {
+                "points": 5,
+                "real_name": "测试",
+                "id_number": "110101199001011234",
+                "phone_number": "13800138000",
+                "bank_name": "银行",
+                "bank_account": "6222020200012345678",
+            },
+            follow=True,
+        )
+        self.assertRedirects(response, reverse("points:withdrawal_list"))
+
+    @patch("points.views.create_withdrawal_request")
+    def test_withdrawal_create_handles_service_errors(self, create_request_mock):
+        source = self._create_source(remaining=20)
+        create_request_mock.side_effect = WithdrawalAmountError("service error")
+
+        url = reverse("points:withdrawal_create", args=[source.id])
+        response = self.client.post(
+            url,
+            {
+                "points": 5,
+                "real_name": "测试",
+                "id_number": "110101199001011234",
+                "phone_number": "13800138000",
+                "bank_name": "银行",
+                "bank_account": "6222020200012345678",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_withdrawal_detail_renders(self):
+        source = self._create_source(remaining=10)
+        wr = source.withdrawal_requests.create(
+            user=self.user,
+            points=5,
+            real_name="测试",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="银行",
+            bank_account="6222020200012345678",
+        )
+        url = reverse("points:withdrawal_detail", args=[wr.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, str(wr.id))
+
+    @patch("points.views.cancel_withdrawal")
+    def test_withdrawal_cancel_post_success(self, cancel_mock):
+        source = self._create_source(remaining=10)
+        wr = source.withdrawal_requests.create(
+            user=self.user,
+            points=5,
+            real_name="测试",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="银行",
+            bank_account="6222020200012345678",
+        )
+        url = reverse("points:withdrawal_cancel", args=[wr.id])
+        response = self.client.post(url)
+        self.assertRedirects(response, reverse("points:withdrawal_list"))
+        cancel_mock.assert_called_once_with(wr)
+
+    @patch("points.views.cancel_withdrawal")
+    def test_withdrawal_cancel_handles_errors(self, cancel_mock):
+        source = self._create_source(remaining=10)
+        wr = source.withdrawal_requests.create(
+            user=self.user,
+            points=5,
+            real_name="测试",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="银行",
+            bank_account="6222020200012345678",
+        )
+        cancel_mock.side_effect = WithdrawalError("cannot cancel")
+        url = reverse("points:withdrawal_cancel", args=[wr.id])
+        response = self.client.post(url)
+        self.assertRedirects(
+            response, reverse("points:withdrawal_detail", args=[wr.id])
+        )
+
+    def test_withdrawal_cancel_get_redirects(self):
+        source = self._create_source(remaining=10)
+        wr = source.withdrawal_requests.create(
+            user=self.user,
+            points=5,
+            real_name="测试",
+            id_number="110101199001011234",
+            phone_number="13800138000",
+            bank_name="银行",
+            bank_account="6222020200012345678",
+        )
+        url = reverse("points:withdrawal_cancel", args=[wr.id])
+        response = self.client.get(url)
+        self.assertRedirects(
+            response, reverse("points:withdrawal_detail", args=[wr.id])
+        )
+
+    @patch("points.services.create_batch_withdrawal_requests")
+    def test_batch_withdrawal_handles_service_errors(self, batch_mock):
+        batch_mock.side_effect = WithdrawalError("batch failed")
+        source = self._create_source(remaining=10)
+        url = reverse("points:batch_withdrawal")
+        data = {
+            f"points_{source.id}": "5",
+            "real_name": "张三",
+            "id_number": "110101199001011234",
+            "phone_number": "13800138000",
+            "bank_name": "银行",
+            "bank_account": "6222020200012345678",
+        }
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, 200)

@@ -252,6 +252,15 @@ class MarkUnreadViewTests(TestCase):
         data = json.loads(response.content)
         self.assertFalse(data["success"])
 
+    def test_mark_unread_redirects_for_non_ajax(self):
+        """非 AJAX 请求应重定向到消息列表."""
+        response = self.client.post(
+            reverse("messages:mark_unread"), {"message_ids[]": [self.message.id]}
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("messages:list"))
+
 
 class DeleteMessageViewTests(TestCase):
     """删除消息视图测试."""
@@ -296,6 +305,15 @@ class DeleteMessageViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         data = json.loads(response.content)
         self.assertFalse(data["success"])
+
+    def test_delete_redirects_for_non_ajax(self):
+        """非 AJAX 请求应重定向到消息列表."""
+        response = self.client.post(
+            reverse("messages:delete"), {"message_ids[]": [self.message.id]}
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("messages:list"))
 
 
 class UnreadCountViewTests(TestCase):

@@ -1,5 +1,7 @@
 """消息服务层测试."""
 
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
@@ -103,6 +105,27 @@ class SendMessageTests(TestCase):
         """测试非广播消息必须指定接收者."""
         with self.assertRaises(MessageError):
             send_message(title="测试", content="内容", is_broadcast=False)
+
+    def test_send_broadcast_uses_batches(self):
+        """测试广播消息按批次写入，触发循环中的批处理逻辑。"""
+        # 创建多一些用户以确保达到批处理阈值
+        extra_users = [
+            User.objects.create_user(
+                username=f"user_batch_{i}", email=f"batch{i}@example.com"
+            )
+            for i in range(3)
+        ]
+
+        with mock.patch("messages.services.BROADCAST_BATCH_SIZE", 1):
+            message = send_message(title="广播", content="批处理", is_broadcast=True)
+
+        # 所有激活用户都应收到消息
+        expected_count = 3 + len(extra_users)  # user1,user2,sender plus extras
+        self.assertEqual(message.get_recipient_count(), expected_count)
+        # 确保最后一个批次的 bulk_create 也执行了
+        self.assertEqual(
+            UserMessage.objects.filter(message=message).count(), expected_count
+        )
 
     def test_send_message_ignores_inactive_users_in_broadcast(self):
         """测试广播消息不会发送给未激活的用户."""

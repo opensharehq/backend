@@ -1,0 +1,50 @@
+{% extends "horizontal_base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="container my-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h4 class="card-title mb-3">提现合同签署</h4>
+          <p class="text-muted mb-4">
+            为保障资金安全，提现前需要完成一次性的电子合同签署。
+          </p>
+
+          <dl class="row">
+            <dt class="col-sm-3">当前状态</dt>
+            <dd class="col-sm-9">
+              {% if contract.is_signed %}
+                <span class="badge bg-success">已签署</span>
+                {% if contract.signed_at %}<small class="text-muted ms-2">签署时间：{{ contract.signed_at|date:"Y-m-d H:i" }}</small>{% endif %}
+              {% else %}
+                <span class="badge bg-warning text-dark">待签署</span>
+              {% endif %}
+            </dd>
+
+            <dt class="col-sm-3">流程编号</dt>
+            <dd class="col-sm-9">{{ contract.fadada_flow_id }}</dd>
+          </dl>
+
+          {% if not contract.is_signed %}
+          <div class="alert alert-info d-flex align-items-center" role="alert">
+            <i data-lucide="file-pen" class="me-2"></i>
+            <div>
+              点击下方按钮跳转至法大大完成签署，签署完成后返回本页继续提现。
+            </div>
+          </div>
+          <a href="{{ contract.sign_url }}" target="_blank" class="btn btn-primary">
+            立即签署
+          </a>
+          {% else %}
+          <a href="{% url 'points:withdrawal_list' %}" class="btn btn-success">
+            已签署，前往提现
+          </a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock content %}

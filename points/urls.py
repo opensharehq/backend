@@ -26,6 +26,16 @@ urlpatterns = [
         views.withdrawal_cancel,
         name="withdrawal_cancel",
     ),
+    path(
+        "withdrawal/contract/",
+        views.withdrawal_contract,
+        name="withdrawal_contract",
+    ),
+    path(
+        "withdrawal/fadada/callback/",
+        views.fadada_withdrawal_callback,
+        name="fadada_withdrawal_callback",
+    ),
     # Recharge URL
     path(
         "recharge/<int:point_source_id>/",

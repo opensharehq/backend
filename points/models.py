@@ -2,6 +2,7 @@
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class _UserAliasQuerySet(models.QuerySet):
@@ -159,6 +160,80 @@ class PointSource(models.Model):
     def is_rechargeable(self):
         """判断积分池是否可充值, 基于自身设置或关联的标签."""
         return self.allow_recharge or self.tags.filter(allow_recharge=True).exists()
+
+
+class WithdrawalContract(models.Model):
+    """提现合同签署记录."""
+
+    class Status(models.TextChoices):
+        """合同签署状态."""
+
+        PENDING = "PENDING", "待签署"
+        SIGNED = "SIGNED", "已签署"
+        REVOKED = "REVOKED", "已作废"
+
+    class CompletionSource(models.TextChoices):
+        """签署完成来源."""
+
+        CALLBACK = "CALLBACK", "法大大回调"
+        ADMIN = "ADMIN", "管理员操作"
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="withdrawal_contract",
+        verbose_name="用户",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        verbose_name="状态",
+        db_index=True,
+    )
+    fadada_flow_id = models.CharField(
+        max_length=128,
+        unique=True,
+        verbose_name="法大大流程ID",
+    )
+    sign_url = models.URLField(max_length=500, blank=True, verbose_name="签署链接")
+    signed_at = models.DateTimeField(null=True, blank=True, verbose_name="签署完成时间")
+    completion_source = models.CharField(
+        max_length=20,
+        choices=CompletionSource.choices,
+        blank=True,
+        verbose_name="完成来源",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        """模型元数据配置."""
+
+        verbose_name = "提现合同"
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        """返回合同的可读表示."""
+        return f"{self.user.username} - {self.get_status_display()}"
+
+    @property
+    def is_signed(self) -> bool:
+        """合同是否已签署."""
+        return self.status == self.Status.SIGNED
+
+    def mark_signed(self, source: str | None = None):
+        """标记合同为已签署."""
+        if self.is_signed:
+            return
+        self.status = self.Status.SIGNED
+        self.signed_at = timezone.now()
+        if source:
+            self.completion_source = source
+        self.save(
+            update_fields=["status", "signed_at", "completion_source", "updated_at"]
+        )
 
 
 class WithdrawalRequest(models.Model):

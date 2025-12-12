@@ -522,7 +522,7 @@ if DEBUG and not TESTING:
 # security config
 if not DEBUG:
     # HTTPS enforcement
-    SECURE_SSL_REDIRECT = True
+    # SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 

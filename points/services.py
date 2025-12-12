@@ -1,6 +1,7 @@
 """积分系统的业务逻辑服务层, 提供积分发放和消费功能."""
 
 import logging
+import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -9,7 +10,13 @@ from django.db import transaction
 from django.db.models import F, Q
 from django.utils.text import slugify
 
-from .models import PointSource, PointTransaction, Tag, WithdrawalRequest
+from .models import (
+    PointSource,
+    PointTransaction,
+    Tag,
+    WithdrawalContract,
+    WithdrawalRequest,
+)
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -277,6 +284,12 @@ class WithdrawalError(Exception):
     pass
 
 
+class WithdrawalContractNotSigned(WithdrawalError):
+    """当用户未完成提现合同签署时抛出此异常."""
+
+    pass
+
+
 class PointSourceNotWithdrawableError(WithdrawalError):
     """当积分来源不支持提现时抛出此异常."""
 
@@ -298,6 +311,42 @@ class WithdrawalData:
     phone_number: str
     bank_name: str
     bank_account: str
+
+
+def get_or_create_withdrawal_contract(user: User) -> tuple[WithdrawalContract, bool]:
+    """
+    获取或创建提现合同.
+
+    会为用户生成一个占位的法大大流程ID和签署链接。
+    """
+    contract, created = WithdrawalContract.objects.get_or_create(
+        user=user,
+        defaults={
+            "fadada_flow_id": uuid.uuid4().hex,
+            "sign_url": "",  # 占位，后续可替换成真实法大大链接
+        },
+    )
+
+    # 如果 sign_url 为空，为其生成占位符链接（幂等）
+    if not contract.sign_url:
+        contract.sign_url = f"https://example.com/fadada/sign/{contract.fadada_flow_id}"
+        contract.save(update_fields=["sign_url", "updated_at"])
+
+    return contract, created
+
+
+def ensure_contract_signed(user: User) -> None:
+    """
+    确认用户已完成提现合同签署, 否则抛出异常.
+
+    Raises:
+        WithdrawalContractNotSigned: 当用户未完成签署时。
+
+    """
+    contract, _ = get_or_create_withdrawal_contract(user)
+    if not contract.is_signed:
+        msg = "提现前需要先完成合同签署。"
+        raise WithdrawalContractNotSigned(msg)
 
 
 @transaction.atomic
@@ -327,6 +376,9 @@ def create_withdrawal_request(
         WithdrawalAmountError: 如果提现金额不合法。
 
     """
+    # 0. 确认用户已签署提现合同
+    ensure_contract_signed(user)
+
     # 1. 验证积分来源
     try:
         point_source = PointSource.objects.select_for_update().get(
@@ -550,6 +602,9 @@ def create_batch_withdrawal_requests(
         WithdrawalAmountError: 如果任何提现金额不合法。
 
     """
+    # 0. 确认用户已签署提现合同
+    ensure_contract_signed(user)
+
     # 验证至少有一个提现请求
     if not withdrawal_amounts:
         msg = "至少需要选择一个积分池进行提现。"

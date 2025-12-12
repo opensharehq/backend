@@ -9,11 +9,14 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import F, Sum
 from django.db.models.functions import TruncDate
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 
 from points.forms import WithdrawalRequestForm
-from points.models import PointSource, Tag, WithdrawalRequest
+from points.models import PointSource, Tag, WithdrawalContract, WithdrawalRequest
 from points.services import (
     PointSourceNotWithdrawableError,
     WithdrawalAmountError,
@@ -21,6 +24,7 @@ from points.services import (
     WithdrawalError,
     cancel_withdrawal,
     create_withdrawal_request,
+    get_or_create_withdrawal_contract,
 )
 
 TREND_DAYS = 30
@@ -172,6 +176,12 @@ def withdrawal_create(request, point_source_id):
     # Get the point source and verify it belongs to the user
     point_source = get_object_or_404(PointSource, id=point_source_id, user=request.user)
 
+    # Ensure contract signed before proceeding
+    contract, _ = get_or_create_withdrawal_contract(request.user)
+    if not contract.is_signed:
+        messages.warning(request, "提现前需要先完成提现合同签署。")
+        return redirect("points:withdrawal_contract")
+
     # Check if the point source is withdrawable
     if not point_source.is_withdrawable:
         messages.error(request, "该积分来源不支持提现。")
@@ -321,7 +331,7 @@ def recharge(request, point_source_id):
 
 
 @login_required
-def batch_withdrawal(request):
+def batch_withdrawal(request):  # noqa: PLR0912
     """
     Batch withdrawal page for multiple point sources.
 
@@ -331,6 +341,12 @@ def batch_withdrawal(request):
     """
     from points.forms import BatchWithdrawalInfoForm
     from points.services import create_batch_withdrawal_requests
+
+    # Ensure contract signed before proceeding
+    contract, _ = get_or_create_withdrawal_contract(request.user)
+    if not contract.is_signed:
+        messages.warning(request, "提现前需要先完成提现合同签署。")
+        return redirect("points:withdrawal_contract")
 
     # Get all withdrawable point sources for the user
     withdrawable_sources = [
@@ -421,3 +437,60 @@ def batch_withdrawal(request):
     }
 
     return render(request, "points/batch_withdrawal.html", context)
+
+
+@login_required
+def withdrawal_contract(request):
+    """
+    展示/引导用户完成提现合同签署.
+
+    如果已签署, 则引导用户继续提现.
+    """
+    contract, _ = get_or_create_withdrawal_contract(request.user)
+
+    if request.method == "POST":
+        # 预留：可以在此触发重新生成链接或刷新状态
+        pass
+
+    if contract.is_signed:
+        messages.success(request, "您已完成提现合同签署，可以继续提现。")
+
+    context = {
+        "contract": contract,
+    }
+    return render(request, "points/withdrawal_contract.html", context)
+
+
+@csrf_exempt
+@require_POST
+def fadada_withdrawal_callback(request):
+    """
+    接收法大大回调, 更新提现合同签署状态.
+
+    预期接收参数:
+        - flow_id: 法大大流程ID
+        - status/sign_result: 签署结果, 成功时为 SIGNED/success/done
+    """
+    payload = request.POST
+    flow_id = payload.get("flow_id") or payload.get("flowId") or payload.get("flowNo")
+    status = (
+        payload.get("status") or payload.get("sign_result") or payload.get("result")
+    )
+
+    if not flow_id:
+        return JsonResponse({"success": False, "error": "missing flow_id"}, status=400)
+
+    try:
+        contract = WithdrawalContract.objects.get(fadada_flow_id=flow_id)
+    except WithdrawalContract.DoesNotExist:
+        return JsonResponse(
+            {"success": False, "error": "contract_not_found"}, status=404
+        )
+
+    normalized_status = (status or "").lower()
+    success_statuses = {"signed", "success", "done", "completed"}
+    if normalized_status in success_statuses:
+        contract.mark_signed(source=WithdrawalContract.CompletionSource.CALLBACK)
+        return JsonResponse({"success": True})
+
+    return JsonResponse({"success": False, "error": "unsupported_status"}, status=400)

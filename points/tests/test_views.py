@@ -645,6 +645,10 @@ class BatchWithdrawalViewTests(TestCase):
         self.user = self.User.objects.create_user(
             username="testuser", email="test@example.com", password="password123"
         )
+        from points.services import get_or_create_withdrawal_contract
+
+        contract, _ = get_or_create_withdrawal_contract(self.user)
+        contract.mark_signed(source=contract.CompletionSource.ADMIN)
         self.withdrawable_tag = Tag.objects.create(
             name="withdrawable", withdrawable=True
         )

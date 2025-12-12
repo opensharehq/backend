@@ -14,6 +14,7 @@ from points.services import (
     approve_withdrawal,
     cancel_withdrawal,
     create_withdrawal_request,
+    get_or_create_withdrawal_contract,
     grant_points,
     reject_withdrawal,
     spend_points,
@@ -860,6 +861,8 @@ class BatchWithdrawalTests(TestCase):
         self.user = self.User.objects.create_user(
             username="testuser", email="test@example.com", password="password123"
         )
+        contract, _ = get_or_create_withdrawal_contract(self.user)
+        contract.mark_signed(source=contract.CompletionSource.ADMIN)
         self.WithdrawalData = WithdrawalData
         self.WithdrawalRequest = WithdrawalRequest
 
@@ -1180,6 +1183,8 @@ class WithdrawalLifecycleTests(TestCase):
             bank_name="中国银行",
             bank_account="6222020200012345678",
         )
+        contract, _ = get_or_create_withdrawal_contract(self.user)
+        contract.mark_signed(source=contract.CompletionSource.ADMIN)
 
     def test_create_withdrawal_request_success(self):
         """Valid request persists applicant data and stays pending."""

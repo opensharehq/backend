@@ -5,7 +5,13 @@ from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.utils.html import format_html
 
-from .models import PointSource, PointTransaction, Tag, WithdrawalRequest
+from .models import (
+    PointSource,
+    PointTransaction,
+    Tag,
+    WithdrawalContract,
+    WithdrawalRequest,
+)
 from .services import approve_withdrawal, reject_withdrawal
 
 User = get_user_model()
@@ -402,4 +408,44 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
                 request,
                 f"{error_count} 个提现申请拒绝失败。",
                 level="WARNING",
+            )
+
+
+@admin.register(WithdrawalContract)
+class WithdrawalContractAdmin(admin.ModelAdmin):
+    """Admin for withdrawal contract records."""
+
+    list_display = (
+        "user",
+        "status",
+        "fadada_flow_id",
+        "signed_at",
+        "completion_source",
+        "sign_link",
+    )
+    search_fields = ("user__username", "user__email", "fadada_flow_id")
+    list_filter = ("status", "completion_source")
+    readonly_fields = ("created_at", "updated_at", "sign_link")
+    actions = ["mark_signed_admin"]
+
+    @admin.display(description="签署链接")
+    def sign_link(self, obj):
+        """Display a clickable sign url."""
+        if not obj.sign_url:
+            return "-"
+        return format_html('<a href="{}" target="_blank">打开</a>', obj.sign_url)
+
+    @admin.action(description="标记为已签署")
+    def mark_signed_admin(self, request, queryset):
+        """Manually mark selected contracts as signed."""
+        updated = 0
+        for contract in queryset:
+            if contract.is_signed:
+                continue
+            contract.mark_signed(source=WithdrawalContract.CompletionSource.ADMIN)
+            updated += 1
+
+        if updated:
+            self.message_user(
+                request, f"已标记 {updated} 个合同为已签署。", level="SUCCESS"
             )

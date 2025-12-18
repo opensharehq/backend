@@ -3,10 +3,18 @@
 from django import forms
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from django.utils.html import format_html
 
-from .models import PointSource, PointTransaction, Tag, WithdrawalRequest
+from .models import (
+    PointSource,
+    PointTransaction,
+    Tag,
+    WithdrawalContractSigning,
+    WithdrawalRequest,
+)
 from .services import approve_withdrawal, reject_withdrawal
+from .withdrawal_contracts import handle_withdrawal_contract_webhook
 
 User = get_user_model()
 
@@ -401,5 +409,153 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
             self.message_user(
                 request,
                 f"{error_count} 个提现申请拒绝失败。",
+                level="WARNING",
+            )
+
+
+@admin.register(WithdrawalContractSigning)
+class WithdrawalContractSigningAdmin(admin.ModelAdmin):
+    """Admin for WithdrawalContractSigning model."""
+
+    list_display = (
+        "id",
+        "user",
+        "status",
+        "real_name",
+        "phone_number",
+        "signed_at",
+        "created_at",
+        "withdrawal_request_count",
+    )
+    list_filter = ("status", "created_at", "signed_at")
+    search_fields = (
+        "user__username",
+        "user__email",
+        "real_name",
+        "id_number",
+        "phone_number",
+        "bank_account",
+    )
+    ordering = ("-created_at",)
+    date_hierarchy = "created_at"
+    actions = ["mark_signed_and_create_withdrawals"]
+
+    readonly_fields = (
+        "user",
+        "status",
+        "real_name",
+        "id_number",
+        "phone_number",
+        "bank_name",
+        "bank_account",
+        "withdrawal_payload",
+        "created_withdrawal_request_ids",
+        "withdrawal_error",
+        "fdd_request_payload",
+        "fdd_response_payload",
+        "fdd_webhook_payload",
+        "signed_at",
+        "created_at",
+        "updated_at",
+    )
+
+    fieldsets = (
+        (
+            "签署信息",
+            {
+                "fields": (
+                    "user",
+                    "status",
+                    "signed_at",
+                    "created_at",
+                    "updated_at",
+                ),
+            },
+        ),
+        (
+            "身份信息",
+            {
+                "fields": (
+                    "real_name",
+                    "id_number",
+                    "phone_number",
+                ),
+            },
+        ),
+        (
+            "收款信息",
+            {
+                "fields": (
+                    "bank_name",
+                    "bank_account",
+                ),
+            },
+        ),
+        (
+            "提现申请",
+            {
+                "fields": (
+                    "withdrawal_payload",
+                    "created_withdrawal_request_ids",
+                    "withdrawal_error",
+                ),
+            },
+        ),
+        (
+            "法大大记录",
+            {
+                "fields": (
+                    "fdd_request_payload",
+                    "fdd_response_payload",
+                    "fdd_webhook_payload",
+                ),
+            },
+        ),
+    )
+
+    @admin.display(description="已创建提现")
+    def withdrawal_request_count(self, obj):
+        """Display count of created withdrawal requests."""
+        if not obj.created_withdrawal_request_ids:
+            return 0
+        return len(obj.created_withdrawal_request_ids)
+
+    @admin.action(description="标记为已签署并创建提现申请")
+    def mark_signed_and_create_withdrawals(self, request, queryset):
+        """Manually mark selected records as signed and create withdrawals."""
+        updated = 0
+        failed = 0
+
+        for record in queryset:
+            if record.status == WithdrawalContractSigning.Status.SIGNED:
+                continue
+            try:
+                handle_withdrawal_contract_webhook(
+                    {
+                        "signing_record_id": record.id,
+                        "status": "SIGNED",
+                        "signed_at": timezone.now().isoformat(),
+                        "source": "admin",
+                    }
+                )
+                updated += 1
+            except Exception as exc:
+                failed += 1
+                self.message_user(
+                    request,
+                    f"处理签署记录 #{record.id} 失败: {exc!s}",
+                    level="ERROR",
+                )
+
+        if updated:
+            self.message_user(
+                request,
+                f"已处理 {updated} 条签署记录。",
+                level="SUCCESS",
+            )
+        if failed:
+            self.message_user(
+                request,
+                f"{failed} 条签署记录处理失败。",
                 level="WARNING",
             )

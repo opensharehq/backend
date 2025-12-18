@@ -32,6 +32,7 @@ urlpatterns = [
     path("", include("social_django.urls", namespace="social")),
     path("accounts/", include("accounts.urls")),
     path("accounts/", include("points.urls")),
+    path("webhooks/", include("points.webhook_urls")),
     path("messages/", include("messages.urls")),
     path("", include("homepage.urls")),
     # Public profile route - must be last to avoid conflicts

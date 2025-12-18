@@ -4,6 +4,7 @@ import json
 from collections import defaultdict
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
@@ -21,6 +22,11 @@ from points.services import (
     WithdrawalError,
     cancel_withdrawal,
     create_withdrawal_request,
+)
+from points.withdrawal_contracts import (
+    get_latest_pending_contract,
+    get_latest_signed_contract,
+    start_withdrawal_contract_signing,
 )
 
 TREND_DAYS = 30
@@ -114,6 +120,61 @@ def _build_tag_trends(user, tags, start_date):
     return datasets
 
 
+def _get_contract_signing_state(user):
+    require_contract_signing = getattr(
+        settings, "WITHDRAWAL_CONTRACT_SIGNING_REQUIRED", False
+    )
+    signed_contract = get_latest_signed_contract(user)
+    pending_contract = None
+    if require_contract_signing and not signed_contract:
+        pending_contract = get_latest_pending_contract(user)
+    return require_contract_signing, signed_contract, pending_contract
+
+
+def _get_withdrawable_sources(user):
+    sources = (
+        user.point_sources.filter(remaining_points__gt=0)
+        .prefetch_related("tags")
+        .order_by("id")
+    )
+    return [source for source in sources if source.is_withdrawable]
+
+
+def _collect_batch_withdrawal_amounts(request, withdrawable_sources, form):
+    withdrawal_amounts: dict[int, int] = {}
+
+    for source in withdrawable_sources:
+        field_name = f"points_{source.id}"
+        points_str = request.POST.get(field_name, "").strip()
+        if not points_str:
+            continue
+
+        try:
+            points = int(points_str)
+        except ValueError:
+            messages.error(request, f"积分池 #{source.id} 的提现数量格式不正确。")
+            form.add_error(None, f"积分池 #{source.id} 的提现数量必须是整数。")
+            continue
+
+        if points <= 0:
+            continue
+
+        if points > source.remaining_points:
+            messages.error(
+                request,
+                f"积分池 #{source.id} 的提现数量不能超过剩余积分 {source.remaining_points}。",
+            )
+            form.add_error(None, f"积分池 #{source.id} 的提现数量不能超过剩余积分。")
+            continue
+
+        withdrawal_amounts[source.id] = points
+
+    if not withdrawal_amounts:
+        form.add_error(None, "至少需要为一个积分池设置提现数量。")
+
+    return withdrawal_amounts
+
+
 @login_required
 def my_points(request):
     """
@@ -182,8 +243,20 @@ def withdrawal_create(request, point_source_id):
         messages.error(request, "该积分来源没有可提现的积分。")
         return redirect("points:my_points")
 
+    require_contract_signing = getattr(
+        settings, "WITHDRAWAL_CONTRACT_SIGNING_REQUIRED", False
+    )
+    signed_contract = get_latest_signed_contract(request.user)
+    pending_contract = None
+    if require_contract_signing and not signed_contract:
+        pending_contract = get_latest_pending_contract(request.user)
+
     if request.method == "POST":
-        form = WithdrawalRequestForm(request.POST, point_source=point_source)
+        form = WithdrawalRequestForm(
+            request.POST,
+            point_source=point_source,
+            signed_contract=signed_contract if require_contract_signing else None,
+        )
         if form.is_valid():
             try:
                 withdrawal_data = WithdrawalData(
@@ -193,6 +266,28 @@ def withdrawal_create(request, point_source_id):
                     bank_name=form.cleaned_data["bank_name"],
                     bank_account=form.cleaned_data["bank_account"],
                 )
+                if require_contract_signing and not signed_contract:
+                    if pending_contract:
+                        messages.info(
+                            request,
+                            "您已发起提现合同签署，请先完成短信签署后再继续。",
+                        )
+                        return redirect("points:withdrawal_list")
+
+                    contract = start_withdrawal_contract_signing(
+                        user=request.user,
+                        withdrawal_data=withdrawal_data,
+                        withdrawal_payload={
+                            "point_source_id": point_source.id,
+                            "points": int(form.cleaned_data["points"]),
+                        },
+                    )
+                    messages.success(
+                        request,
+                        f"已发起提现合同签署（记录ID: #{contract.id}）。请查收短信完成签署，签署完成后将自动提交提现申请。",
+                    )
+                    return redirect("points:withdrawal_list")
+
                 withdrawal_request = create_withdrawal_request(
                     user=request.user,
                     point_source_id=point_source.id,
@@ -208,14 +303,21 @@ def withdrawal_create(request, point_source_id):
                 PointSource.DoesNotExist,
                 PointSourceNotWithdrawableError,
                 WithdrawalAmountError,
+                WithdrawalError,
             ) as e:
                 messages.error(request, str(e))
     else:
-        form = WithdrawalRequestForm(point_source=point_source)
+        form = WithdrawalRequestForm(
+            point_source=point_source,
+            signed_contract=signed_contract if require_contract_signing else None,
+        )
 
     context = {
         "form": form,
         "point_source": point_source,
+        "signed_contract": signed_contract,
+        "pending_contract": pending_contract,
+        "require_contract_signing": require_contract_signing,
     }
 
     return render(request, "points/withdrawal_create.html", context)
@@ -332,59 +434,29 @@ def batch_withdrawal(request):
     from points.forms import BatchWithdrawalInfoForm
     from points.services import create_batch_withdrawal_requests
 
-    # Get all withdrawable point sources for the user
-    withdrawable_sources = [
-        source
-        for source in request.user.point_sources.filter(
-            remaining_points__gt=0
-        ).prefetch_related("tags")
-        if source.is_withdrawable
-    ]
+    withdrawable_sources = _get_withdrawable_sources(request.user)
 
     # Check if user has any withdrawable sources
     if not withdrawable_sources:
         messages.warning(request, "您没有可提现的积分池。")
         return redirect("points:my_points")
 
+    require_contract_signing, signed_contract, pending_contract = (
+        _get_contract_signing_state(request.user)
+    )
+
     if request.method == "POST":
-        form = BatchWithdrawalInfoForm(request.POST)
+        form = BatchWithdrawalInfoForm(
+            request.POST,
+            signed_contract=signed_contract if require_contract_signing else None,
+        )
+        withdrawal_amounts = _collect_batch_withdrawal_amounts(
+            request,
+            withdrawable_sources,
+            form,
+        )
 
-        # Collect withdrawal amounts from POST data
-        withdrawal_amounts = {}
-        has_any_amount = False
-
-        for source in withdrawable_sources:
-            field_name = f"points_{source.id}"
-            points_str = request.POST.get(field_name, "").strip()
-
-            if points_str:
-                try:
-                    points = int(points_str)
-                    if points > 0:
-                        # Validate amount doesn't exceed remaining points
-                        if points > source.remaining_points:
-                            messages.error(
-                                request,
-                                f"积分池 #{source.id} 的提现数量不能超过剩余积分 {source.remaining_points}。",
-                            )
-                            form.add_error(
-                                None,
-                                f"积分池 #{source.id} 的提现数量不能超过剩余积分。",
-                            )
-                        else:
-                            withdrawal_amounts[source.id] = points
-                            has_any_amount = True
-                except ValueError:
-                    messages.error(
-                        request, f"积分池 #{source.id} 的提现数量格式不正确。"
-                    )
-                    form.add_error(None, f"积分池 #{source.id} 的提现数量必须是整数。")
-
-        # Validate that at least one amount is provided
-        if not has_any_amount:
-            form.add_error(None, "至少需要为一个积分池设置提现数量。")
-
-        if form.is_valid() and has_any_amount:
+        if form.is_valid() and withdrawal_amounts:
             try:
                 withdrawal_data = WithdrawalData(
                     real_name=form.cleaned_data["real_name"],
@@ -393,6 +465,24 @@ def batch_withdrawal(request):
                     bank_name=form.cleaned_data["bank_name"],
                     bank_account=form.cleaned_data["bank_account"],
                 )
+                if require_contract_signing and not signed_contract:
+                    if pending_contract:
+                        messages.info(
+                            request,
+                            "您已发起提现合同签署，请先完成短信签署后再继续。",
+                        )
+                        return redirect("points:withdrawal_list")
+
+                    contract = start_withdrawal_contract_signing(
+                        user=request.user,
+                        withdrawal_data=withdrawal_data,
+                        withdrawal_payload={"withdrawal_amounts": withdrawal_amounts},
+                    )
+                    messages.success(
+                        request,
+                        f"已发起提现合同签署（记录ID: #{contract.id}）。请查收短信完成签署，签署完成后将自动提交提现申请。",
+                    )
+                    return redirect("points:withdrawal_list")
 
                 withdrawal_requests = create_batch_withdrawal_requests(
                     user=request.user,
@@ -413,11 +503,16 @@ def batch_withdrawal(request):
             ) as e:
                 messages.error(request, str(e))
     else:
-        form = BatchWithdrawalInfoForm()
+        form = BatchWithdrawalInfoForm(
+            signed_contract=signed_contract if require_contract_signing else None
+        )
 
     context = {
         "form": form,
         "withdrawable_sources": withdrawable_sources,
+        "signed_contract": signed_contract,
+        "pending_contract": pending_contract,
+        "require_contract_signing": require_contract_signing,
     }
 
     return render(request, "points/batch_withdrawal.html", context)

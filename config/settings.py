@@ -129,6 +129,7 @@ INSTALLED_APPS = [
     "shop",
     "chdb",
     "messages.apps.SiteMessagesConfig",
+    "labels",
 ]
 
 _BASE_MIDDLEWARE = [

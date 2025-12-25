@@ -108,6 +108,13 @@ class Label(models.Model):
 
         支持通过 LabelPermission 的授权访问.
         """
+        # 公开标签：允许查看/使用，不开放编辑或管理
+        if self.is_public and required_level in (
+            PermissionLevel.VIEW,
+            PermissionLevel.USE,
+        ):
+            return True
+
         # 系统标签对所有人可见
         if self.owner_type == OwnerType.SYSTEM:
             return required_level == "view"
@@ -115,10 +122,33 @@ class Label(models.Model):
         # 所有者拥有完全权限
         if self.owner_type == OwnerType.USER and self.owner_id == user.id:
             return True
+
+        # 延迟导入以避免潜在循环依赖
+        from accounts.models import OrganizationMembership
+
+        # 预取用户的组织成员关系，便于后续多处复用
+        memberships = list(
+            OrganizationMembership.objects.filter(user=user).values(
+                "organization_id", "role"
+            )
+        )
+        user_org_ids = {m["organization_id"] for m in memberships}
+        admin_org_ids = {
+            m["organization_id"]
+            for m in memberships
+            if m["role"]
+            in (OrganizationMembership.Role.ADMIN, OrganizationMembership.Role.OWNER)
+        }
+
         if self.owner_type == OwnerType.ORGANIZATION:
-            # 检查用户是否是组织管理员
-            if hasattr(user, "is_org_admin"):
-                return user.is_org_admin(self.owner_id)
+            # 组织成员可查看/使用标签；管理员/所有者可编辑/管理
+            if self.owner_id in user_org_ids and required_level in (
+                PermissionLevel.VIEW,
+                PermissionLevel.USE,
+            ):
+                return True
+            if self.owner_id in admin_org_ids:
+                return True
 
         # 检查直接授予用户的权限
         user_permission = self.permissions.filter(
@@ -128,8 +158,7 @@ class Label(models.Model):
             return True
 
         # 检查通过组织授予的权限
-        if hasattr(user, "get_organization_ids"):
-            user_org_ids = user.get_organization_ids()
+        if user_org_ids:
             org_permissions = self.permissions.filter(
                 grantee_type=GranteeType.ORGANIZATION,
                 grantee_id__in=user_org_ids,

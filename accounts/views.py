@@ -2194,7 +2194,7 @@ def org_label_delete_view(request, slug, label_id):
     """Delete an organization label."""
     from labels.models import Label, OwnerType
 
-    organization, membership, error = _check_org_label_permission(
+    organization, _membership, error = _check_org_label_permission(
         request, slug, require_admin=True
     )
     if error:

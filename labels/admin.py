@@ -1,3 +1,5 @@
+"""Admin customisations for managing labels and their permissions."""
+
 import json
 
 from django.contrib import admin
@@ -8,7 +10,7 @@ from .models import Label, LabelPermission, LabelPermissionLog
 
 
 class LabelPermissionInline(admin.TabularInline):
-    """标签权限内联编辑"""
+    """标签权限内联编辑."""
 
     model = LabelPermission
     extra = 0
@@ -23,14 +25,14 @@ class LabelPermissionInline(admin.TabularInline):
     readonly_fields = ["granted_by", "granted_at"]
 
     def get_queryset(self, request):
-        """只显示激活的权限"""
+        """只显示激活的权限."""
         qs = super().get_queryset(request)
         return qs.filter(is_active=True)
 
 
 @admin.register(Label)
 class LabelAdmin(admin.ModelAdmin):
-    """标签管理后台"""
+    """标签管理后台."""
 
     list_display = [
         "id",
@@ -99,7 +101,7 @@ class LabelAdmin(admin.ModelAdmin):
     actions = ["make_public", "make_private", "export_labels"]
 
     def owner_display(self, obj):
-        """显示所有者信息"""
+        """显示所有者信息."""
         if obj.owner_type == "system":
             return format_html('<span style="color: blue;">系统</span>')
         elif obj.owner_type == "user":
@@ -122,7 +124,7 @@ class LabelAdmin(admin.ModelAdmin):
     owner_display.short_description = "所有者"
 
     def entity_count(self, obj):
-        """计算标签包含的实体总数"""
+        """计算标签包含的实体总数."""
         count = 0
         for platform in obj.data.get("platforms", []):
             count += len(platform.get("orgs", []))
@@ -133,7 +135,7 @@ class LabelAdmin(admin.ModelAdmin):
     entity_count.short_description = "实体数量"
 
     def entity_count_detail(self, obj):
-        """详细的实体计数"""
+        """详细的实体计数."""
         details = []
         for platform in obj.data.get("platforms", []):
             platform_name = platform.get("name", "Unknown")
@@ -148,7 +150,7 @@ class LabelAdmin(admin.ModelAdmin):
     entity_count_detail.short_description = "实体详情"
 
     def data_preview(self, obj):
-        """JSON 数据预览"""
+        """JSON 数据预览."""
         return format_html(
             '<pre style="max-height: 300px; overflow: auto;">{}</pre>',
             json.dumps(obj.data, indent=2, ensure_ascii=False),
@@ -157,21 +159,21 @@ class LabelAdmin(admin.ModelAdmin):
     data_preview.short_description = "数据预览"
 
     def make_public(self, request, queryset):
-        """批量设为公开"""
+        """批量设为公开."""
         updated = queryset.update(is_public=True)
         self.message_user(request, f"成功将 {updated} 个标签设为公开")
 
     make_public.short_description = "设为公开"
 
     def make_private(self, request, queryset):
-        """批量设为私有"""
+        """批量设为私有."""
         updated = queryset.update(is_public=False)
         self.message_user(request, f"成功将 {updated} 个标签设为私有")
 
     make_private.short_description = "设为私有"
 
     def export_labels(self, request, queryset):
-        """导出标签为 JSON"""
+        """导出标签为 JSON."""
         labels_data = []
         for label in queryset:
             labels_data.append(
@@ -195,7 +197,7 @@ class LabelAdmin(admin.ModelAdmin):
 
 @admin.register(LabelPermission)
 class LabelPermissionAdmin(admin.ModelAdmin):
-    """标签权限管理后台"""
+    """标签权限管理后台."""
 
     list_display = [
         "id",
@@ -245,7 +247,7 @@ class LabelPermissionAdmin(admin.ModelAdmin):
     actions = ["activate_permissions", "deactivate_permissions"]
 
     def label_link(self, obj):
-        """标签链接"""
+        """标签链接."""
         return format_html(
             '<a href="/admin/labels/label/{}/change/">{}</a>',
             obj.label.id,
@@ -255,7 +257,7 @@ class LabelPermissionAdmin(admin.ModelAdmin):
     label_link.short_description = "标签"
 
     def grantee_display(self, obj):
-        """被授权对象显示"""
+        """被授权对象显示."""
         if obj.grantee_type == "user":
             from accounts.models import User
 
@@ -275,7 +277,7 @@ class LabelPermissionAdmin(admin.ModelAdmin):
     grantee_display.short_description = "被授权对象"
 
     def granted_by_display(self, obj):
-        """授权者显示"""
+        """授权者显示."""
         if not obj.granted_by:
             return "-"
         return format_html(
@@ -287,7 +289,7 @@ class LabelPermissionAdmin(admin.ModelAdmin):
     granted_by_display.short_description = "授权者"
 
     def status_display(self, obj):
-        """权限状态显示"""
+        """权限状态显示."""
         if not obj.is_active:
             return format_html('<span style="color: red;">已撤销</span>')
         if obj.is_expired():
@@ -297,14 +299,14 @@ class LabelPermissionAdmin(admin.ModelAdmin):
     status_display.short_description = "状态"
 
     def activate_permissions(self, request, queryset):
-        """激活权限"""
+        """激活权限."""
         updated = queryset.update(is_active=True)
         self.message_user(request, f"成功激活 {updated} 个权限")
 
     activate_permissions.short_description = "激活选中权限"
 
     def deactivate_permissions(self, request, queryset):
-        """停用权限"""
+        """停用权限."""
         updated = queryset.update(is_active=False)
         self.message_user(request, f"成功停用 {updated} 个权限")
 
@@ -313,7 +315,7 @@ class LabelPermissionAdmin(admin.ModelAdmin):
 
 @admin.register(LabelPermissionLog)
 class LabelPermissionLogAdmin(admin.ModelAdmin):
-    """标签权限日志管理后台"""
+    """标签权限日志管理后台."""
 
     list_display = [
         "id",
@@ -350,15 +352,15 @@ class LabelPermissionLogAdmin(admin.ModelAdmin):
     )
 
     def has_add_permission(self, request):
-        """禁止添加日志(只能由系统创建)"""
+        """禁止添加日志(只能由系统创建)."""
         return False
 
     def has_delete_permission(self, request, obj=None):
-        """禁止删除日志(审计需要)"""
+        """禁止删除日志(审计需要)."""
         return False
 
     def permission_link(self, obj):
-        """权限链接"""
+        """权限链接."""
         return format_html(
             '<a href="/admin/labels/labelpermission/{}/change/">权限 #{}</a>',
             obj.permission.id,
@@ -368,7 +370,7 @@ class LabelPermissionLogAdmin(admin.ModelAdmin):
     permission_link.short_description = "权限"
 
     def actor_display(self, obj):
-        """操作者显示"""
+        """操作者显示."""
         if not obj.actor:
             return "系统"
         return format_html(
@@ -380,7 +382,7 @@ class LabelPermissionLogAdmin(admin.ModelAdmin):
     actor_display.short_description = "操作者"
 
     def details_display(self, obj):
-        """详情显示"""
+        """详情显示."""
         return format_html(
             "<pre>{}</pre>",
             json.dumps(obj.details, indent=2, ensure_ascii=False),

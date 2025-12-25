@@ -1,9 +1,11 @@
+"""Models for labels and related permissions."""
+
 from django.db import models
 from django.utils import timezone
 
 
 class LabelType(models.TextChoices):
-    """标签类型枚举"""
+    """标签类型枚举."""
 
     PROJECT = "project", "项目"
     ENTERPRISE = "enterprise", "企业"
@@ -13,7 +15,7 @@ class LabelType(models.TextChoices):
 
 
 class OwnerType(models.TextChoices):
-    """所有者类型枚举"""
+    """所有者类型枚举."""
 
     SYSTEM = "system", "系统"  # OpenDigger 同步的标签
     USER = "user", "个人"  # 用户创建的标签
@@ -21,7 +23,7 @@ class OwnerType(models.TextChoices):
 
 
 class PermissionLevel(models.TextChoices):
-    """权限级别枚举"""
+    """权限级别枚举."""
 
     VIEW = "view", "查看"  # 仅可查看标签及其数据
     USE = "use", "使用"  # 可查看和使用标签(积分分发、筛选)
@@ -30,7 +32,7 @@ class PermissionLevel(models.TextChoices):
 
 
 class GranteeType(models.TextChoices):
-    """被授权对象类型枚举"""
+    """被授权对象类型枚举."""
 
     USER = "user", "用户"  # 授权给个人用户
     ORGANIZATION = "organization", "组织"  # 授权给整个组织
@@ -38,8 +40,9 @@ class GranteeType(models.TextChoices):
 
 class Label(models.Model):
     """
-    标签模型，用于分类项目、组织和开发者
-    与 OpenDigger 标签系统集成
+    标签模型, 用于分类项目、组织和开发者.
+
+    与 OpenDigger 标签系统集成.
     """
 
     name = models.CharField(max_length=200, db_index=True, verbose_name="英文名称")
@@ -63,7 +66,7 @@ class Label(models.Model):
     data = models.JSONField(default=dict, verbose_name="标签数据")
     is_public = models.BooleanField(default=False, verbose_name="是否公开")
     sync_source = models.CharField(
-        max_length=50, null=True, blank=True, verbose_name="同步来源"
+        max_length=50, blank=True, default="", verbose_name="同步来源"
     )
     last_synced_at = models.DateTimeField(
         null=True, blank=True, verbose_name="最后同步时间"
@@ -72,6 +75,8 @@ class Label(models.Model):
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 
     class Meta:
+        """Meta options for Label."""
+
         db_table = "labels"
         verbose_name = "标签"
         verbose_name_plural = "标签"
@@ -87,10 +92,11 @@ class Label(models.Model):
         ]
 
     def __str__(self):
+        """Return string representation with name and type."""
         return f"{self.name} ({self.get_type_display()})"
 
     def get_platform_entities(self, platform_name):
-        """提取特定平台的组织/仓库/开发者"""
+        """提取特定平台的组织/仓库/开发者."""
         for platform in self.data.get("platforms", []):
             if platform["name"] == platform_name:
                 return platform
@@ -98,8 +104,9 @@ class Label(models.Model):
 
     def has_access(self, user, required_level="view"):
         """
-        检查用户是否可以访问此标签
-        支持通过 LabelPermission 的授权访问
+        检查用户是否可以访问此标签.
+
+        支持通过 LabelPermission 的授权访问.
         """
         # 系统标签对所有人可见
         if self.owner_type == OwnerType.SYSTEM:
@@ -135,22 +142,20 @@ class Label(models.Model):
         return False
 
     def can_edit(self, user):
-        """检查用户是否可以编辑此标签"""
+        """检查用户是否可以编辑此标签."""
         if self.owner_type == OwnerType.SYSTEM:
             return False
         return self.has_access(user, required_level="edit")
 
     def can_manage(self, user):
-        """检查用户是否可以管理此标签(删除、授权等)"""
+        """检查用户是否可以管理此标签(删除、授权等)."""
         if self.owner_type == OwnerType.SYSTEM:
             return False
         return self.has_access(user, required_level="manage")
 
 
 class LabelPermission(models.Model):
-    """
-    标签共享权限模型，支持跨用户和跨组织的标签访问控制
-    """
+    """标签共享权限模型, 支持跨用户和跨组织的标签访问控制."""
 
     label = models.ForeignKey(
         "Label",
@@ -178,6 +183,8 @@ class LabelPermission(models.Model):
     notes = models.TextField(blank=True, verbose_name="备注")
 
     class Meta:
+        """Meta options for LabelPermission."""
+
         db_table = "label_permissions"
         verbose_name = "标签权限"
         verbose_name_plural = "标签权限"
@@ -195,16 +202,20 @@ class LabelPermission(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.label.name} - {self.get_permission_level_display()} to {self.grantee_type}:{self.grantee_id}"
+        """Return readable permission description."""
+        return (
+            f"{self.label.name} - {self.get_permission_level_display()} "
+            f"to {self.grantee_type}:{self.grantee_id}"
+        )
 
     def is_expired(self):
-        """检查权限是否已过期"""
+        """检查权限是否已过期."""
         if not self.expires_at:
             return False
         return timezone.now() > self.expires_at
 
     def check_permission(self, required_level):
-        """检查是否具有所需权限级别"""
+        """检查是否具有所需权限级别."""
         if not self.is_active or self.is_expired():
             return False
 
@@ -216,7 +227,7 @@ class LabelPermission(models.Model):
 
 
 class LabelPermissionLog(models.Model):
-    """标签权限变更审计日志"""
+    """标签权限变更审计日志."""
 
     ACTION_CHOICES = [
         ("granted", "授予"),
@@ -241,10 +252,13 @@ class LabelPermissionLog(models.Model):
     details = models.JSONField(default=dict, verbose_name="变更详情")
 
     class Meta:
+        """Meta options for LabelPermissionLog."""
+
         db_table = "label_permission_logs"
         verbose_name = "标签权限日志"
         verbose_name_plural = "标签权限日志"
         ordering = ["-timestamp"]
 
     def __str__(self):
+        """Return string description of permission log entry."""
         return f"{self.get_action_display()} - {self.permission} at {self.timestamp}"

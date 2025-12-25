@@ -91,7 +91,7 @@
                                                 {% endif %}
                                             </td>
                                             <td>
-                                                <form method="post" action="{% url 'accounts:label_permission_revoke' perm.id %}" style="display: inline;" onsubmit="return confirm('确定要撤销此权限吗？');">
+                                                <form method="post" action="{% url 'accounts:label_permission_revoke' perm.id %}" class="d-inline" onsubmit="return confirm('确定要撤销此权限吗？');">
                                                     {% csrf_token %}
                                                     <button type="submit" class="btn btn-sm btn-outline-danger" title="撤销权限">
                                                         <i data-lucide="x-circle" class="icon-sm"></i> 撤销

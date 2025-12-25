@@ -142,8 +142,16 @@ def sign_up_view(request):
 @login_required
 def profile_view(request):
     """Display user profile page."""
+    from labels.models import Label, OwnerType
+
     profile, _created = UserProfile.objects.get_or_create(user=request.user)
-    return render(request, "profile.html", {"profile": profile})
+    # 获取用户拥有的标签数量
+    label_count = Label.objects.filter(
+        owner_type=OwnerType.USER, owner_id=request.user.id
+    ).count()
+    return render(
+        request, "profile.html", {"profile": profile, "label_count": label_count}
+    )
 
 
 def _get_profile_edit_forms(

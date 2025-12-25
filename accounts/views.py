@@ -1641,6 +1641,8 @@ def label_list_view(request):
 @login_required
 def label_create_view(request):
     """Create a new label."""
+    import json
+
     from labels.models import Label, LabelType, OwnerType
 
     if request.method == "POST":
@@ -1648,6 +1650,7 @@ def label_create_view(request):
         name_zh = request.POST.get("name_zh", "").strip()
         label_type = request.POST.get("type", "")
         is_public = request.POST.get("is_public") == "1"
+        data_str = request.POST.get("data", "{}").strip()
 
         errors = {}
         if not name:
@@ -1656,6 +1659,16 @@ def label_create_view(request):
             errors["name_zh"] = "中文名称不能为空"
         if label_type not in dict(LabelType.choices):
             errors["type"] = "请选择有效的标签类型"
+
+        # Parse JSON data
+        data = {}
+        if data_str:
+            try:
+                data = json.loads(data_str)
+                if not isinstance(data, dict):
+                    errors["data"] = "标签数据必须是 JSON 对象格式"
+            except json.JSONDecodeError:
+                errors["data"] = "标签数据格式无效，请输入有效的 JSON"
 
         # Check uniqueness
         if name and Label.objects.filter(
@@ -1671,6 +1684,7 @@ def label_create_view(request):
                 owner_type=OwnerType.USER,
                 owner_id=request.user.id,
                 is_public=is_public,
+                data=data,
             )
             messages.success(request, f"标签 {label.name_zh} 创建成功")
             return redirect("accounts:label_list")
@@ -1681,6 +1695,7 @@ def label_create_view(request):
             "name_zh": name_zh,
             "type": label_type,
             "is_public": is_public,
+            "data": data_str,
             "label_types": LabelType.choices,
         }
         return render(request, "accounts/label_form.html", context)
@@ -1693,6 +1708,8 @@ def label_create_view(request):
 @login_required
 def label_edit_view(request, label_id):
     """Edit an existing label."""
+    import json
+
     from labels.models import Label, LabelType
 
     label = get_object_or_404(Label, id=label_id)
@@ -1706,6 +1723,7 @@ def label_edit_view(request, label_id):
         name_zh = request.POST.get("name_zh", "").strip()
         label_type = request.POST.get("type", "")
         is_public = request.POST.get("is_public") == "1"
+        data_str = request.POST.get("data", "{}").strip()
 
         errors = {}
         if not name:
@@ -1714,6 +1732,16 @@ def label_edit_view(request, label_id):
             errors["name_zh"] = "中文名称不能为空"
         if label_type not in dict(LabelType.choices):
             errors["type"] = "请选择有效的标签类型"
+
+        # Parse JSON data
+        data = {}
+        if data_str:
+            try:
+                data = json.loads(data_str)
+                if not isinstance(data, dict):
+                    errors["data"] = "标签数据必须是 JSON 对象格式"
+            except json.JSONDecodeError:
+                errors["data"] = "标签数据格式无效，请输入有效的 JSON"
 
         # Check uniqueness (exclude current label)
         if name and Label.objects.filter(
@@ -1726,6 +1754,7 @@ def label_edit_view(request, label_id):
             label.name_zh = name_zh
             label.type = label_type
             label.is_public = is_public
+            label.data = data
             label.save()
             messages.success(request, f"标签 {label.name_zh} 更新成功")
             return redirect("accounts:label_list")
@@ -1737,6 +1766,7 @@ def label_edit_view(request, label_id):
             "name_zh": name_zh,
             "type": label_type,
             "is_public": is_public,
+            "data": data_str,
             "label_types": LabelType.choices,
         }
         return render(request, "accounts/label_form.html", context)

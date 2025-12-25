@@ -31,6 +31,9 @@
             <h4 class="mb-3 mb-md-0">{{ organization.name }}</h4>
         </div>
         <div class="d-flex align-items-center flex-wrap text-nowrap gap-2">
+            <a href="{% url 'accounts:org_label_list' organization.slug %}" class="btn btn-outline-info btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="tag" class="btn-icon-prepend"></i> 标签管理
+            </a>
             {% if is_admin %}
                 <a href="{% url 'accounts:organization_members' organization.slug %}" class="btn btn-primary btn-icon-text mb-2 mb-md-0">
                     <i data-lucide="users" class="btn-icon-prepend"></i> 成员管理

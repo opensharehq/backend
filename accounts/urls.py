@@ -19,6 +19,10 @@ from .views import (
     merge_reject_view,
     merge_request_view,
     merge_review_view,
+    org_label_create_view,
+    org_label_delete_view,
+    org_label_edit_view,
+    org_label_list_view,
     organization_create,
     organization_delete,
     organization_detail,
@@ -151,6 +155,27 @@ urlpatterns = [
         "organizations/<slug:slug>/members/<int:member_id>/remove/",
         organization_member_remove,
         name="organization_member_remove",
+    ),
+    # Organization Label URLs
+    path(
+        "organizations/<slug:slug>/labels/",
+        org_label_list_view,
+        name="org_label_list",
+    ),
+    path(
+        "organizations/<slug:slug>/labels/create/",
+        org_label_create_view,
+        name="org_label_create",
+    ),
+    path(
+        "organizations/<slug:slug>/labels/<int:label_id>/edit/",
+        org_label_edit_view,
+        name="org_label_edit",
+    ),
+    path(
+        "organizations/<slug:slug>/labels/<int:label_id>/delete/",
+        org_label_delete_view,
+        name="org_label_delete",
     ),
     # Label management URLs
     path("labels/", label_list_view, name="label_list"),

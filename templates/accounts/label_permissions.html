@@ -1,0 +1,154 @@
+{% extends "horizontal_base.html" %}
+
+{% block title %}标签权限管理{% endblock title %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">标签权限管理</h4>
+            <p class="text-muted mb-0">标签: {{ label.name_zh }} ({{ label.name }})</p>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap gap-2">
+            <a href="{% url 'accounts:label_permission_grant' label.id %}" class="btn btn-primary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="user-plus" class="btn-icon-prepend"></i> 授予权限
+            </a>
+            <a href="{% url 'accounts:label_list' %}" class="btn btn-secondary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回列表
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12 grid-margin stretch-card">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i data-lucide="shield" class="icon-sm"></i> 权限列表
+                    </h6>
+                    {% if permissions %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>用户</th>
+                                        <th>权限级别</th>
+                                        <th>授予者</th>
+                                        <th>授予时间</th>
+                                        <th>过期时间</th>
+                                        <th>备注</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for perm in permissions %}
+                                        <tr {% if perm.is_expired %}class="table-secondary"{% endif %}>
+                                            <td>
+                                                {% if perm.grantee_type == 'user' %}
+                                                    <span class="badge bg-info">
+                                                        <i data-lucide="user" class="icon-xs"></i> ID: {{ perm.grantee_id }}
+                                                    </span>
+                                                {% else %}
+                                                    <span class="badge bg-warning">
+                                                        <i data-lucide="users" class="icon-xs"></i> 组织 ID: {{ perm.grantee_id }}
+                                                    </span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if perm.permission_level == 'view' %}
+                                                    <span class="badge bg-secondary">
+                                                        <i data-lucide="eye" class="icon-xs"></i> 查看
+                                                    </span>
+                                                {% elif perm.permission_level == 'use' %}
+                                                    <span class="badge bg-primary">
+                                                        <i data-lucide="check" class="icon-xs"></i> 使用
+                                                    </span>
+                                                {% elif perm.permission_level == 'edit' %}
+                                                    <span class="badge bg-info">
+                                                        <i data-lucide="edit" class="icon-xs"></i> 编辑
+                                                    </span>
+                                                {% elif perm.permission_level == 'manage' %}
+                                                    <span class="badge bg-success">
+                                                        <i data-lucide="settings" class="icon-xs"></i> 管理
+                                                    </span>
+                                                {% endif %}
+                                            </td>
+                                            <td>{{ perm.granted_by.username|default:"系统" }}</td>
+                                            <td>{{ perm.granted_at|date:"Y-m-d H:i" }}</td>
+                                            <td>
+                                                {% if perm.expires_at %}
+                                                    {{ perm.expires_at|date:"Y-m-d H:i" }}
+                                                    {% if perm.is_expired %}
+                                                        <span class="badge bg-danger">已过期</span>
+                                                    {% endif %}
+                                                {% else %}
+                                                    <span class="badge bg-success">永久</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if perm.notes %}
+                                                    <small>{{ perm.notes|truncatewords:10 }}</small>
+                                                {% else %}
+                                                    <span class="text-muted">-</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <form method="post" action="{% url 'accounts:label_permission_revoke' perm.id %}" style="display: inline;" onsubmit="return confirm('确定要撤销此权限吗？');">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="撤销权限">
+                                                        <i data-lucide="x-circle" class="icon-sm"></i> 撤销
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="alert alert-info d-flex align-items-center" role="alert">
+                            <i data-lucide="info" class="icon-sm me-2"></i>
+                            <div>暂无权限记录，点击右上角"授予权限"按钮开始授权。</div>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- 权限说明 -->
+    <div class="row">
+        <div class="col-12 grid-margin stretch-card">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i data-lucide="help-circle" class="icon-sm"></i> 权限级别说明
+                    </h6>
+                    <ul class="list-unstyled">
+                        <li class="mb-2">
+                            <span class="badge bg-secondary">
+                                <i data-lucide="eye" class="icon-xs"></i> 查看
+                            </span>
+                            - 仅可查看标签及其数据
+                        </li>
+                        <li class="mb-2">
+                            <span class="badge bg-primary">
+                                <i data-lucide="check" class="icon-xs"></i> 使用
+                            </span>
+                            - 可查看和使用标签（积分分发、筛选）
+                        </li>
+                        <li class="mb-2">
+                            <span class="badge bg-info">
+                                <i data-lucide="edit" class="icon-xs"></i> 编辑
+                            </span>
+                            - 可查看、使用和编辑标签数据
+                        </li>
+                        <li class="mb-2">
+                            <span class="badge bg-success">
+                                <i data-lucide="settings" class="icon-xs"></i> 管理
+                            </span>
+                            - 完全控制（包括删除、授权）
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

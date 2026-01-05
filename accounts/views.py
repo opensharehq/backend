@@ -1671,9 +1671,12 @@ def label_create_view(request):
                 errors["data"] = "标签数据格式无效，请输入有效的 JSON"
 
         # Check uniqueness
-        if name and Label.objects.filter(
-            name=name, owner_type=OwnerType.USER, owner_id=request.user.id
-        ).exists():
+        if (
+            name
+            and Label.objects.filter(
+                name=name, owner_type=OwnerType.USER, owner_id=request.user.id
+            ).exists()
+        ):
             errors["name"] = "该标签名称已存在"
 
         if not errors:
@@ -1744,9 +1747,14 @@ def label_edit_view(request, label_id):
                 errors["data"] = "标签数据格式无效，请输入有效的 JSON"
 
         # Check uniqueness (exclude current label)
-        if name and Label.objects.filter(
-            name=name, owner_type=label.owner_type, owner_id=label.owner_id
-        ).exclude(id=label.id).exists():
+        if (
+            name
+            and Label.objects.filter(
+                name=name, owner_type=label.owner_type, owner_id=label.owner_id
+            )
+            .exclude(id=label.id)
+            .exists()
+        ):
             errors["name"] = "该标签名称已存在"
 
         if not errors:
@@ -2052,9 +2060,12 @@ def org_label_create_view(request, slug):
                 errors["data"] = "标签数据格式无效，请输入有效的 JSON"
 
         # Check uniqueness within organization
-        if name and Label.objects.filter(
-            name=name, owner_type=OwnerType.ORGANIZATION, owner_id=organization.id
-        ).exists():
+        if (
+            name
+            and Label.objects.filter(
+                name=name, owner_type=OwnerType.ORGANIZATION, owner_id=organization.id
+            ).exists()
+        ):
             errors["name"] = "该标签名称已存在"
 
         if not errors:
@@ -2145,9 +2156,14 @@ def org_label_edit_view(request, slug, label_id):
                 errors["data"] = "标签数据格式无效，请输入有效的 JSON"
 
         # Check uniqueness (exclude current label)
-        if name and Label.objects.filter(
-            name=name, owner_type=OwnerType.ORGANIZATION, owner_id=organization.id
-        ).exclude(id=label.id).exists():
+        if (
+            name
+            and Label.objects.filter(
+                name=name, owner_type=OwnerType.ORGANIZATION, owner_id=organization.id
+            )
+            .exclude(id=label.id)
+            .exists()
+        ):
             errors["name"] = "该标签名称已存在"
 
         if not errors:

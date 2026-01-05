@@ -108,57 +108,72 @@ class Label(models.Model):
 
         支持通过 LabelPermission 的授权访问.
         """
+        allowed = False
+
         # 公开标签：允许查看/使用，不开放编辑或管理
         if self.is_public and required_level in (
             PermissionLevel.VIEW,
             PermissionLevel.USE,
         ):
-            return True
+            allowed = True
 
         # 系统标签对所有人可见
-        if self.owner_type == OwnerType.SYSTEM:
-            return required_level == "view"
+        if not allowed and self.owner_type == OwnerType.SYSTEM:
+            allowed = required_level == "view"
 
         # 所有者拥有完全权限
-        if self.owner_type == OwnerType.USER and self.owner_id == user.id:
-            return True
+        if (
+            not allowed
+            and self.owner_type == OwnerType.USER
+            and self.owner_id == user.id
+        ):
+            allowed = True
 
         # 延迟导入以避免潜在循环依赖
-        from accounts.models import OrganizationMembership
+        user_org_ids = set()
+        admin_org_ids = set()
+        if (
+            self.owner_type == OwnerType.ORGANIZATION
+            or self.permissions.filter(grantee_type=GranteeType.ORGANIZATION).exists()
+        ):
+            from accounts.models import OrganizationMembership
 
-        # 预取用户的组织成员关系，便于后续多处复用
-        memberships = list(
-            OrganizationMembership.objects.filter(user=user).values(
-                "organization_id", "role"
+            memberships = list(
+                OrganizationMembership.objects.filter(user=user).values(
+                    "organization_id", "role"
+                )
             )
-        )
-        user_org_ids = {m["organization_id"] for m in memberships}
-        admin_org_ids = {
-            m["organization_id"]
-            for m in memberships
-            if m["role"]
-            in (OrganizationMembership.Role.ADMIN, OrganizationMembership.Role.OWNER)
-        }
+            user_org_ids = {m["organization_id"] for m in memberships}
+            admin_org_ids = {
+                m["organization_id"]
+                for m in memberships
+                if m["role"]
+                in (
+                    OrganizationMembership.Role.ADMIN,
+                    OrganizationMembership.Role.OWNER,
+                )
+            }
 
-        if self.owner_type == OwnerType.ORGANIZATION:
-            # 组织成员可查看/使用标签；管理员/所有者可编辑/管理
-            if self.owner_id in user_org_ids and required_level in (
+        if not allowed and self.owner_type == OwnerType.ORGANIZATION:
+            # 组织管理员/所有者拥有完全权限；普通成员可查看和使用
+            if self.owner_id in admin_org_ids:
+                allowed = True
+            elif self.owner_id in user_org_ids and required_level in (
                 PermissionLevel.VIEW,
                 PermissionLevel.USE,
             ):
-                return True
-            if self.owner_id in admin_org_ids:
-                return True
+                allowed = True
 
         # 检查直接授予用户的权限
-        user_permission = self.permissions.filter(
-            grantee_type=GranteeType.USER, grantee_id=user.id, is_active=True
-        ).first()
-        if user_permission and user_permission.check_permission(required_level):
-            return True
+        if not allowed:
+            user_permission = self.permissions.filter(
+                grantee_type=GranteeType.USER, grantee_id=user.id, is_active=True
+            ).first()
+            if user_permission and user_permission.check_permission(required_level):
+                allowed = True
 
         # 检查通过组织授予的权限
-        if user_org_ids:
+        if not allowed and user_org_ids:
             org_permissions = self.permissions.filter(
                 grantee_type=GranteeType.ORGANIZATION,
                 grantee_id__in=user_org_ids,
@@ -166,9 +181,10 @@ class Label(models.Model):
             )
             for perm in org_permissions:
                 if perm.check_permission(required_level):
-                    return True
+                    allowed = True
+                    break
 
-        return False
+        return allowed
 
     def can_edit(self, user):
         """检查用户是否可以编辑此标签."""

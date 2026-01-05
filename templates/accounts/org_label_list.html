@@ -1,0 +1,104 @@
+{% extends "horizontal_base.html" %}
+
+{% block title %}{{ organization.name }} - 标签管理{% endblock title %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">{{ organization.name }} - 标签管理</h4>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap gap-2">
+            {% if is_admin %}
+                <a href="{% url 'accounts:org_label_create' organization.slug %}" class="btn btn-primary btn-icon-text mb-2 mb-md-0">
+                    <i data-lucide="plus" class="btn-icon-prepend"></i> 创建标签
+                </a>
+            {% endif %}
+            <a href="{% url 'accounts:organization_detail' organization.slug %}" class="btn btn-outline-secondary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回组织
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12 grid-margin stretch-card">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i data-lucide="tag" class="icon-sm"></i> 组织标签
+                    </h6>
+                    {% if org_labels %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>名称</th>
+                                        <th>类型</th>
+                                        <th>公开</th>
+                                        <th>创建时间</th>
+                                        {% if is_admin %}
+                                            <th>操作</th>
+                                        {% endif %}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for label in org_labels %}
+                                        <tr>
+                                            <td>
+                                                <div>
+                                                    <strong>{{ label.name_zh }}</strong>
+                                                    <br>
+                                                    <small class="text-muted">{{ label.name }}</small>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-info">{{ label.get_type_display }}</span>
+                                            </td>
+                                            <td>
+                                                {% if label.is_public %}
+                                                    <span class="badge bg-success">
+                                                        <i data-lucide="eye" class="icon-xs"></i> 公开
+                                                    </span>
+                                                {% else %}
+                                                    <span class="badge bg-secondary">
+                                                        <i data-lucide="eye-off" class="icon-xs"></i> 私有
+                                                    </span>
+                                                {% endif %}
+                                            </td>
+                                            <td>{{ label.created_at|date:"Y-m-d H:i" }}</td>
+                                            {% if is_admin %}
+                                                <td>
+                                                    <div class="btn-group" role="group">
+                                                        <a href="{% url 'accounts:org_label_edit' organization.slug label.id %}" class="btn btn-sm btn-outline-primary" title="编辑">
+                                                            <i data-lucide="edit" class="icon-sm"></i>
+                                                        </a>
+                                                        <form method="post" action="{% url 'accounts:org_label_delete' organization.slug label.id %}" style="display: inline;" onsubmit="return confirm('确定要删除标签「{{ label.name_zh }}」吗？');">
+                                                            {% csrf_token %}
+                                                            <button type="submit" class="btn btn-sm btn-outline-danger" title="删除">
+                                                                <i data-lucide="trash-2" class="icon-sm"></i>
+                                                            </button>
+                                                        </form>
+                                                    </div>
+                                                </td>
+                                            {% endif %}
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="alert alert-info d-flex align-items-center" role="alert">
+                            <i data-lucide="info" class="icon-sm me-2"></i>
+                            <div>
+                                该组织还没有创建任何标签
+                                {% if is_admin %}
+                                    ，点击右上角"创建标签"按钮开始创建。
+                                {% else %}
+                                    。
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

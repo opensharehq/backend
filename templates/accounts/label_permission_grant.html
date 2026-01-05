@@ -1,0 +1,84 @@
+{% extends "horizontal_base.html" %}
+
+{% block title %}授予标签权限{% endblock title %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">授予标签权限</h4>
+            <p class="text-muted mb-0">标签: {{ label.name_zh }} ({{ label.name }})</p>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap">
+            <a href="{% url 'accounts:label_permissions' label.id %}" class="btn btn-secondary btn-icon-text mb-2 mb-md-0">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-8 col-lg-6 grid-margin stretch-card mx-auto">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i data-lucide="user-plus" class="icon-sm"></i> 授权信息
+                    </h6>
+                    <form method="post" class="forms-sample">
+                        {% csrf_token %}
+                        <div class="mb-3">
+                            <label for="username" class="form-label">用户名 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control {% if errors.username %}is-invalid{% endif %}" id="username" name="username" value="{{ username }}" placeholder="请输入要授权的用户名" required>
+                            {% if errors.username %}
+                                <div class="invalid-feedback">{{ errors.username }}</div>
+                            {% endif %}
+                            <small class="form-text text-muted">输入要授予权限的用户的用户名</small>
+                        </div>
+                        <div class="mb-3">
+                            <label for="permission_level" class="form-label">权限级别 <span class="text-danger">*</span></label>
+                            <select class="form-select {% if errors.permission_level %}is-invalid{% endif %}" id="permission_level" name="permission_level" required>
+                                <option value="">请选择权限级别</option>
+                                {% for value, display in permission_levels %}
+                                    <option value="{{ value }}" {% if permission_level == value %}selected{% endif %}>
+                                        {{ display }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                            {% if errors.permission_level %}
+                                <div class="invalid-feedback">{{ errors.permission_level }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="expires_days" class="form-label">有效期（天）</label>
+                            <input type="number" class="form-control {% if errors.expires_days %}is-invalid{% endif %}" id="expires_days" name="expires_days" value="{{ expires_days }}" placeholder="留空表示永久有效" min="1">
+                            {% if errors.expires_days %}
+                                <div class="invalid-feedback">{{ errors.expires_days }}</div>
+                            {% endif %}
+                            <small class="form-text text-muted">留空表示权限永久有效</small>
+                        </div>
+                        <div class="mb-3">
+                            <label for="notes" class="form-label">备注</label>
+                            <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="可以添加一些备注说明">{{ notes }}</textarea>
+                            <small class="form-text text-muted">可选，用于说明授权原因</small>
+                        </div>
+                        <div class="alert alert-warning d-flex align-items-start" role="alert">
+                            <i data-lucide="alert-triangle" class="icon-sm me-2 mt-1"></i>
+                            <div>
+                                <strong>权限说明：</strong>
+                                <ul class="mb-0 mt-2">
+                                    <li><strong>查看</strong>：仅可查看标签及其数据</li>
+                                    <li><strong>使用</strong>：可查看和使用标签（积分分发、筛选）</li>
+                                    <li><strong>编辑</strong>：可查看、使用和编辑标签数据</li>
+                                    <li><strong>管理</strong>：完全控制（包括删除、授权）</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <a href="{% url 'accounts:label_permissions' label.id %}" class="btn btn-secondary">取消</a>
+                            <button type="submit" class="btn btn-primary">
+                                <i data-lucide="check" class="btn-icon-prepend"></i> 授予权限
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

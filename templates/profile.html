@@ -168,6 +168,23 @@
                         </div>
                     </div>
                 </div>
+                <!-- 我的标签卡片 -->
+                <div class="col-md-6 grid-margin stretch-card">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title">
+                                <i data-lucide="tag" class="icon-sm"></i> 我的标签
+                            </h6>
+                            <div class="d-flex justify-content-between align-items-baseline mb-2">
+                                <h2 class="mb-0">{{ label_count }}</h2>
+                                <a href="{% url 'accounts:label_list' %}" class="btn btn-sm btn-primary btn-icon-text">
+                                    <i data-lucide="settings" class="btn-icon-prepend"></i> 管理标签
+                                </a>
+                            </div>
+                            <p class="text-muted">已创建的标签数量</p>
+                        </div>
+                    </div>
+                </div>
                 <!-- 工作经历卡片 -->
                 {% if profile.work_experiences.all %}
                     <div class="col-md-12 grid-margin stretch-card">

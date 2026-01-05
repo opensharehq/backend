@@ -142,8 +142,16 @@ def sign_up_view(request):
 @login_required
 def profile_view(request):
     """Display user profile page."""
+    from labels.models import Label, OwnerType
+
     profile, _created = UserProfile.objects.get_or_create(user=request.user)
-    return render(request, "profile.html", {"profile": profile})
+    # 获取用户拥有的标签数量
+    label_count = Label.objects.filter(
+        owner_type=OwnerType.USER, owner_id=request.user.id
+    ).count()
+    return render(
+        request, "profile.html", {"profile": profile, "label_count": label_count}
+    )
 
 
 def _get_profile_edit_forms(
@@ -1594,3 +1602,629 @@ def organization_delete(request, slug):
             transaction.on_commit(lambda f=avatar_file: f.delete(save=False))
     messages.success(request, f"组织 {org_name} 已删除。")
     return redirect("accounts:organization_list")
+
+
+# Label management views
+
+
+@login_required
+def label_list_view(request):
+    """Display user's labels."""
+    from labels.models import Label, OwnerType
+
+    # Get user's labels
+    user_labels = Label.objects.filter(
+        owner_type=OwnerType.USER, owner_id=request.user.id
+    ).order_by("-created_at")
+
+    # Get labels shared with user
+    shared_labels = []
+    from labels.models import GranteeType, LabelPermission
+
+    label_permissions = LabelPermission.objects.filter(
+        grantee_type=GranteeType.USER, grantee_id=request.user.id, is_active=True
+    ).select_related("label")
+
+    for perm in label_permissions:
+        if not perm.is_expired():
+            label = perm.label
+            label.permission_level = perm.permission_level
+            shared_labels.append(label)
+
+    return render(
+        request,
+        "accounts/label_list.html",
+        {"user_labels": user_labels, "shared_labels": shared_labels},
+    )
+
+
+@login_required
+def label_create_view(request):
+    """Create a new label."""
+    import json
+
+    from labels.models import Label, LabelType, OwnerType
+
+    if request.method == "POST":
+        name = request.POST.get("name", "").strip()
+        name_zh = request.POST.get("name_zh", "").strip()
+        label_type = request.POST.get("type", "")
+        is_public = request.POST.get("is_public") == "1"
+        data_str = request.POST.get("data", "{}").strip()
+
+        errors = {}
+        if not name:
+            errors["name"] = "英文名称不能为空"
+        if not name_zh:
+            errors["name_zh"] = "中文名称不能为空"
+        if label_type not in dict(LabelType.choices):
+            errors["type"] = "请选择有效的标签类型"
+
+        # Parse JSON data
+        data = {}
+        if data_str:
+            try:
+                data = json.loads(data_str)
+                if not isinstance(data, dict):
+                    errors["data"] = "标签数据必须是 JSON 对象格式"
+            except json.JSONDecodeError:
+                errors["data"] = "标签数据格式无效，请输入有效的 JSON"
+
+        # Check uniqueness
+        if (
+            name
+            and Label.objects.filter(
+                name=name, owner_type=OwnerType.USER, owner_id=request.user.id
+            ).exists()
+        ):
+            errors["name"] = "该标签名称已存在"
+
+        if not errors:
+            label = Label.objects.create(
+                name=name,
+                name_zh=name_zh,
+                type=label_type,
+                owner_type=OwnerType.USER,
+                owner_id=request.user.id,
+                is_public=is_public,
+                data=data,
+            )
+            messages.success(request, f"标签 {label.name_zh} 创建成功")
+            return redirect("accounts:label_list")
+
+        context = {
+            "errors": errors,
+            "name": name,
+            "name_zh": name_zh,
+            "type": label_type,
+            "is_public": is_public,
+            "data": data_str,
+            "label_types": LabelType.choices,
+        }
+        return render(request, "accounts/label_form.html", context)
+
+    return render(
+        request, "accounts/label_form.html", {"label_types": LabelType.choices}
+    )
+
+
+@login_required
+def label_edit_view(request, label_id):
+    """Edit an existing label."""
+    import json
+
+    from labels.models import Label, LabelType
+
+    label = get_object_or_404(Label, id=label_id)
+
+    if not label.can_edit(request.user):
+        messages.error(request, "您没有权限编辑此标签")
+        return redirect("accounts:label_list")
+
+    if request.method == "POST":
+        name = request.POST.get("name", "").strip()
+        name_zh = request.POST.get("name_zh", "").strip()
+        label_type = request.POST.get("type", "")
+        is_public = request.POST.get("is_public") == "1"
+        data_str = request.POST.get("data", "{}").strip()
+
+        errors = {}
+        if not name:
+            errors["name"] = "英文名称不能为空"
+        if not name_zh:
+            errors["name_zh"] = "中文名称不能为空"
+        if label_type not in dict(LabelType.choices):
+            errors["type"] = "请选择有效的标签类型"
+
+        # Parse JSON data
+        data = {}
+        if data_str:
+            try:
+                data = json.loads(data_str)
+                if not isinstance(data, dict):
+                    errors["data"] = "标签数据必须是 JSON 对象格式"
+            except json.JSONDecodeError:
+                errors["data"] = "标签数据格式无效，请输入有效的 JSON"
+
+        # Check uniqueness (exclude current label)
+        if (
+            name
+            and Label.objects.filter(
+                name=name, owner_type=label.owner_type, owner_id=label.owner_id
+            )
+            .exclude(id=label.id)
+            .exists()
+        ):
+            errors["name"] = "该标签名称已存在"
+
+        if not errors:
+            label.name = name
+            label.name_zh = name_zh
+            label.type = label_type
+            label.is_public = is_public
+            label.data = data
+            label.save()
+            messages.success(request, f"标签 {label.name_zh} 更新成功")
+            return redirect("accounts:label_list")
+
+        context = {
+            "label": label,
+            "errors": errors,
+            "name": name,
+            "name_zh": name_zh,
+            "type": label_type,
+            "is_public": is_public,
+            "data": data_str,
+            "label_types": LabelType.choices,
+        }
+        return render(request, "accounts/label_form.html", context)
+
+    return render(
+        request,
+        "accounts/label_form.html",
+        {"label": label, "label_types": LabelType.choices},
+    )
+
+
+@login_required
+@require_POST
+def label_delete_view(request, label_id):
+    """Delete a label."""
+    from labels.models import Label
+
+    label = get_object_or_404(Label, id=label_id)
+
+    if not label.can_manage(request.user):
+        messages.error(request, "您没有权限删除此标签")
+        return redirect("accounts:label_list")
+
+    label_name = label.name_zh
+    label.delete()
+    messages.success(request, f"标签 {label_name} 已删除")
+    return redirect("accounts:label_list")
+
+
+@login_required
+def label_permissions_view(request, label_id):
+    """Manage label permissions."""
+    from labels.models import Label, LabelPermission
+
+    label = get_object_or_404(Label, id=label_id)
+
+    if not label.can_manage(request.user):
+        messages.error(request, "您没有权限管理此标签的权限")
+        return redirect("accounts:label_list")
+
+    permissions = LabelPermission.objects.filter(label=label, is_active=True).order_by(
+        "-granted_at"
+    )
+
+    return render(
+        request,
+        "accounts/label_permissions.html",
+        {"label": label, "permissions": permissions},
+    )
+
+
+@login_required
+def label_permission_grant_view(request, label_id):
+    """Grant permission to a user."""
+    from labels.models import (
+        GranteeType,
+        Label,
+        LabelPermission,
+        LabelPermissionLog,
+        PermissionLevel,
+    )
+
+    label = get_object_or_404(Label, id=label_id)
+
+    if not label.can_manage(request.user):
+        messages.error(request, "您没有权限管理此标签的权限")
+        return redirect("accounts:label_list")
+
+    if request.method == "POST":
+        username = request.POST.get("username", "").strip()
+        permission_level = request.POST.get("permission_level", "")
+        expires_days = request.POST.get("expires_days", "").strip()
+        notes = request.POST.get("notes", "").strip()
+
+        errors = {}
+        if not username:
+            errors["username"] = "请输入用户名"
+        if permission_level not in dict(PermissionLevel.choices):
+            errors["permission_level"] = "请选择有效的权限级别"
+
+        # Find user
+        User = get_user_model()
+        try:
+            target_user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            errors["username"] = f"用户 {username} 不存在"
+            target_user = None
+
+        # Check if user is trying to grant permission to themselves
+        if target_user and target_user.id == request.user.id:
+            errors["username"] = "不能授权给自己"
+            target_user = None
+
+        # Calculate expiration date
+        expires_at = None
+        if expires_days:
+            try:
+                days = int(expires_days)
+                if days > 0:
+                    expires_at = timezone.now() + timedelta(days=days)
+            except ValueError:
+                errors["expires_days"] = "请输入有效的天数"
+
+        if not errors and target_user:
+            # Check if permission already exists
+            existing_perm = LabelPermission.objects.filter(
+                label=label,
+                grantee_type=GranteeType.USER,
+                grantee_id=target_user.id,
+                is_active=True,
+            ).first()
+
+            if existing_perm:
+                # Update existing permission
+                existing_perm.permission_level = permission_level
+                existing_perm.expires_at = expires_at
+                existing_perm.notes = notes
+                existing_perm.save()
+
+                # Log the update
+                LabelPermissionLog.objects.create(
+                    permission=existing_perm,
+                    action="updated",
+                    actor=request.user,
+                    details={
+                        "permission_level": permission_level,
+                        "expires_at": expires_at.isoformat() if expires_at else None,
+                    },
+                )
+                messages.success(request, f"已更新授予 {username} 的权限")
+            else:
+                # Create new permission
+                perm = LabelPermission.objects.create(
+                    label=label,
+                    grantee_type=GranteeType.USER,
+                    grantee_id=target_user.id,
+                    permission_level=permission_level,
+                    granted_by=request.user,
+                    expires_at=expires_at,
+                    notes=notes,
+                )
+
+                # Log the grant
+                LabelPermissionLog.objects.create(
+                    permission=perm,
+                    action="granted",
+                    actor=request.user,
+                    details={
+                        "permission_level": permission_level,
+                        "expires_at": expires_at.isoformat() if expires_at else None,
+                    },
+                )
+                messages.success(request, f"已授予 {username} 权限")
+
+            return redirect("accounts:label_permissions", label_id=label.id)
+
+        context = {
+            "label": label,
+            "errors": errors,
+            "username": username,
+            "permission_level": permission_level,
+            "expires_days": expires_days,
+            "notes": notes,
+            "permission_levels": PermissionLevel.choices,
+        }
+        return render(request, "accounts/label_permission_grant.html", context)
+
+    return render(
+        request,
+        "accounts/label_permission_grant.html",
+        {"label": label, "permission_levels": PermissionLevel.choices},
+    )
+
+
+@login_required
+@require_POST
+def label_permission_revoke_view(request, permission_id):
+    """Revoke a permission."""
+    from labels.models import LabelPermission, LabelPermissionLog
+
+    permission = get_object_or_404(LabelPermission, id=permission_id)
+
+    if not permission.label.can_manage(request.user):
+        messages.error(request, "您没有权限撤销此权限")
+        return redirect("accounts:label_list")
+
+    label_id = permission.label.id
+    permission.is_active = False
+    permission.save()
+
+    # Log the revocation
+    LabelPermissionLog.objects.create(
+        permission=permission, action="revoked", actor=request.user, details={}
+    )
+
+    messages.success(request, "权限已撤销")
+    return redirect("accounts:label_permissions", label_id=label_id)
+
+
+# Organization Label Views
+
+
+def _check_org_label_permission(request, slug, require_admin=False):
+    """Check if user has permission to manage organization labels."""
+    organization = get_object_or_404(Organization, slug=slug)
+
+    try:
+        membership = OrganizationMembership.objects.get(
+            user=request.user, organization=organization
+        )
+    except OrganizationMembership.DoesNotExist:
+        return None, None, "您不是该组织的成员"
+
+    if require_admin and not membership.is_admin_or_owner():
+        return organization, membership, "只有管理员可以执行此操作"
+
+    return organization, membership, None
+
+
+@login_required
+def org_label_list_view(request, slug):
+    """List labels for an organization."""
+    from labels.models import Label, OwnerType
+
+    organization, membership, error = _check_org_label_permission(request, slug)
+    if error:
+        messages.error(request, error)
+        return redirect("accounts:organization_list")
+
+    org_labels = Label.objects.filter(
+        owner_type=OwnerType.ORGANIZATION, owner_id=organization.id
+    ).order_by("-created_at")
+
+    return render(
+        request,
+        "accounts/org_label_list.html",
+        {
+            "organization": organization,
+            "membership": membership,
+            "org_labels": org_labels,
+            "is_admin": membership.is_admin_or_owner(),
+        },
+    )
+
+
+@login_required
+def org_label_create_view(request, slug):
+    """Create a new label for an organization."""
+    import json
+
+    from labels.models import Label, LabelType, OwnerType
+
+    organization, membership, error = _check_org_label_permission(
+        request, slug, require_admin=True
+    )
+    if error:
+        messages.error(request, error)
+        return redirect("accounts:organization_list")
+
+    if request.method == "POST":
+        name = request.POST.get("name", "").strip()
+        name_zh = request.POST.get("name_zh", "").strip()
+        label_type = request.POST.get("type", "")
+        is_public = request.POST.get("is_public") == "1"
+        data_str = request.POST.get("data", "{}").strip()
+
+        errors = {}
+        if not name:
+            errors["name"] = "英文名称不能为空"
+        if not name_zh:
+            errors["name_zh"] = "中文名称不能为空"
+        if label_type not in dict(LabelType.choices):
+            errors["type"] = "请选择有效的标签类型"
+
+        # Parse JSON data
+        data = {}
+        if data_str:
+            try:
+                data = json.loads(data_str)
+                if not isinstance(data, dict):
+                    errors["data"] = "标签数据必须是 JSON 对象格式"
+            except json.JSONDecodeError:
+                errors["data"] = "标签数据格式无效，请输入有效的 JSON"
+
+        # Check uniqueness within organization
+        if (
+            name
+            and Label.objects.filter(
+                name=name, owner_type=OwnerType.ORGANIZATION, owner_id=organization.id
+            ).exists()
+        ):
+            errors["name"] = "该标签名称已存在"
+
+        if not errors:
+            Label.objects.create(
+                name=name,
+                name_zh=name_zh,
+                type=label_type,
+                owner_type=OwnerType.ORGANIZATION,
+                owner_id=organization.id,
+                is_public=is_public,
+                data=data,
+            )
+            messages.success(request, f"标签 {name_zh} 创建成功")
+            return redirect("accounts:org_label_list", slug=slug)
+
+        context = {
+            "organization": organization,
+            "membership": membership,
+            "errors": errors,
+            "name": name,
+            "name_zh": name_zh,
+            "type": label_type,
+            "is_public": is_public,
+            "data": data_str,
+            "label_types": LabelType.choices,
+            "is_admin": membership.is_admin_or_owner(),
+        }
+        return render(request, "accounts/org_label_form.html", context)
+
+    from labels.models import LabelType
+
+    return render(
+        request,
+        "accounts/org_label_form.html",
+        {
+            "organization": organization,
+            "membership": membership,
+            "label_types": LabelType.choices,
+            "is_admin": membership.is_admin_or_owner(),
+        },
+    )
+
+
+@login_required
+def org_label_edit_view(request, slug, label_id):
+    """Edit an existing organization label."""
+    import json
+
+    from labels.models import Label, LabelType, OwnerType
+
+    organization, membership, error = _check_org_label_permission(
+        request, slug, require_admin=True
+    )
+    if error:
+        messages.error(request, error)
+        return redirect("accounts:organization_list")
+
+    label = get_object_or_404(
+        Label,
+        id=label_id,
+        owner_type=OwnerType.ORGANIZATION,
+        owner_id=organization.id,
+    )
+
+    if request.method == "POST":
+        name = request.POST.get("name", "").strip()
+        name_zh = request.POST.get("name_zh", "").strip()
+        label_type = request.POST.get("type", "")
+        is_public = request.POST.get("is_public") == "1"
+        data_str = request.POST.get("data", "{}").strip()
+
+        errors = {}
+        if not name:
+            errors["name"] = "英文名称不能为空"
+        if not name_zh:
+            errors["name_zh"] = "中文名称不能为空"
+        if label_type not in dict(LabelType.choices):
+            errors["type"] = "请选择有效的标签类型"
+
+        # Parse JSON data
+        data = {}
+        if data_str:
+            try:
+                data = json.loads(data_str)
+                if not isinstance(data, dict):
+                    errors["data"] = "标签数据必须是 JSON 对象格式"
+            except json.JSONDecodeError:
+                errors["data"] = "标签数据格式无效，请输入有效的 JSON"
+
+        # Check uniqueness (exclude current label)
+        if (
+            name
+            and Label.objects.filter(
+                name=name, owner_type=OwnerType.ORGANIZATION, owner_id=organization.id
+            )
+            .exclude(id=label.id)
+            .exists()
+        ):
+            errors["name"] = "该标签名称已存在"
+
+        if not errors:
+            label.name = name
+            label.name_zh = name_zh
+            label.type = label_type
+            label.is_public = is_public
+            label.data = data
+            label.save()
+            messages.success(request, f"标签 {label.name_zh} 更新成功")
+            return redirect("accounts:org_label_list", slug=slug)
+
+        context = {
+            "organization": organization,
+            "membership": membership,
+            "label": label,
+            "errors": errors,
+            "name": name,
+            "name_zh": name_zh,
+            "type": label_type,
+            "is_public": is_public,
+            "data": data_str,
+            "label_types": LabelType.choices,
+            "is_admin": membership.is_admin_or_owner(),
+        }
+        return render(request, "accounts/org_label_form.html", context)
+
+    return render(
+        request,
+        "accounts/org_label_form.html",
+        {
+            "organization": organization,
+            "membership": membership,
+            "label": label,
+            "label_types": LabelType.choices,
+            "is_admin": membership.is_admin_or_owner(),
+        },
+    )
+
+
+@login_required
+@require_POST
+def org_label_delete_view(request, slug, label_id):
+    """Delete an organization label."""
+    from labels.models import Label, OwnerType
+
+    organization, _membership, error = _check_org_label_permission(
+        request, slug, require_admin=True
+    )
+    if error:
+        messages.error(request, error)
+        return redirect("accounts:organization_list")
+
+    label = get_object_or_404(
+        Label,
+        id=label_id,
+        owner_type=OwnerType.ORGANIZATION,
+        owner_id=organization.id,
+    )
+
+    label_name = label.name_zh
+    label.delete()
+    messages.success(request, f"标签 {label_name} 已删除")
+    return redirect("accounts:org_label_list", slug=slug)

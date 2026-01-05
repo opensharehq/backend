@@ -34,6 +34,12 @@
                     <span class="link-title">我的积分</span>
                 </a>
             </li>
+            <li class="nav-item {% if 'labels' in request.path %}active{% endif %}">
+                <a href="{% url 'accounts:label_list' %}" class="nav-link">
+                    <i class="link-icon" data-lucide="tag"></i>
+                    <span class="link-title">标签管理</span>
+                </a>
+            </li>
             <li class="nav-item nav-category">兑换积分</li>
             <li class="nav-item {% if 'shop' in request.path %}active{% endif %}">
                 <a href="{% url 'accounts:shop_list' %}" class="nav-link">

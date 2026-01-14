@@ -231,6 +231,87 @@ class WithdrawalRequest(models.Model):
         return f"{self.user.username} - {self.points}积分 - {self.get_status_display()}"
 
 
+class WithdrawalContractSigning(models.Model):
+    """提现合同签署记录."""
+
+    class Status(models.TextChoices):
+        """签署状态枚举."""
+
+        PENDING = "PENDING", "待签署"
+        SIGNED = "SIGNED", "已签署"
+        FAILED = "FAILED", "发起失败"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="withdrawal_contract_signings",
+        verbose_name="用户",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        verbose_name="状态",
+        db_index=True,
+    )
+
+    # 签署需要的身份与收款信息
+    real_name = models.CharField(max_length=100, verbose_name="真实姓名")
+    id_number = models.CharField(max_length=18, verbose_name="身份证号")
+    phone_number = models.CharField(max_length=11, verbose_name="手机号")
+    bank_name = models.CharField(max_length=100, verbose_name="开户银行")
+    bank_account = models.CharField(max_length=50, verbose_name="银行账号")
+
+    # 用户在发起签署时选择的提现信息（单笔/批量），用于签署回调后自动创建提现申请
+    withdrawal_payload = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="提现申请信息",
+        help_text="用于签署完成后自动创建提现申请（例如 points / point_source_id）。",
+    )
+    created_withdrawal_request_ids = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="已创建的提现申请ID列表",
+    )
+    withdrawal_error = models.TextField(blank=True, verbose_name="提现创建错误")
+
+    # 法大大请求与回调记录，便于排障
+    fdd_request_payload = models.JSONField(
+        null=True, blank=True, verbose_name="法大大请求"
+    )
+    fdd_response_payload = models.JSONField(
+        null=True, blank=True, verbose_name="法大大响应"
+    )
+    fdd_webhook_payload = models.JSONField(
+        null=True, blank=True, verbose_name="法大大回调"
+    )
+
+    signed_at = models.DateTimeField(null=True, blank=True, verbose_name="签署完成时间")
+    created_at = models.DateTimeField(
+        auto_now_add=True, db_index=True, verbose_name="创建时间"
+    )
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        """模型元数据配置."""
+
+        ordering = ["-created_at"]
+        verbose_name = "提现合同签署"
+        verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(status="PENDING"),
+                name="unique_pending_withdrawal_contract_per_user",
+            ),
+        ]
+
+    def __str__(self):
+        """返回签署记录的字符串表示."""
+        return f"{self.user.username} - {self.get_status_display()} - #{self.id}"
+
+
 class PointTransaction(models.Model):
     """积分交易记录模型, 记录用户积分的获得和消费."""
 

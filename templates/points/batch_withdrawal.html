@@ -115,9 +115,28 @@
                         </h6>
                         <p class="text-muted mb-4">请填写真实的提现信息，这些信息将用于审核和打款</p>
 
+                        {% if require_contract_signing %}
+                            {% if signed_contract %}
+                                <div class="alert alert-success" role="alert">
+                                    <i data-lucide="check-circle" class="icon-sm"></i>
+                                    已完成提现合同签署（{{ signed_contract.signed_at|date:"Y-m-d H:i"|default:"未知时间" }}），以下信息来自已签署合同。
+                                </div>
+                            {% elif pending_contract %}
+                                <div class="alert alert-info" role="alert">
+                                    <i data-lucide="message-square" class="icon-sm"></i>
+                                    您已发起提现合同签署（记录ID: #{{ pending_contract.id }}），请查收短信完成签署后再继续提交提现申请。
+                                </div>
+                            {% else %}
+                                <div class="alert alert-warning" role="alert">
+                                    <i data-lucide="alert-triangle" class="icon-sm"></i>
+                                    提现前需要先签署合同。本次提交将发起短信签署，签署完成后将自动提交提现申请。
+                                </div>
+                            {% endif %}
+                        {% endif %}
+
                         <div class="row">
                             <div class="col-md-6 mb-3">
-                                <label for="{{ form.real_name.id_for_label }}" class="form-label">{{ form.real_name.label }} <span class="text-danger">*</span></label>
+                                <label for="{{ form.real_name.id_for_label }}" class="form-label">{{ form.real_name.label }}{% if form.real_name.field.required %} <span class="text-danger">*</span>{% endif %}</label>
                                 {{ form.real_name }}
                                 {% if form.real_name.errors %}
                                     <div class="text-danger">
@@ -129,7 +148,7 @@
                             </div>
 
                             <div class="col-md-6 mb-3">
-                                <label for="{{ form.id_number.id_for_label }}" class="form-label">{{ form.id_number.label }} <span class="text-danger">*</span></label>
+                                <label for="{{ form.id_number.id_for_label }}" class="form-label">{{ form.id_number.label }}{% if form.id_number.field.required %} <span class="text-danger">*</span>{% endif %}</label>
                                 {{ form.id_number }}
                                 {% if form.id_number.errors %}
                                     <div class="text-danger">
@@ -141,7 +160,7 @@
                             </div>
 
                             <div class="col-md-6 mb-3">
-                                <label for="{{ form.phone_number.id_for_label }}" class="form-label">{{ form.phone_number.label }} <span class="text-danger">*</span></label>
+                                <label for="{{ form.phone_number.id_for_label }}" class="form-label">{{ form.phone_number.label }}{% if form.phone_number.field.required %} <span class="text-danger">*</span>{% endif %}</label>
                                 {{ form.phone_number }}
                                 {% if form.phone_number.errors %}
                                     <div class="text-danger">
@@ -153,7 +172,7 @@
                             </div>
 
                             <div class="col-md-6 mb-3">
-                                <label for="{{ form.bank_name.id_for_label }}" class="form-label">{{ form.bank_name.label }} <span class="text-danger">*</span></label>
+                                <label for="{{ form.bank_name.id_for_label }}" class="form-label">{{ form.bank_name.label }}{% if form.bank_name.field.required %} <span class="text-danger">*</span>{% endif %}</label>
                                 {{ form.bank_name }}
                                 {% if form.bank_name.errors %}
                                     <div class="text-danger">
@@ -165,7 +184,7 @@
                             </div>
 
                             <div class="col-md-12 mb-3">
-                                <label for="{{ form.bank_account.id_for_label }}" class="form-label">{{ form.bank_account.label }} <span class="text-danger">*</span></label>
+                                <label for="{{ form.bank_account.id_for_label }}" class="form-label">{{ form.bank_account.label }}{% if form.bank_account.field.required %} <span class="text-danger">*</span>{% endif %}</label>
                                 {{ form.bank_account }}
                                 {% if form.bank_account.errors %}
                                     <div class="text-danger">
@@ -182,8 +201,13 @@
                             <strong>重要提示：</strong>
                             <ul class="mb-0 mt-2">
                                 <li>请确保您填写的信息真实准确，否则可能导致提现失败</li>
-                                <li>提现申请提交后需要等待管理员审核</li>
-                                <li>审核通过后，积分将被扣除，款项将转入您的银行账户</li>
+                                {% if require_contract_signing and not signed_contract %}
+                                    <li>提交后将先发起合同签署，请查收短信完成签署</li>
+                                    <li>签署完成后将自动提交提现申请，并进入管理员审核流程</li>
+                                {% else %}
+                                    <li>提现申请提交后需要等待管理员审核</li>
+                                    <li>审核通过后，积分将被扣除，款项将转入您的银行账户</li>
+                                {% endif %}
                                 <li>批量提现将为每个积分池创建单独的提现申请</li>
                             </ul>
                         </div>
@@ -194,8 +218,13 @@
                                 <span class="fs-4 fw-bold text-primary ms-2" id="totalPoints">0</span>
                             </div>
                             <div>
-                                <button type="submit" class="btn btn-primary me-2">
-                                    <i data-lucide="send" class="btn-icon-prepend"></i> 提交申请
+                                <button type="submit" class="btn btn-primary me-2" {% if require_contract_signing and pending_contract and not signed_contract %}disabled{% endif %}>
+                                    <i data-lucide="send" class="btn-icon-prepend"></i>
+                                    {% if require_contract_signing and not signed_contract %}
+                                        发起签署
+                                    {% else %}
+                                        提交申请
+                                    {% endif %}
                                 </button>
                                 <a href="{% url 'points:my_points' %}" class="btn btn-outline-secondary">取消</a>
                             </div>

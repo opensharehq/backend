@@ -75,10 +75,11 @@ class WithdrawalRequestForm(forms.ModelForm):
             "bank_account": "银行账号",
         }
 
-    def __init__(self, *args, point_source=None, **kwargs):
+    def __init__(self, *args, point_source=None, signed_contract=None, **kwargs):
         """初始化表单, 保存积分来源引用."""
         super().__init__(*args, **kwargs)
         self.point_source = point_source
+        self.signed_contract = signed_contract
 
         # 如果有积分来源，设置提现积分的最大值
         if point_source:
@@ -86,6 +87,24 @@ class WithdrawalRequestForm(forms.ModelForm):
             self.fields[
                 "points"
             ].help_text = f"可提现积分: {point_source.remaining_points}"
+
+        if signed_contract:
+            locked_fields = [
+                "real_name",
+                "id_number",
+                "phone_number",
+                "bank_name",
+                "bank_account",
+            ]
+            for field_name in locked_fields:
+                field = self.fields[field_name]
+                field.required = False
+                field.disabled = True
+                field.initial = getattr(signed_contract, field_name, "")
+                field.widget.attrs["readonly"] = True
+            self.fields["points"].help_text = (
+                (self.fields["points"].help_text or "") + "（已完成合同签署）"
+            ).strip()
 
     def clean_points(self):
         """验证提现积分数量."""
@@ -294,8 +313,24 @@ class BatchWithdrawalInfoForm(forms.Form):
 
     def __init__(self, *args, point_source=None, **kwargs):
         """初始化表单, 保存积分来源引用."""
+        signed_contract = kwargs.pop("signed_contract", None)
         super().__init__(*args, **kwargs)
         self.point_source = point_source
+
+        if signed_contract:
+            locked_fields = [
+                "real_name",
+                "id_number",
+                "phone_number",
+                "bank_name",
+                "bank_account",
+            ]
+            for field_name in locked_fields:
+                field = self.fields[field_name]
+                field.required = False
+                field.disabled = True
+                field.initial = getattr(signed_contract, field_name, "")
+                field.widget.attrs["readonly"] = True
 
         # 如果有积分来源，设置提现积分的最大值
         if point_source:

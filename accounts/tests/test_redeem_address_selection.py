@@ -5,8 +5,6 @@ from django.test import TestCase
 from django.urls import reverse
 
 from accounts.models import ShippingAddress
-from points.models import Tag
-from points.services import grant_points
 from shop.models import ShopItem
 
 
@@ -19,10 +17,6 @@ class RedeemConfirmAddressSelectionTests(TestCase):
             username="testuser",
             email="test@example.com",
             password="password123",
-        )
-        self.default_tag, _ = Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
         )
         self.client.login(username="testuser", password="password123")
 
@@ -58,14 +52,6 @@ class RedeemConfirmAddressSelectionTests(TestCase):
             is_default=False,
         )
 
-        # Grant points
-        grant_points(
-            user_profile=self.user,
-            points=200,
-            description="Test",
-            tag_names=["default"],
-        )
-
         # Get confirmation page
         response = self.client.get(reverse("accounts:redeem_confirm", args=[item.id]))
 
@@ -84,13 +70,6 @@ class RedeemConfirmAddressSelectionTests(TestCase):
             description="Test",
             cost=100,
             requires_shipping=True,
-        )
-
-        grant_points(
-            user_profile=self.user,
-            points=200,
-            description="Test",
-            tag_names=["default"],
         )
 
         response = self.client.get(
@@ -141,14 +120,6 @@ class RedeemConfirmAddressSelectionTests(TestCase):
             is_default=True,
         )
 
-        # Grant points
-        grant_points(
-            user_profile=self.user,
-            points=200,
-            description="Test",
-            tag_names=["default"],
-        )
-
         # Get confirmation page
         response = self.client.get(reverse("accounts:redeem_confirm", args=[item.id]))
 
@@ -185,14 +156,6 @@ class RedeemConfirmAddressSelectionTests(TestCase):
             is_default=True,
         )
 
-        # Grant points
-        grant_points(
-            user_profile=self.user,
-            points=200,
-            description="Test",
-            tag_names=["default"],
-        )
-
         # Get confirmation page
         response = self.client.get(reverse("accounts:redeem_confirm", args=[item.id]))
 
@@ -221,14 +184,6 @@ class RedeemConfirmAddressSelectionTests(TestCase):
             district="朝阳区",
             address="地址1",
             is_default=True,
-        )
-
-        # Grant points
-        grant_points(
-            user_profile=self.user,
-            points=200,
-            description="Test",
-            tag_names=["default"],
         )
 
         # Get confirmation page
@@ -273,14 +228,6 @@ class RedeemConfirmAddressSelectionTests(TestCase):
             is_default=False,
         )
 
-        # Grant points
-        grant_points(
-            user_profile=self.user,
-            points=200,
-            description="Test",
-            tag_names=["default"],
-        )
-
         # Post redemption with non-default address
         response = self.client.post(
             reverse("accounts:redeem_confirm", args=[item.id]),
@@ -315,14 +262,6 @@ class RedeemConfirmAddressSelectionTests(TestCase):
             district="朝阳区",
             address="地址1",
             is_default=True,
-        )
-
-        # Grant points
-        grant_points(
-            user_profile=self.user,
-            points=200,
-            description="Test",
-            tag_names=["default"],
         )
 
         # Post redemption without address
@@ -363,14 +302,6 @@ class RedeemConfirmAddressSelectionTests(TestCase):
                 is_default=(i == 0),
             )
             addresses.append(address)
-
-        # Grant points
-        grant_points(
-            user_profile=self.user,
-            points=200,
-            description="Test",
-            tag_names=["default"],
-        )
 
         # Get confirmation page
         response = self.client.get(reverse("accounts:redeem_confirm", args=[item.id]))

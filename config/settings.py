@@ -125,7 +125,6 @@ INSTALLED_APPS = [
     # app
     "homepage",
     "accounts",
-    "points",
     "shop",
     "chdb",
     "messages.apps.SiteMessagesConfig",
@@ -418,14 +417,6 @@ LOGGING = {
             "backupCount": 5,
             "formatter": "verbose",
         },
-        "points_file": {
-            "level": "INFO",
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": LOG_DIR / "points.log",
-            "maxBytes": 1024 * 1024 * 10,  # 10MB
-            "backupCount": 10,
-            "formatter": "verbose",
-        },
         "shop_file": {
             "level": "INFO",
             "class": "logging.handlers.RotatingFileHandler",
@@ -451,16 +442,6 @@ LOGGING = {
             "level": "DEBUG" if DEBUG else "INFO",
             "propagate": False,
         },
-        "points": {
-            "handlers": ["console", "points_file", "error_file"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "points.services": {
-            "handlers": ["console", "points_file", "error_file"],
-            "level": "INFO",
-            "propagate": False,
-        },
         "shop": {
             "handlers": ["console", "shop_file", "error_file"],
             "level": "INFO",
@@ -479,15 +460,13 @@ LOGGING = {
 }
 
 if TESTING:
-    noisy_handlers = ("console", "console_debug", "file", "points_file", "shop_file")
+    noisy_handlers = ("console", "console_debug", "file", "shop_file")
     for handler_name in noisy_handlers:
         LOGGING["handlers"][handler_name]["level"] = "ERROR"
 
     noisy_loggers = (
         "django",
         "django.db.backends",
-        "points",
-        "points.services",
         "shop",
         "shop.services",
     )

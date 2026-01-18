@@ -8,8 +8,7 @@ from dataclasses import dataclass
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.db.models import Q, Sum
-from django.db.models.functions import Coalesce
+from django.db.models import Q
 from django.shortcuts import redirect, render
 from django.urls import reverse
 
@@ -33,7 +32,6 @@ class SearchFilters:
 
     location: str = ""
     company: str = ""
-    min_points_raw: str = ""
     sort: str = "relevance"
 
     @classmethod
@@ -42,32 +40,16 @@ class SearchFilters:
         return cls(
             location=request.GET.get("location", "").strip(),
             company=request.GET.get("company", "").strip(),
-            min_points_raw=request.GET.get("min_points", "").strip(),
             sort=request.GET.get("sort", "relevance"),
         )
 
     def ordering(self) -> Iterable[str]:
         """Return database ordering for the chosen sort."""
         sort_map = {
-            "relevance": ["-points_sum", "username"],
-            "points_desc": ["-points_sum", "username"],
-            "points_asc": ["points_sum", "username"],
+            "relevance": ["username"],
             "username": ["username"],
         }
         return sort_map.get(self.sort, sort_map["relevance"])
-
-
-def _parse_min_points(raw_value: str) -> tuple[int | None, bool]:
-    """Convert the raw minimum points input into an integer."""
-    if not raw_value:
-        return None, False
-
-    try:
-        value = int(raw_value)
-    except ValueError:
-        return None, True
-
-    return (value if value > 0 else None), False
 
 
 def _apply_optional_filters(queryset, filters: SearchFilters):
@@ -109,7 +91,6 @@ def _serialize_user(user):
         "bio": getattr(profile, "bio", "") or "",
         "company": getattr(profile, "company", "") or "",
         "location": getattr(profile, "location", "") or "",
-        "total_points": getattr(user, "points_sum", 0),
         "profile_url": reverse("public_profile", args=[user.username]),
         "avatar_url": f"https://ui-avatars.com/api/?name={user.username}&background=random",
     }
@@ -128,15 +109,10 @@ def user_search(request):
         return redirect("public_profile", username=exact_match.username)
 
     filters = SearchFilters.from_request(request)
-    min_points, invalid_min_points = _parse_min_points(filters.min_points_raw)
-    if invalid_min_points:
-        messages.error(request, "最低积分需要是整数。")
 
     cache_key = _build_search_cache_key(
         query=query,
         filters=filters,
-        min_points=min_points,
-        invalid_min_points=invalid_min_points,
     )
     cached_context = cache.get(cache_key)
     if cached_context is not None:
@@ -152,14 +128,10 @@ def user_search(request):
             | Q(profile__location__icontains=query)
         )
         .select_related("profile")
-        .annotate(points_sum=Coalesce(Sum("point_sources__remaining_points"), 0))
         .distinct()
     )
 
     users_qs = _apply_optional_filters(users_qs, filters)
-
-    if min_points is not None:
-        users_qs = users_qs.filter(points_sum__gte=min_points)
 
     users_qs = users_qs.order_by(*filters.ordering())
 
@@ -179,13 +151,11 @@ def user_search(request):
         "filters": {
             "location": filters.location,
             "company": filters.company,
-            "min_points": filters.min_points_raw,
             "sort": filters.sort,
         },
         "available_locations": available_locations,
         "available_companies": available_companies,
         "page_size": PAGE_SIZE,
-        "invalid_min_points": invalid_min_points,
     }
 
     cache.set(cache_key, context, SEARCH_RESULTS_CACHE_TIMEOUT)
@@ -197,17 +167,12 @@ def _build_search_cache_key(
     *,
     query: str,
     filters: SearchFilters,
-    min_points: int | None,
-    invalid_min_points: bool,
 ) -> str:
     payload = {
         "query": query,
         "location": filters.location,
         "company": filters.company,
-        "min_points_raw": filters.min_points_raw,
-        "min_points": min_points,
         "sort": filters.sort,
-        "invalid_min_points": invalid_min_points,
     }
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")

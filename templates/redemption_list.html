@@ -49,7 +49,6 @@
                                         <th>消耗积分</th>
                                         <th>状态</th>
                                         <th>兑换时间</th>
-                                        <th>操作</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -90,13 +89,6 @@
                                                 {% endif %}
                                             </td>
                                             <td>{{ redemption.created_at|date:"Y-m-d H:i:s" }}</td>
-                                            <td>
-                                                {% if redemption.transaction %}
-                                                    <a href="{% url 'points:my_points' %}" class="btn btn-sm btn-outline-primary" title="查看积分记录">
-                                                        <i data-lucide="eye" class="redemption-icon-small"></i>
-                                                    </a>
-                                                {% endif %}
-                                            </td>
                                         </tr>
                                     {% endfor %}
                                 </tbody>

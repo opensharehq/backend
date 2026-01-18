@@ -11,7 +11,6 @@ from django.urls import reverse
 from accounts.models import UserProfile
 from homepage import views as homepage_views
 from homepage.cache import get_search_cache_version
-from points.models import PointSource
 
 
 @override_settings(
@@ -39,11 +38,6 @@ class HomepageUserSearchTests(TestCase):
             company="OpenShare",
             location="上海",
         )
-        PointSource.objects.create(
-            user_profile=self.alice,
-            initial_points=250,
-            remaining_points=250,
-        )
 
         self.bob = self.User.objects.create_user(
             username="bob",
@@ -57,11 +51,6 @@ class HomepageUserSearchTests(TestCase):
             bio="Community maintainer",
             company="自由职业者",
             location="北京",
-        )
-        PointSource.objects.create(
-            user_profile=self.bob,
-            initial_points=60,
-            remaining_points=60,
         )
 
     def test_redirects_on_exact_username_match(self):
@@ -108,30 +97,6 @@ class HomepageUserSearchTests(TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["username"], "alice")
         self.assertEqual(results[0]["company"], "OpenShare")
-
-    def test_min_points_filter(self):
-        """Minimum points filter keeps users above the threshold."""
-        response = self.client.get(
-            self.search_url,
-            {"q": "example", "min_points": "100"},
-        )
-
-        results = response.context["results"]
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["username"], "alice")
-
-    def test_invalid_min_points_shows_message(self):
-        """Non-numeric points filter triggers a validation message."""
-        response = self.client.get(
-            self.search_url,
-            {"q": "example", "min_points": "abc"},
-            follow=True,
-        )
-
-        messages = list(response.context["messages"])
-        self.assertTrue(
-            any("最低积分需要是整数" in str(message) for message in messages)
-        )
 
     def test_empty_query_redirects_home(self):
         """Empty queries should redirect back to the homepage."""
@@ -186,8 +151,6 @@ class HomepageUserSearchTests(TestCase):
         cache_key = homepage_views._build_search_cache_key(
             query="example",
             filters=filters,
-            min_points=None,
-            invalid_min_points=False,
         )
         cached_context = cache.get(cache_key)
         self.assertIsNotNone(cached_context)
@@ -204,11 +167,6 @@ class HomepageUserSearchTests(TestCase):
             bio="New contributor",
             company="OpenShare",
             location="广州",
-        )
-        PointSource.objects.create(
-            user=charlie,
-            initial_points=80,
-            remaining_points=80,
         )
 
         updated_version = get_search_cache_version()

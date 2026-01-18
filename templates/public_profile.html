@@ -7,7 +7,7 @@
         <meta http-equiv="X-UA-Compatible" content="ie=edge" />
         <meta name="description" content="{{ profile_user.username }} - OpenShare 开发者个人资料" />
         <meta name="author" content="OpenShare" />
-        <meta name="keywords" content="开源, 开发者, {{ profile_user.username }}, 个人资料, GitHub, 积分, 贡献" />
+        <meta name="keywords" content="开源, 开发者, {{ profile_user.username }}, 个人资料, GitHub, 贡献" />
 
         <title>{{ profile_user.username }} - OpenShare</title>
         <script src="//unpkg.com/alpinejs" defer></script>
@@ -148,26 +148,6 @@
                 border-color: #667eea;
                 color: #667eea;
                 transform: translateY(-2px);
-            }
-
-            /* Points Badge */
-            .points-display {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                padding: 2rem;
-                border-radius: 15px;
-                text-align: center;
-            }
-
-            .points-number {
-                font-size: 3rem;
-                font-weight: 900;
-                margin-bottom: 0.5rem;
-            }
-
-            .points-label {
-                font-size: 1.1rem;
-                opacity: 0.9;
             }
 
             /* Timeline */
@@ -343,10 +323,6 @@
                     font-size: 2rem;
                 }
 
-                .points-number {
-                    font-size: 2.5rem;
-                }
-
                 .user-avatar-large {
                     width: 100px;
                     height: 100px;
@@ -433,15 +409,9 @@
                 <div class="row">
                     <!-- Left Column -->
                     <div class="col-lg-4 mb-4">
-                        <!-- Points Card -->
-                        <div class="points-display">
-                            <div class="points-number">{{ total_points }}</div>
-                            <div class="points-label">总积分</div>
-                        </div>
-
                         <!-- Social Links Card -->
                         {% if profile.github_url or profile.homepage_url or profile.blog_url or profile.twitter_url or profile.linkedin_url %}
-                            <div class="info-card mt-4">
+                            <div class="info-card">
                                 <h6 class="card-title-custom">
                                     <i data-lucide="link"></i> 社交链接
                                 </h6>

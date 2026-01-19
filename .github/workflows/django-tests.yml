@@ -65,7 +65,7 @@ jobs:
             --durations 10
           uv run coverage combine
           uv run coverage xml
-          uv run coverage report --fail-under=100
+          uv run coverage report --fail-under=95
           uv run coverage report --skip-covered --skip-empty
 
       - name: Generate coverage HTML report

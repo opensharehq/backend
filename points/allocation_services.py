@@ -8,8 +8,8 @@ from django.utils import timezone
 
 from contributions.services import ContributionService
 
-from .models import PendingPointGrant, PointAllocation
-from .services import grant_points
+from .models import PendingPointGrant, PointAllocation, PointSource, PointType
+from .services import grant_points, spend_points
 from .tag_operations import TagOperation
 
 logger = logging.getLogger(__name__)
@@ -83,6 +83,7 @@ class AllocationService:
         try:
             preview = AllocationService.preview_allocation(allocation)
             stats = AllocationService._apply_allocation_items(allocation, preview)
+            AllocationService._deduct_source_pool(allocation, stats["total_points"])
             AllocationService._finalize_allocation(allocation, preview, stats)
             return stats
         except Exception:
@@ -242,10 +243,36 @@ class AllocationService:
             )
             if success:
                 return (1, 0, 0, amount)
-            return (0, 0, 1, amount)
+            return (0, 0, 1, 0)
 
         AllocationService._create_pending_grant(allocation, item, amount)
         return (0, 1, 0, amount)
+
+    @staticmethod
+    def _deduct_source_pool(allocation: PointAllocation, amount: int) -> None:
+        if amount <= 0:
+            return
+
+        source_pool = PointSource.objects.select_related("wallet", "tag").get(
+            id=allocation.source_pool_id
+        )
+        tag_slug = source_pool.tag.slug if source_pool.tag else None
+        tag_is_null = (
+            source_pool.point_type == PointType.GIFT and source_pool.tag is None
+        )
+
+        spend_points(
+            owner=source_pool.wallet.owner,
+            amount=amount,
+            point_type=source_pool.point_type,
+            description=(
+                f"贡献度分配 ({allocation.start_month} - {allocation.end_month})"
+            ),
+            tag_slug=tag_slug,
+            tag_is_null=tag_is_null,
+            reference_id=f"allocation_{allocation.id}",
+            created_by=None,
+        )
 
     @staticmethod
     def _grant_registered_points(

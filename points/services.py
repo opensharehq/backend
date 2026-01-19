@@ -5,6 +5,7 @@ from collections import defaultdict
 
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from accounts.models import Organization, User
@@ -233,6 +234,46 @@ def grant_points(  # noqa: PLR0913
     return source
 
 
+def _get_available_balance(
+    wallet: PointWallet,
+    point_type: str,
+    tag_slug: str | None,
+    tag_is_null: bool,
+) -> int:
+    if tag_slug:
+        return wallet.get_gift_balance(tag_slug=tag_slug)
+    if point_type == PointType.GIFT and tag_is_null:
+        return (
+            wallet.sources.filter(
+                point_type=PointType.GIFT,
+                remaining_amount__gt=0,
+                tag__isnull=True,
+            ).aggregate(total=Sum("remaining_amount"))["total"]
+            or 0
+        )
+    if point_type == PointType.CASH:
+        return wallet.get_cash_balance()
+    return wallet.get_gift_balance()
+
+
+def _get_spend_sources_queryset(
+    wallet: PointWallet,
+    point_type: str,
+    tag_slug: str | None,
+    tag_is_null: bool,
+):
+    sources_queryset = wallet.sources.filter(
+        point_type=point_type,
+        remaining_amount__gt=0,
+    ).order_by("created_at")
+
+    if tag_slug:
+        return sources_queryset.filter(tag__slug=tag_slug)
+    if tag_is_null:
+        return sources_queryset.filter(tag__isnull=True)
+    return sources_queryset
+
+
 @transaction.atomic
 def spend_points(  # noqa: PLR0913
     owner: User | Organization,
@@ -241,6 +282,7 @@ def spend_points(  # noqa: PLR0913
     description: str,
     *,
     tag_slug: str | None = None,
+    tag_is_null: bool = False,
     reference_id: str = "",
     created_by: User | None = None,
 ) -> list[PointTransaction]:
@@ -253,6 +295,7 @@ def spend_points(  # noqa: PLR0913
         point_type: 积分类型 (cash/gift)
         description: 消费描述
         tag_slug: 标签别名(仅限使用特定标签的积分)
+        tag_is_null: 仅消费无标签礼物积分
         reference_id: 关联ID
         created_by: 创建者
 
@@ -275,30 +318,26 @@ def spend_points(  # noqa: PLR0913
     wallet = get_or_create_wallet(owner)
 
     # 获取可用余额
-    if tag_slug:
-        if point_type != PointType.GIFT:
-            msg = "只有礼物积分可以按标签筛选"
-            raise InvalidPointOperationError(msg)
-        available = wallet.get_gift_balance(tag_slug=tag_slug)
-    elif point_type == PointType.CASH:
-        available = wallet.get_cash_balance()
-    else:
-        available = wallet.get_gift_balance()
+    if tag_slug and tag_is_null:
+        msg = "tag_slug 与 tag_is_null 不能同时使用"
+        raise InvalidPointOperationError(msg)
+
+    if tag_slug and point_type != PointType.GIFT:
+        msg = "只有礼物积分可以按标签筛选"
+        raise InvalidPointOperationError(msg)
+
+    available = _get_available_balance(wallet, point_type, tag_slug, tag_is_null)
 
     if available < amount:
         msg = f"积分不足：需要 {amount}，可用 {available}"
         raise InsufficientPointsError(msg)
 
     # 获取可消费的积分来源（FIFO）
-    sources_queryset = wallet.sources.filter(
-        point_type=point_type,
-        remaining_amount__gt=0,
-    ).order_by("created_at")
-
-    if tag_slug:
-        sources_queryset = sources_queryset.filter(tag__slug=tag_slug)
-
-    sources = list(sources_queryset.select_for_update())
+    sources = list(
+        _get_spend_sources_queryset(
+            wallet, point_type, tag_slug, tag_is_null
+        ).select_for_update()
+    )
 
     # 消费积分
     remaining_to_spend = amount

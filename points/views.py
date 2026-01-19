@@ -313,11 +313,11 @@ class PointAllocationConfigView(LoginRequiredMixin, TemplateView):
 
         user = self.request.user
 
-        # 获取用户可用的积分池
-        user_pools = PointSource.objects.filter(
-            wallet__content_type=ContentType.objects.get_for_model(user),
-            wallet__object_id=user.id,
-            remaining_amount__gt=0,
+        # 获取用户可用的积分池（按类型和标签分组汇总）
+        user_pools = self._get_aggregated_pools(
+            wallet_content_type=ContentType.objects.get_for_model(user),
+            wallet_object_id=user.id,
+            wallet_owner=user,
         )
 
         # 获取用户所在组织的积分池（如果是 OWNER/ADMIN）
@@ -327,10 +327,10 @@ class PointAllocationConfigView(LoginRequiredMixin, TemplateView):
             org_content_type = ContentType.objects.get_for_model(
                 membership.organization
             )
-            pools = PointSource.objects.filter(
-                wallet__content_type=org_content_type,
-                wallet__object_id=membership.organization.id,
-                remaining_amount__gt=0,
+            pools = self._get_aggregated_pools(
+                wallet_content_type=org_content_type,
+                wallet_object_id=membership.organization.id,
+                wallet_owner=membership.organization,
             )
             org_pools.extend(pools)
 
@@ -338,6 +338,65 @@ class PointAllocationConfigView(LoginRequiredMixin, TemplateView):
         context["org_pools"] = org_pools
 
         return context
+
+    def _get_aggregated_pools(
+        self, wallet_content_type, wallet_object_id, wallet_owner=None
+    ):
+        """
+        获取按类型和标签分组汇总的积分池.
+
+        Args:
+            wallet_content_type: 钱包的 ContentType
+            wallet_object_id: 钱包所有者的 ID
+            wallet_owner: 钱包所有者对象 (用于组织池显示名称)
+
+        Returns:
+            list: 包含分组汇总后积分池信息的字典列表
+
+        """
+        from django.db.models import Min, Sum
+
+        from .models import Tag
+
+        # 查询所有有余额的 PointSource
+        sources = PointSource.objects.filter(
+            wallet__content_type=wallet_content_type,
+            wallet__object_id=wallet_object_id,
+            remaining_amount__gt=0,
+        )
+
+        # 按 point_type 和 tag 分组汇总
+        aggregated = (
+            sources.values("point_type", "tag")
+            .annotate(
+                total_remaining=Sum("remaining_amount"),
+                min_id=Min("id"),
+            )
+            .order_by("point_type", "tag")
+        )
+
+        # 构建结果列表
+        pools = []
+        for item in aggregated:
+            point_type = item["point_type"]
+            tag_id = item["tag"]
+            total_remaining = item["total_remaining"]
+
+            # 获取 tag 对象（如果有）
+            tag = Tag.objects.get(id=tag_id) if tag_id else None
+
+            # 构建虚拟的积分池对象（字典）
+            pool = {
+                "id": item["min_id"],
+                "point_type": point_type,
+                "get_point_type_display": dict(PointType.choices)[point_type],
+                "remaining_amount": total_remaining,
+                "tag": tag,
+                "wallet": {"owner": wallet_owner} if wallet_owner else None,
+            }
+            pools.append(pool)
+
+        return pools
 
 
 class PoolListAPIView(LoginRequiredMixin, View):

@@ -567,3 +567,125 @@ class ContributionPreviewAPIViewWithLabelsTests(TestCase):
             self.assertEqual(data["label_platforms_info"], {})
             # When project_scope has no tags, get_label_users should not be called
             mock_get_labels.assert_not_called()
+
+
+class PointAllocationConfigViewTests(TestCase):
+    """Tests for PointAllocationConfigView."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.user = User.objects.create_user(username="testuser", password="testpass")
+        self.client = Client()
+        self.client.login(username="testuser", password="testpass")
+
+    def test_allocation_config_requires_login(self):
+        """Test that allocation config view requires login."""
+        self.client.logout()
+        response = self.client.get(reverse("points:allocation_config"))
+        self.assertEqual(response.status_code, 302)
+
+    def test_allocation_config_success(self):
+        """Test allocation config view loads successfully."""
+        response = self.client.get(reverse("points:allocation_config"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "points/allocation_config.html")
+
+    def test_pools_aggregated_by_type_and_tag(self):
+        """Test that multiple PointSources are aggregated by type and tag."""
+        from points.models import Tag
+
+        # Create a tag
+        Tag.objects.create(name="Tag1", slug="tag1")
+
+        # Grant cash points multiple times (no tags allowed for cash)
+        services.grant_points(self.user, 1000, PointType.CASH, "First cash grant")
+        services.grant_points(self.user, 500, PointType.CASH, "Second cash grant")
+
+        # Grant gift points without tag
+        services.grant_points(
+            self.user, 10000, PointType.GIFT, "Gift grant without tag"
+        )
+
+        # Grant gift points with tag
+        services.grant_points(
+            self.user, 1532, PointType.GIFT, "Gift grant with tag", tag_slug="tag1"
+        )
+
+        response = self.client.get(reverse("points:allocation_config"))
+        self.assertEqual(response.status_code, 200)
+
+        user_pools = response.context["user_pools"]
+
+        # Should have 3 aggregated pools:
+        # 1. CASH without tag (1000 + 500 = 1500)
+        # 2. GIFT without tag (10000)
+        # 3. GIFT with tag1 (1532)
+        self.assertEqual(len(user_pools), 3)
+
+        # Find pools by type and tag
+        cash_pools = [p for p in user_pools if p["point_type"] == "cash"]
+        gift_no_tag = [
+            p for p in user_pools if p["point_type"] == "gift" and not p["tag"]
+        ]
+        gift_with_tag = [
+            p for p in user_pools if p["point_type"] == "gift" and p["tag"]
+        ]
+
+        # Check cash pool (aggregated)
+        self.assertEqual(len(cash_pools), 1)
+        self.assertEqual(cash_pools[0]["remaining_amount"], 1500)
+
+        # Check gift pool without tag
+        self.assertEqual(len(gift_no_tag), 1)
+        self.assertEqual(gift_no_tag[0]["remaining_amount"], 10000)
+
+        # Check gift pool with tag
+        self.assertEqual(len(gift_with_tag), 1)
+        self.assertEqual(gift_with_tag[0]["remaining_amount"], 1532)
+        self.assertEqual(gift_with_tag[0]["tag"].slug, "tag1")
+
+    def test_org_pools_aggregated_correctly(self):
+        """Test that organization pools are aggregated correctly."""
+        # Create organization
+        org = Organization.objects.create(name="TestOrg", slug="testorg")
+        OrganizationMembership.objects.create(
+            user=self.user, organization=org, role="owner"
+        )
+
+        # Grant points to organization multiple times
+        services.grant_points(org, 5000, PointType.CASH, "Org grant 1")
+        services.grant_points(org, 5000, PointType.CASH, "Org grant 2")
+        services.grant_points(org, 10000, PointType.GIFT, "Org gift grant")
+
+        response = self.client.get(reverse("points:allocation_config"))
+        self.assertEqual(response.status_code, 200)
+
+        org_pools = response.context["org_pools"]
+
+        # Should have 2 aggregated pools:
+        # 1. CASH (5000 + 5000 = 10000)
+        # 2. GIFT (10000)
+        self.assertEqual(len(org_pools), 2)
+
+        cash_pool = [p for p in org_pools if p["point_type"] == "cash"]
+        gift_pool = [p for p in org_pools if p["point_type"] == "gift"]
+
+        self.assertEqual(len(cash_pool), 1)
+        self.assertEqual(cash_pool[0]["remaining_amount"], 10000)
+        self.assertEqual(cash_pool[0]["wallet"]["owner"], org)
+
+        self.assertEqual(len(gift_pool), 1)
+        self.assertEqual(gift_pool[0]["remaining_amount"], 10000)
+
+    def test_pools_exclude_zero_balance(self):
+        """Test that pools with zero balance are excluded."""
+        # Grant and spend all points
+        services.grant_points(self.user, 100, PointType.CASH, "Grant")
+        services.spend_points(self.user, 100, PointType.CASH, "Spend all")
+
+        response = self.client.get(reverse("points:allocation_config"))
+        self.assertEqual(response.status_code, 200)
+
+        user_pools = response.context["user_pools"]
+        # Should have no pools since balance is zero
+        self.assertEqual(len(user_pools), 0)

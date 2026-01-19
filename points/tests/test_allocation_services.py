@@ -26,9 +26,13 @@ class AllocationServiceTests(TestCase):
 
     def setUp(self):
         """Set up test data."""
+
+        def fake_project_tags(tags, operation="AND"):
+            return {"repo:github:1"} if tags else set()
+
         self.tag_operation_patcher = patch(
             "points.tag_operations.TagOperation.evaluate_project_tags",
-            return_value={"repo:github:1"},
+            side_effect=fake_project_tags,
         )
         self.tag_operation_patcher.start()
         self.addCleanup(self.tag_operation_patcher.stop)
@@ -177,6 +181,7 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
 
+        initial_remaining = self.source_pool.remaining_amount
         result = AllocationService.execute_allocation(allocation)
 
         # 检查执行结果
@@ -190,6 +195,13 @@ class AllocationServiceTests(TestCase):
         self.assertEqual(allocation.status, "completed")
         self.assertIsNotNone(allocation.executed_at)
         self.assertTrue(len(allocation.contribution_data) > 0)
+
+        # 检查积分池余额扣减
+        self.source_pool.refresh_from_db()
+        self.assertEqual(
+            self.source_pool.remaining_amount,
+            initial_remaining - result["total_points"],
+        )
 
     def test_execute_allocation_creates_pending_grants(self):
         """Test that executing allocation creates pending grants for unregistered users."""

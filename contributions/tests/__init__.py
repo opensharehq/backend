@@ -2,6 +2,7 @@
 
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.test import TestCase
 
@@ -27,11 +28,15 @@ class ContributionServiceTests(TestCase):
         start_month = date(2024, 1, 1)
         end_month = date(2024, 12, 1)
 
-        contributions = ContributionService.get_contributions(
-            project_identifiers=["alibaba/dubbo"],
-            start_month=start_month,
-            end_month=end_month,
-        )
+        with patch(
+            "contributions.services.ContributionService.query_from_clickhouse",
+            side_effect=Exception("ClickHouse connection failed"),
+        ):
+            contributions = ContributionService.get_contributions(
+                project_identifiers=["alibaba/dubbo"],
+                start_month=start_month,
+                end_month=end_month,
+            )
 
         # 应该返回一些贡献数据
         self.assertTrue(len(contributions) > 0)
@@ -47,11 +52,15 @@ class ContributionServiceTests(TestCase):
 
     def test_contributions_include_registered_users(self):
         """Test that contributions include registered users."""
-        contributions = ContributionService.get_contributions(
-            project_identifiers=["test/project"],
-            start_month=date(2024, 1, 1),
-            end_month=date(2024, 12, 1),
-        )
+        with patch(
+            "contributions.services.ContributionService.query_from_clickhouse",
+            side_effect=Exception("ClickHouse connection failed"),
+        ):
+            contributions = ContributionService.get_contributions(
+                project_identifiers=["test/project"],
+                start_month=date(2024, 1, 1),
+                end_month=date(2024, 12, 1),
+            )
 
         # 应该包含已注册的用户
         registered_users = [c for c in contributions if c["is_registered"]]
@@ -63,11 +72,15 @@ class ContributionServiceTests(TestCase):
 
     def test_contributions_include_unregistered_users(self):
         """Test that contributions include unregistered users."""
-        contributions = ContributionService.get_contributions(
-            project_identifiers=["test/project"],
-            start_month=date(2024, 1, 1),
-            end_month=date(2024, 12, 1),
-        )
+        with patch(
+            "contributions.services.ContributionService.query_from_clickhouse",
+            side_effect=Exception("ClickHouse connection failed"),
+        ):
+            contributions = ContributionService.get_contributions(
+                project_identifiers=["test/project"],
+                start_month=date(2024, 1, 1),
+                end_month=date(2024, 12, 1),
+            )
 
         # 应该包含未注册的用户
         unregistered_users = [c for c in contributions if not c["is_registered"]]
@@ -78,10 +91,24 @@ class ContributionServiceTests(TestCase):
             self.assertIsNone(user_contrib["user_id"])
 
     def test_query_from_clickhouse_not_implemented(self):
-        """Test that ClickHouse query raises NotImplementedError."""
-        with self.assertRaises(NotImplementedError):
-            ContributionService.query_from_clickhouse(
+        """Test query_from_clickhouse returns enriched results."""
+        with patch(
+            "chdb.services.query_contributions",
+            return_value=[
+                {
+                    "platform": "GitHub",
+                    "actor_id": "123456",
+                    "actor_login": "tester",
+                    "contribution_score": 12.5,
+                }
+            ],
+        ):
+            results = ContributionService.query_from_clickhouse(
                 project_identifiers=["test/project"],
                 start_month=date(2024, 1, 1),
                 end_month=date(2024, 12, 1),
             )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["github_id"], "123456")
+        self.assertEqual(results[0]["github_login"], "tester")

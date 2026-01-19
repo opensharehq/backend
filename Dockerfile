@@ -44,6 +44,7 @@ COPY --from=builder /app/config /app/config
 COPY --from=builder /app/accounts /app/accounts
 COPY --from=builder /app/chdb /app/chdb
 COPY --from=builder /app/common /app/common
+COPY --from=builder /app/contributions /app/contributions
 COPY --from=builder /app/homepage /app/homepage
 COPY --from=builder /app/messages /app/messages
 COPY --from=builder /app/points /app/points

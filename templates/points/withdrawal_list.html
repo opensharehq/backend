@@ -1,0 +1,126 @@
+{% extends "horizontal_base.html" %}
+
+{% block title %}提现记录{% endblock title %}
+
+{% block extra_css %}
+    <style>
+        .icon-lg {
+            width: 48px;
+            height: 48px;
+        }
+    </style>
+{% endblock extra_css %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">提现记录</h4>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'points:create_withdrawal' %}" class="btn btn-primary btn-icon-text">
+                <i data-lucide="plus" class="btn-icon-prepend"></i> 申请提现
+            </a>
+            <a href="{% url 'points:user_wallet' %}" class="btn btn-outline-secondary btn-icon-text">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回钱包
+            </a>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body">
+            {% if page_obj %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>金额</th>
+                                <th>状态</th>
+                                <th>真实姓名</th>
+                                <th>银行</th>
+                                <th>申请时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for w in page_obj %}
+                                <tr>
+                                    <td class="text-muted">#{{ w.id }}</td>
+                                    <td class="fw-semibold">{{ w.amount }}</td>
+                                    <td>
+                                        {% if w.status == "pending" %}
+                                            <span class="badge bg-warning text-dark">待审核</span>
+                                        {% elif w.status == "approved" %}
+                                            <span class="badge bg-info">已批准</span>
+                                        {% elif w.status == "rejected" %}
+                                            <span class="badge bg-danger">已拒绝</span>
+                                        {% elif w.status == "completed" %}
+                                            <span class="badge bg-success">已完成</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">已取消</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ w.real_name }}</td>
+                                    <td>{{ w.bank_name }}</td>
+                                    <td class="text-muted small">{{ w.created_at|date:"Y-m-d H:i" }}</td>
+                                    <td>
+                                        {% if w.status == "pending" %}
+                                            <form method="post"
+                                                  action="{% url 'points:cancel_withdrawal' w.id %}"
+                                                  class="d-inline"
+                                                  onsubmit="return confirm('确定要取消此提现申请吗？');">
+                                                {% csrf_token %}
+                                                <button type="submit" class="btn btn-sm btn-outline-danger">取消</button>
+                                            </form>
+                                        {% elif w.status == "rejected" and w.admin_note %}
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-secondary"
+                                                    data-bs-toggle="tooltip"
+                                                    title="{{ w.admin_note }}">查看原因</button>
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <!-- 分页 -->
+                {% if page_obj.has_other_pages %}
+                    <nav class="mt-4">
+                        <ul class="pagination justify-content-center">
+                            {% if page_obj.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}">上一页</a>
+                                </li>
+                            {% endif %}
+                            <li class="page-item disabled">
+                                <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+                            </li>
+                            {% if page_obj.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}">下一页</a>
+                                </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5">
+                    <i data-lucide="inbox" class="text-muted mb-3 icon-lg"></i>
+                    <p class="text-muted">暂无提现记录</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+{% endblock content %}
+
+{% block extra_js %}
+    <script>
+        // 初始化 tooltips
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl)
+        })
+    </script>
+{% endblock extra_js %}

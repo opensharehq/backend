@@ -5,6 +5,9 @@ import logging
 from django.db import transaction
 from django.db.models import F
 
+from points import services as points_services
+from points.models import PointType
+
 from .models import Redemption, ShopItem
 
 logger = logging.getLogger(__name__)
@@ -15,7 +18,7 @@ class RedemptionError(Exception):
 
 
 @transaction.atomic
-def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:
+def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # noqa: PLR0912, PLR0915
     """
     执行商品兑换的核心业务逻辑.
 
@@ -88,16 +91,71 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:
             msg = "无效的收货地址。"
             raise RedemptionError(msg) from err
 
-    # 2. 创建兑换记录
+    # 2. 积分验证和扣除
+    tag_slug = None
+    allowed_tags = list(item.allowed_tags.all())
+
+    if allowed_tags:
+        # 商品有标签限制，查找用户拥有的、商品允许的标签积分
+        for tag in allowed_tags:
+            balance = points_services.get_balance(user, PointType.GIFT, tag.slug)
+            if balance >= item.cost:
+                tag_slug = tag.slug
+                break
+
+        if tag_slug is None:
+            msg = "您没有足够的符合条件的积分来兑换此商品"
+            logger.warning(
+                "兑换失败（标签积分不足）: 用户=%s (ID=%s), 商品=%s (ID=%s), 需要标签=%s",
+                user.username,
+                user.id,
+                item.name,
+                item.id,
+                [t.slug for t in allowed_tags],
+            )
+            raise RedemptionError(msg)
+    else:
+        # 无标签限制，使用任意礼物积分
+        balance = points_services.get_balance(user, PointType.GIFT)
+        if balance < item.cost:
+            msg = f"积分不足：需要 {item.cost}，当前可用 {balance}"
+            logger.warning(
+                "兑换失败（积分不足）: 用户=%s (ID=%s), 商品=%s (ID=%s), 需要=%s, 可用=%s",
+                user.username,
+                user.id,
+                item.name,
+                item.id,
+                item.cost,
+                balance,
+            )
+            raise RedemptionError(msg)
+
+    # 扣除积分
+    try:
+        transactions = points_services.spend_points(
+            owner=user,
+            amount=item.cost,
+            point_type=PointType.GIFT,
+            description=f"兑换商品: {item.name}",
+            tag_slug=tag_slug,
+            reference_id=f"shop:item:{item.id}",
+            created_by=user,
+        )
+    except points_services.InsufficientPointsError as err:
+        msg = f"积分不足：{err}"
+        raise RedemptionError(msg) from err
+
+    # 3. 创建兑换记录
     redemption = Redemption.objects.create(
         user_profile=user,
         item=item,
         points_cost_at_redemption=item.cost,
         status=Redemption.StatusChoices.COMPLETED,
         shipping_address=shipping_address,
+        point_transaction=transactions[0] if transactions else None,
     )
 
-    # 3. 更新库存 (使用 F() 表达式防止并发问题)
+    # 4. 更新库存 (使用 F() 表达式防止并发问题)
     if item.stock is not None:
         item.stock = F("stock") - 1
         item.save(update_fields=["stock"])

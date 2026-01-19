@@ -4,6 +4,8 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from accounts.models import ShippingAddress
+from points import services as points_services
+from points.models import PointType
 from shop.models import Redemption, ShopItem
 from shop.services import RedemptionError, redeem_item
 
@@ -16,6 +18,8 @@ class RedeemItemServiceTests(TestCase):
         self.user = get_user_model().objects.create_user(
             username="testuser", email="test@example.com", password="password123"
         )
+        # Grant gift points for redemption tests
+        points_services.grant_points(self.user, 10000, PointType.GIFT, "Test points")
 
     def test_redeem_item_success(self):
         """Test successful item redemption."""
@@ -250,3 +254,16 @@ class RedeemItemServiceTests(TestCase):
 
         self.assertIsNotNone(redemption)
         self.assertIsNone(redemption.shipping_address)
+
+    def test_redeem_item_insufficient_points(self):
+        """Test redeeming item when user has insufficient points."""
+        # Create a new user without any points
+        poor_user = get_user_model().objects.create_user(
+            username="pooruser", email="poor@example.com", password="password123"
+        )
+        item = ShopItem.objects.create(
+            name="Expensive Item", description="Test", cost=100, stock=5
+        )
+
+        with self.assertRaisesMessage(RedemptionError, "积分不足"):
+            redeem_item(user=poor_user, item_id=item.id)

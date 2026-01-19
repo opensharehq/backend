@@ -4,6 +4,8 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
 
+from points import services as points_services
+from points.models import PointType
 from shop.models import Redemption, ShopItem
 from shop.services import RedemptionError, redeem_item
 
@@ -19,6 +21,8 @@ class ShopRedemptionFlowTests(TestCase):
             email="test@example.com",
             password="testpass123",
         )
+        # Grant gift points for redemption tests
+        points_services.grant_points(self.user, 10000, PointType.GIFT, "Test points")
 
     def test_complete_redemption_flow(self):
         """Test complete flow: user redeems item."""
@@ -132,6 +136,8 @@ class ShopViewFlowTests(TestCase):
             email="test@example.com",
             password="testpass123",
         )
+        # Grant gift points for redemption tests
+        points_services.grant_points(self.user, 10000, PointType.GIFT, "Test points")
 
         self.client.force_login(self.user)
 
@@ -258,6 +264,9 @@ class FullUserJourneyTests(TestCase):
         User = get_user_model()
         user = User.objects.get(username="newuser")
 
+        # Grant gift points for redemption
+        points_services.grant_points(user, 1000, PointType.GIFT, "Welcome bonus")
+
         # Step 2: User logs in
         client.force_login(user)
 
@@ -312,6 +321,8 @@ class FullUserJourneyTests(TestCase):
             email="profile@example.com",
             password="testpass123",
         )
+        # Grant gift points for redemption
+        points_services.grant_points(user, 1000, PointType.GIFT, "Test points")
         client.force_login(user)
 
         # User completes profile

@@ -139,6 +139,33 @@
                 </div>
             </div>
         </div>
+        <!-- Organization Points Card -->
+        <div class="col-12 col-lg-4 grid-margin stretch-card">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i data-lucide="wallet" class="icon-sm"></i> 组织积分
+                    </h6>
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <div class="border rounded p-3 text-center">
+                                <p class="text-muted small mb-1">现金积分</p>
+                                <h4 class="mb-0 text-primary">{{ balance.cash|default:0 }}</h4>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="border rounded p-3 text-center">
+                                <p class="text-muted small mb-1">礼物积分</p>
+                                <h4 class="mb-0 text-success">{{ balance.gift|default:0 }}</h4>
+                            </div>
+                        </div>
+                    </div>
+                    <a href="{% url 'points:org_wallet' organization.slug %}" class="btn btn-primary btn-sm w-100">
+                        <i data-lucide="wallet" class="icon-sm"></i> 查看钱包详情
+                    </a>
+                </div>
+            </div>
+        </div>
         <!-- Members List -->
         <div class="col-12 col-lg-8 grid-margin stretch-card">
             <div class="card">

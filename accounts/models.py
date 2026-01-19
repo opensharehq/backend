@@ -26,6 +26,19 @@ class User(AbstractUser):
         verbose_name = "用户"
         verbose_name_plural = verbose_name
 
+    @property
+    def point_wallet(self):
+        """获取或创建用户积分钱包."""
+        from django.contrib.contenttypes.models import ContentType
+
+        from points.models import PointWallet
+
+        ct = ContentType.objects.get_for_model(self)
+        wallet, _ = PointWallet.objects.get_or_create(
+            content_type=ct, object_id=self.pk
+        )
+        return wallet
+
 
 class UserProfile(models.Model):
     """User profile model with bio and social links."""
@@ -208,6 +221,19 @@ class Organization(models.Model):
     def __str__(self):
         """Return organization string representation."""
         return self.name
+
+    @property
+    def point_wallet(self):
+        """获取或创建组织积分钱包."""
+        from django.contrib.contenttypes.models import ContentType
+
+        from points.models import PointWallet
+
+        ct = ContentType.objects.get_for_model(self)
+        wallet, _ = PointWallet.objects.get_or_create(
+            content_type=ct, object_id=self.pk
+        )
+        return wallet
 
 
 class OrganizationMembership(models.Model):

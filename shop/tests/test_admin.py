@@ -5,6 +5,8 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from accounts.models import ShippingAddress
+from points import services as points_services
+from points.models import PointType
 from shop.admin import RedemptionAdmin, ShopItemAdmin
 from shop.models import Redemption, ShopItem
 from shop.services import redeem_item
@@ -68,6 +70,8 @@ class RedemptionAdminTests(TestCase):
             email="test@example.com",
             password="password123",
         )
+        # Grant gift points for redemption tests
+        points_services.grant_points(self.user, 10000, PointType.GIFT, "Test points")
 
     def test_has_shipping_address_in_list_display(self):
         """Test that has_shipping_address is shown in list display."""

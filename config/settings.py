@@ -125,6 +125,7 @@ INSTALLED_APPS = [
     # app
     "homepage",
     "accounts",
+    "points",
     "shop",
     "chdb",
     "messages.apps.SiteMessagesConfig",

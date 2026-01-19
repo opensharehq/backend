@@ -28,6 +28,15 @@ class ShopItem(models.Model):
         help_text="如果选中，用户兑换时需要提供收货地址",
     )
 
+    # 积分标签限制
+    allowed_tags = models.ManyToManyField(
+        "points.Tag",
+        blank=True,
+        related_name="shop_items",
+        verbose_name="允许的积分标签",
+        help_text="如果为空，任何礼物积分都可兑换；否则只有指定标签的积分可用",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -74,6 +83,15 @@ class Redemption(models.Model):
         related_name="redemptions",
         verbose_name="收货地址",
         help_text="兑换时用户选择的收货地址（仅需要线下发货的商品）",
+    )
+    # 关联积分交易记录
+    point_transaction = models.OneToOneField(
+        "points.PointTransaction",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="redemption",
+        verbose_name="积分交易记录",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 

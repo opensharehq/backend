@@ -1,0 +1,151 @@
+{% extends "horizontal_base.html" %}
+
+{% block title %}{{ org.name }} - 交易记录{% endblock title %}
+
+{% block extra_css %}
+    <style>
+        .icon-lg {
+            width: 48px;
+            height: 48px;
+        }
+    </style>
+{% endblock extra_css %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">{{ org.name }} - 交易记录</h4>
+        </div>
+        <div>
+            <a href="{% url 'points:org_wallet' org.slug %}"
+               class="btn btn-outline-secondary btn-icon-text">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回钱包
+            </a>
+        </div>
+    </div>
+    <!-- 筛选 -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="get" class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label">积分类型</label>
+                    <select name="point_type" class="form-select">
+                        <option value="">全部</option>
+                        {% for value, label in point_types %}
+                            <option value="{{ value }}"
+                                    {% if point_type == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">交易类型</label>
+                    <select name="transaction_type" class="form-select">
+                        <option value="">全部</option>
+                        {% for value, label in transaction_types %}
+                            <option value="{{ value }}"
+                                    {% if transaction_type == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <button type="submit" class="btn btn-primary">
+                        <i data-lucide="search" class="me-1"></i> 筛选
+                    </button>
+                    <a href="{% url 'points:org_transactions' org.slug %}" class="btn btn-outline-secondary">重置</a>
+                </div>
+            </form>
+        </div>
+    </div>
+    <!-- 交易列表 -->
+    <div class="card">
+        <div class="card-body">
+            {% if page_obj %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>交易类型</th>
+                                <th>积分类型</th>
+                                <th>金额</th>
+                                <th>余额</th>
+                                <th>描述</th>
+                                <th>标签</th>
+                                <th>时间</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for txn in page_obj %}
+                                <tr>
+                                    <td class="text-muted">#{{ txn.id }}</td>
+                                    <td>
+                                        {% if txn.transaction_type == "earn" %}
+                                            <span class="badge bg-success">获取</span>
+                                        {% elif txn.transaction_type == "spend" %}
+                                            <span class="badge bg-warning text-dark">消费</span>
+                                        {% elif txn.transaction_type == "withdraw" %}
+                                            <span class="badge bg-info">提现</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">过期</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if txn.point_type == "cash" %}
+                                            <span class="badge bg-light text-success">现金积分</span>
+                                        {% else %}
+                                            <span class="badge bg-light text-info">礼物积分</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if txn.amount > 0 %}
+                                            <span class="text-success fw-semibold">+{{ txn.amount }}</span>
+                                        {% else %}
+                                            <span class="text-danger fw-semibold">{{ txn.amount }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-muted">{{ txn.balance_after }}</td>
+                                    <td>{{ txn.description|truncatechars:40 }}</td>
+                                    <td>
+                                        {% if txn.tag %}
+                                            <span class="badge bg-light text-dark">{{ txn.tag.name }}</span>
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-muted small">{{ txn.created_at|date:"Y-m-d H:i" }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <!-- 分页 -->
+                {% if page_obj.has_other_pages %}
+                    <nav class="mt-4">
+                        <ul class="pagination justify-content-center">
+                            {% if page_obj.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link"
+                                       href="?page={{ page_obj.previous_page_number }}{% if point_type %}&point_type={{ point_type }}{% endif %}{% if transaction_type %}&transaction_type={{ transaction_type }}{% endif %}">上一页</a>
+                                </li>
+                            {% endif %}
+                            <li class="page-item disabled">
+                                <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+                            </li>
+                            {% if page_obj.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link"
+                                       href="?page={{ page_obj.next_page_number }}{% if point_type %}&point_type={{ point_type }}{% endif %}{% if transaction_type %}&transaction_type={{ transaction_type }}{% endif %}">下一页</a>
+                                </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5">
+                    <i data-lucide="inbox" class="text-muted mb-3 icon-lg"></i>
+                    <p class="text-muted">暂无交易记录</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+{% endblock content %}

@@ -13,6 +13,8 @@ from social_django.models import UserSocialAuth
 
 from accounts.models import Education, UserProfile, WorkExperience
 from common.test_utils import CacheClearTestCase
+from points import services as points_services
+from points.models import PointType
 
 
 class AccountsIndexViewTests(TestCase):
@@ -1572,6 +1574,8 @@ class RedeemConfirmViewTests(TestCase):
             email="test@example.com",
             password="password123",
         )
+        # Grant gift points for redemption tests
+        points_services.grant_points(self.user, 10000, PointType.GIFT, "Test points")
 
         # Create shop item
         self.item = ShopItem.objects.create(

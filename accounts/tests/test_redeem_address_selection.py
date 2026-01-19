@@ -5,6 +5,8 @@ from django.test import TestCase
 from django.urls import reverse
 
 from accounts.models import ShippingAddress
+from points import services as points_services
+from points.models import PointType
 from shop.models import ShopItem
 
 
@@ -18,6 +20,8 @@ class RedeemConfirmAddressSelectionTests(TestCase):
             email="test@example.com",
             password="password123",
         )
+        # Grant gift points for redemption tests
+        points_services.grant_points(self.user, 10000, PointType.GIFT, "Test points")
         self.client.login(username="testuser", password="password123")
 
     def test_shipping_item_shows_address_selection(self):

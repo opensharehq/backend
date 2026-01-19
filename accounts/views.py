@@ -141,8 +141,11 @@ def sign_up_view(request):
 @login_required
 def profile_view(request):
     """Display user profile page."""
+    from points import services as points_services
+
     profile, _created = UserProfile.objects.get_or_create(user=request.user)
-    return render(request, "profile.html", {"profile": profile})
+    balance = points_services.get_detailed_balance(request.user)
+    return render(request, "profile.html", {"profile": profile, "balance": balance})
 
 
 def _get_profile_edit_forms(
@@ -1140,6 +1143,8 @@ def organization_detail(request, slug):
         slug: Organization slug
 
     """
+    from points import services as points_services
+
     organization = get_object_or_404(Organization, slug=slug)
 
     # Check if user is a member
@@ -1159,12 +1164,16 @@ def organization_detail(request, slug):
     )
     memberships_count = len(memberships)
 
+    # Get organization points balance
+    balance = points_services.get_detailed_balance(organization)
+
     context = {
         "organization": organization,
         "membership": membership,
         "memberships": memberships,
         "memberships_count": memberships_count,
         "is_admin": membership.is_admin_or_owner(),
+        "balance": balance,
     }
 
     return render(request, "accounts/organization_detail.html", context)

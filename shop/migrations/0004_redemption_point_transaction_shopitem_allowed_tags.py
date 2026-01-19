@@ -4,6 +4,39 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
+def _allowed_tags_through_model(apps):
+    ShopItem = apps.get_model("shop", "ShopItem")
+    Tag = apps.get_model("points", "Tag")
+
+    class ShopItemAllowedTags(models.Model):
+        id = models.BigAutoField(primary_key=True)
+        shopitem = models.ForeignKey(ShopItem, on_delete=models.CASCADE)
+        tag = models.ForeignKey(Tag, on_delete=models.CASCADE)
+
+        class Meta:
+            app_label = "shop"
+            db_table = "shop_shopitem_allowed_tags"
+            unique_together = (("shopitem", "tag"),)
+
+    return ShopItemAllowedTags
+
+
+def create_allowed_tags_table(apps, schema_editor):
+    table_name = "shop_shopitem_allowed_tags"
+    existing_tables = schema_editor.connection.introspection.table_names()
+    if table_name in existing_tables:
+        return
+    schema_editor.create_model(_allowed_tags_through_model(apps))
+
+
+def drop_allowed_tags_table(apps, schema_editor):
+    table_name = "shop_shopitem_allowed_tags"
+    existing_tables = schema_editor.connection.introspection.table_names()
+    if table_name not in existing_tables:
+        return
+    schema_editor.delete_model(_allowed_tags_through_model(apps))
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -17,9 +50,25 @@ class Migration(migrations.Migration):
             name='point_transaction',
             field=models.OneToOneField(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='redemption', to='points.pointtransaction', verbose_name='积分交易记录'),
         ),
-        migrations.AddField(
-            model_name='shopitem',
-            name='allowed_tags',
-            field=models.ManyToManyField(blank=True, help_text='如果为空，任何礼物积分都可兑换；否则只有指定标签的积分可用', related_name='shop_items', to='points.tag', verbose_name='允许的积分标签'),
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(
+                    create_allowed_tags_table,
+                    reverse_code=drop_allowed_tags_table,
+                ),
+            ],
+            state_operations=[
+                migrations.AddField(
+                    model_name="shopitem",
+                    name="allowed_tags",
+                    field=models.ManyToManyField(
+                        blank=True,
+                        help_text="如果为空，任何礼物积分都可兑换；否则只有指定标签的积分可用",
+                        related_name="shop_items",
+                        to="points.tag",
+                        verbose_name="允许的积分标签",
+                    ),
+                ),
+            ],
         ),
     ]

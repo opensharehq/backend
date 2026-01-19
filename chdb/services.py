@@ -66,6 +66,22 @@ CONTRIBUTIONS_SQL = """
     ORDER BY total_openrank DESC
 """
 
+CONTRIBUTIONS_WITH_USERS_SQL = """
+    SELECT
+        platform,
+        actor_id,
+        actor_login,
+        sum(openrank) as total_openrank
+    FROM opensource.normalized_community_openrank
+    WHERE repo_id IN {repo_ids:Array(UInt64)}
+      AND actor_id IN {user_ids:Array(UInt64)}
+      AND yyyymm >= {start_month:UInt32}
+      AND yyyymm <= {end_month:UInt32}
+    GROUP BY platform, actor_id, actor_login
+    HAVING total_openrank > 0
+    ORDER BY total_openrank DESC
+"""
+
 
 def _get_result_rows(result: Any) -> list[Any]:
     """兼容 clickhouse-connect 不同结果对象的行访问方式."""
@@ -241,6 +257,17 @@ def _collect_repo_ids(label_entities: dict[str, dict[str, Any]]) -> list[int]:
             if platform and platform.lower() == "github":
                 repo_ids.extend(repos)
     return repo_ids
+
+
+def _collect_user_ids(label_entities: dict[str, dict[str, Any]]) -> list[int]:
+    """收集 GitHub 用户 ID."""
+    user_ids: list[int] = []
+    for label_info in label_entities.values():
+        users_by_platform = label_info.get("users", {})
+        for platform, users in users_by_platform.items():
+            if platform and platform.lower() == "github":
+                user_ids.extend(users)
+    return user_ids
 
 
 def _parse_contribution_rows(rows: list[Any]) -> list[dict[str, Any]]:
@@ -432,29 +459,41 @@ def query_contributions(
         return []
 
     repo_ids = _collect_repo_ids(label_entities)
+    user_ids = _collect_user_ids(label_entities)
 
     if not repo_ids:
         logger.warning("未找到关联的仓库")
         return []
 
     try:
-        result = ClickHouseDB.query(
-            CONTRIBUTIONS_SQL,
-            parameters={
-                "repo_ids": repo_ids,
-                "start_month": start_month,
-                "end_month": end_month,
-            },
-        )
+        if user_ids:
+            result = ClickHouseDB.query(
+                CONTRIBUTIONS_WITH_USERS_SQL,
+                parameters={
+                    "repo_ids": repo_ids,
+                    "user_ids": user_ids,
+                    "start_month": start_month,
+                    "end_month": end_month,
+                },
+            )
+            logger.info(
+                "查询贡献度数据（带用户过滤）: %s 个仓库, %s 个用户",
+                len(repo_ids),
+                len(user_ids),
+            )
+        else:
+            result = ClickHouseDB.query(
+                CONTRIBUTIONS_SQL,
+                parameters={
+                    "repo_ids": repo_ids,
+                    "start_month": start_month,
+                    "end_month": end_month,
+                },
+            )
+            logger.info("查询贡献度数据: %s 个仓库", len(repo_ids))
 
         contributions = _parse_contribution_rows(_get_result_rows(result))
-
-        logger.info(
-            "查询贡献度数据: %s 个标签, %s 个仓库, %s 个贡献者",
-            len(normalized_ids),
-            len(repo_ids),
-            len(contributions),
-        )
+        logger.info("查询到 %s 个贡献者", len(contributions))
         return contributions
 
     except Exception as e:

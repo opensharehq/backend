@@ -128,6 +128,7 @@ INSTALLED_APPS = [
     "points",
     "shop",
     "chdb",
+    "contributions",
     "messages.apps.SiteMessagesConfig",
 ]
 

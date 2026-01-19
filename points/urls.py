@@ -32,4 +32,23 @@ urlpatterns = [
         views.org_create_withdrawal_view,
         name="org_create_withdrawal",
     ),
+    # 积分分配
+    path(
+        "allocations/config/",
+        views.PointAllocationConfigView.as_view(),
+        name="allocation_config",
+    ),
+    # API 端点
+    path("api/pools/", views.PoolListAPIView.as_view(), name="api_pool_list"),
+    path("api/tags/", views.TagListAPIView.as_view(), name="api_tag_list"),
+    path(
+        "api/contributions/preview/",
+        views.ContributionPreviewAPIView.as_view(),
+        name="api_contribution_preview",
+    ),
+    path(
+        "api/allocations/execute/",
+        views.AllocationExecuteAPIView.as_view(),
+        name="api_allocation_execute",
+    ),
 ]

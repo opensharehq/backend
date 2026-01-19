@@ -1,15 +1,26 @@
 """Views for points application."""
 
+import json
+from datetime import datetime
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.decorators import method_decorator
+from django.views import View
+from django.views.decorators.csrf import csrf_exempt
+from django.views.generic import TemplateView
 
 from accounts.models import Organization, OrganizationMembership
 
 from . import services
+from .allocation_services import AllocationService
 from .forms import WithdrawalRequestForm
-from .models import PointType, WithdrawalStatus
+from .models import PointAllocation, PointSource, PointType, Tag, WithdrawalStatus
 
 
 @login_required
@@ -284,3 +295,218 @@ def org_create_withdrawal_view(request, slug):
         "has_pending": has_pending,
     }
     return render(request, "points/organization_withdrawal_form.html", context)
+
+
+# ============================================================================
+# 积分分配相关视图
+# ============================================================================
+
+
+class PointAllocationConfigView(LoginRequiredMixin, TemplateView):
+    """积分分配配置页面."""
+
+    template_name = "points/allocation_config.html"
+
+    def get_context_data(self, **kwargs):
+        """Get context data."""
+        context = super().get_context_data(**kwargs)
+
+        user = self.request.user
+
+        # 获取用户可用的积分池
+        user_pools = PointSource.objects.filter(
+            wallet__content_type=ContentType.objects.get_for_model(user),
+            wallet__object_id=user.id,
+            remaining_amount__gt=0,
+        )
+
+        # 获取用户所在组织的积分池（如果是 OWNER/ADMIN）
+        org_pools = []
+        memberships = user.organization_memberships.filter(role__in=["owner", "admin"])
+        for membership in memberships:
+            org_content_type = ContentType.objects.get_for_model(
+                membership.organization
+            )
+            pools = PointSource.objects.filter(
+                wallet__content_type=org_content_type,
+                wallet__object_id=membership.organization.id,
+                remaining_amount__gt=0,
+            )
+            org_pools.extend(pools)
+
+        context["user_pools"] = user_pools
+        context["org_pools"] = org_pools
+
+        return context
+
+
+class PoolListAPIView(LoginRequiredMixin, View):
+    """API: 获取可用积分池列表."""
+
+    def get(self, request):
+        """Get available point pools."""
+        user = request.user
+
+        # 获取用户积分池
+        user_content_type = ContentType.objects.get_for_model(user)
+        user_pools = PointSource.objects.filter(
+            wallet__content_type=user_content_type,
+            wallet__object_id=user.id,
+            remaining_amount__gt=0,
+        ).select_related("tag")
+
+        # 获取组织积分池
+        org_pools = []
+        memberships = user.organization_memberships.filter(role__in=["owner", "admin"])
+        for membership in memberships:
+            org_content_type = ContentType.objects.get_for_model(
+                membership.organization
+            )
+            pools = PointSource.objects.filter(
+                wallet__content_type=org_content_type,
+                wallet__object_id=membership.organization.id,
+                remaining_amount__gt=0,
+            ).select_related("tag")
+            org_pools.extend(pools)
+
+        # 序列化数据
+        user_pools_data = [
+            {
+                "id": pool.id,
+                "type": pool.point_type,
+                "type_display": pool.get_point_type_display(),
+                "balance": pool.remaining_amount,
+                "tag": pool.tag.slug if pool.tag else None,
+                "tag_name": pool.tag.name if pool.tag else None,
+                "owner": "个人",
+            }
+            for pool in user_pools
+        ]
+
+        org_pools_data = [
+            {
+                "id": pool.id,
+                "type": pool.point_type,
+                "type_display": pool.get_point_type_display(),
+                "balance": pool.remaining_amount,
+                "tag": pool.tag.slug if pool.tag else None,
+                "tag_name": pool.tag.name if pool.tag else None,
+                "owner": str(pool.wallet.owner),
+            }
+            for pool in org_pools
+        ]
+
+        return JsonResponse(
+            {"user_pools": user_pools_data, "org_pools": org_pools_data}
+        )
+
+
+class TagListAPIView(LoginRequiredMixin, View):
+    """API: 获取标签列表."""
+
+    def get(self, request):
+        """Get tag list."""
+        tag_type = request.GET.get("type")  # org/repo/user
+        is_official = request.GET.get("official")  # true/false
+
+        tags = Tag.objects.all()
+
+        if tag_type:
+            tags = tags.filter(tag_type=tag_type)
+
+        if is_official is not None:
+            tags = tags.filter(is_official=is_official == "true")
+
+        # Future enhancement: include user/org private tags.
+
+        tags_data = [
+            {
+                "slug": tag.slug,
+                "name": tag.name,
+                "type": tag.tag_type,
+                "is_official": tag.is_official,
+                "entity_identifier": tag.entity_identifier,
+            }
+            for tag in tags
+        ]
+
+        return JsonResponse({"tags": tags_data})
+
+
+class ContributionPreviewAPIView(LoginRequiredMixin, View):
+    """API: 预览贡献度列表."""
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        """Dispatch."""
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request):
+        """Preview contributions."""
+        try:
+            data = json.loads(request.body)
+
+            # 创建临时的 PointAllocation 对象
+            allocation = PointAllocation(
+                project_scope=data["project_scope"],
+                user_scope=data.get("user_scope"),
+                start_month=datetime.strptime(data["start_month"], "%Y-%m-%d").date(),
+                end_month=datetime.strptime(data["end_month"], "%Y-%m-%d").date(),
+                total_amount=data["total_amount"],
+                adjustment_ratio=data.get("adjustment_ratio", 1.0),
+                individual_adjustments=data.get("individual_adjustments", {}),
+            )
+
+            # 预览
+            preview = AllocationService.preview_allocation(allocation)
+
+            # 转换 Decimal 为 float 以便 JSON 序列化
+            for item in preview:
+                if "contribution_score" in item:
+                    item["contribution_score"] = float(item["contribution_score"])
+
+            return JsonResponse(
+                {
+                    "contributions": preview,
+                    "total_points": sum(c["adjusted_points"] for c in preview),
+                    "total_recipients": len(preview),
+                }
+            )
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=400)
+
+
+class AllocationExecuteAPIView(LoginRequiredMixin, View):
+    """API: 执行积分分配."""
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        """Dispatch."""
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request):
+        """Execute allocation."""
+        try:
+            data = json.loads(request.body)
+
+            # 创建 PointAllocation 记录
+            user_content_type = ContentType.objects.get_for_model(request.user)
+            allocation = PointAllocation.objects.create(
+                initiator_type=user_content_type,
+                initiator_id=request.user.id,
+                source_pool_id=data["pool_id"],
+                total_amount=data["total_amount"],
+                project_scope=data["project_scope"],
+                user_scope=data.get("user_scope"),
+                start_month=datetime.strptime(data["start_month"], "%Y-%m-%d").date(),
+                end_month=datetime.strptime(data["end_month"], "%Y-%m-%d").date(),
+                adjustment_ratio=data.get("adjustment_ratio", 1.0),
+                individual_adjustments=data.get("individual_adjustments", {}),
+            )
+
+            # 执行
+            result = AllocationService.execute_allocation(allocation)
+
+            return JsonResponse({"allocation_id": allocation.id, **result})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=400)

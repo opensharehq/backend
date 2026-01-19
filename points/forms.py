@@ -3,7 +3,7 @@
 from django import forms
 
 from . import services
-from .models import PointType, WithdrawalRequest
+from .models import PointType, Tag, WithdrawalRequest
 
 
 class WithdrawalRequestForm(forms.ModelForm):
@@ -85,3 +85,63 @@ class WithdrawalRequestForm(forms.ModelForm):
             msg = "请输入有效的银行卡号（16-19位数字）"
             raise forms.ValidationError(msg)
         return cleaned
+
+
+class GrantPointsForm(forms.Form):
+    """Form for granting points to users or organizations."""
+
+    POINT_TYPE_CHOICES = [
+        (PointType.CASH.value, "现金积分"),
+        (PointType.GIFT.value, "礼物积分"),
+    ]
+
+    point_type = forms.ChoiceField(
+        choices=POINT_TYPE_CHOICES,
+        label="积分类型",
+        widget=forms.RadioSelect,
+    )
+    amount = forms.IntegerField(
+        min_value=1,
+        label="积分数量",
+        help_text="请输入正整数",
+        widget=forms.NumberInput(attrs={"class": "form-control"}),
+    )
+    reason = forms.CharField(
+        max_length=500,
+        label="发放描述",
+        widget=forms.Textarea(attrs={"rows": 3, "class": "form-control"}),
+    )
+    tag = forms.ModelChoiceField(
+        queryset=Tag.objects.all(),
+        required=False,
+        label="标签",
+        help_text="仅礼物积分需要选择标签",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+    expires_at = forms.DateField(
+        required=False,
+        label="过期时间",
+        widget=forms.DateInput(attrs={"type": "date", "class": "form-control"}),
+    )
+    reference_id = forms.CharField(
+        max_length=100,
+        required=False,
+        label="参考ID",
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
+
+    def clean(self):
+        """Validate form data."""
+        cleaned_data = super().clean()
+        point_type = cleaned_data.get("point_type")
+        tag = cleaned_data.get("tag")
+
+        if point_type == PointType.GIFT.value and not tag:
+            msg = "礼物积分必须选择标签"
+            raise forms.ValidationError(msg)
+
+        if point_type == PointType.CASH.value and tag:
+            msg = "现金积分不能选择标签"
+            raise forms.ValidationError(msg)
+
+        return cleaned_data

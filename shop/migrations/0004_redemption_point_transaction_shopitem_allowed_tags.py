@@ -5,20 +5,27 @@ from django.db import migrations, models
 
 
 def _allowed_tags_through_model(apps):
-    ShopItem = apps.get_model("shop", "ShopItem")
-    Tag = apps.get_model("points", "Tag")
+    apps_registry = apps
+    ShopItem = apps_registry.get_model("shop", "ShopItem")
+    Tag = apps_registry.get_model("points", "Tag")
 
-    class ShopItemAllowedTags(models.Model):
-        id = models.BigAutoField(primary_key=True)
-        shopitem = models.ForeignKey(ShopItem, on_delete=models.CASCADE)
-        tag = models.ForeignKey(Tag, on_delete=models.CASCADE)
+    class Meta:
+        app_label = "shop"
+        db_table = "shop_shopitem_allowed_tags"
+        unique_together = (("shopitem", "tag"),)
+        apps = apps_registry
 
-        class Meta:
-            app_label = "shop"
-            db_table = "shop_shopitem_allowed_tags"
-            unique_together = (("shopitem", "tag"),)
-
-    return ShopItemAllowedTags
+    return type(
+        "ShopItemAllowedTags",
+        (models.Model,),
+        {
+            "__module__": __name__,
+            "id": models.BigAutoField(primary_key=True),
+            "shopitem": models.ForeignKey(ShopItem, on_delete=models.CASCADE),
+            "tag": models.ForeignKey(Tag, on_delete=models.CASCADE),
+            "Meta": Meta,
+        },
+    )
 
 
 def create_allowed_tags_table(apps, schema_editor):

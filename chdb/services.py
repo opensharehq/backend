@@ -44,7 +44,6 @@ LABEL_ENTITIES_SQL = """
         name_zh,
         children,
         `platforms.name`,
-        `platforms.orgs`,
         `platforms.repos`,
         `platforms.users`
     FROM opensource.labels

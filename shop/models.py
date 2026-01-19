@@ -32,6 +32,7 @@ class ShopItem(models.Model):
     allowed_tags = models.ManyToManyField(
         "points.Tag",
         blank=True,
+        through="ShopItemAllowedTags",
         related_name="shop_items",
         verbose_name="允许的积分标签",
         help_text="如果为空，任何礼物积分都可兑换；否则只有指定标签的积分可用",
@@ -49,6 +50,19 @@ class ShopItem(models.Model):
     def __str__(self):
         """Return string representation."""
         return f"{self.name} - {self.cost} pts"
+
+
+class ShopItemAllowedTags(models.Model):
+    """Through table for shop items and allowed tags."""
+
+    shopitem = models.ForeignKey(ShopItem, on_delete=models.CASCADE)
+    tag = models.ForeignKey("points.Tag", on_delete=models.CASCADE)
+
+    class Meta:
+        """Model metadata."""
+
+        db_table = "shop_shopitem_allowed_tags"
+        unique_together = ("shopitem", "tag")
 
 
 class Redemption(models.Model):

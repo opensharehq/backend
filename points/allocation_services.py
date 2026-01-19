@@ -146,7 +146,12 @@ class AllocationService:
         allowed_users = TagOperation.evaluate_user_tags(
             allocation.user_scope["tags"], allocation.user_scope["operation"]
         )
-        return [c for c in contributions if c["github_login"] in allowed_users]
+        return [
+            c
+            for c in contributions
+            if c.get("github_login") in allowed_users
+            or str(c.get("github_id")) in allowed_users
+        ]
 
     @staticmethod
     def _total_contribution(contributions: list[dict]) -> float:

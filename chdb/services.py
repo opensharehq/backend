@@ -1,5 +1,6 @@
 """ClickHouse 服务层: 标签搜索和用户信息查询."""
 
+import json
 import logging
 from typing import Any
 
@@ -21,15 +22,50 @@ def _get_result_rows(result: Any) -> list[Any]:
     return []
 
 
+def _normalize_label_ids(label_ids: list[Any]) -> list[str]:
+    """规范化标签 ID 列表."""
+    normalized_ids = []
+    for label_id in label_ids:
+        if label_id is None:
+            continue
+        label_id_str = str(label_id).strip()
+        if label_id_str:
+            normalized_ids.append(label_id_str)
+    return normalized_ids
+
+
+def _extract_openrank(raw_data: Any) -> float | None:
+    """从 labels.data 中尝试解析 OpenRank."""
+    openrank = None
+    payload = None
+
+    if isinstance(raw_data, (int, float)):
+        openrank = float(raw_data)
+    elif isinstance(raw_data, str):
+        try:
+            payload = json.loads(raw_data)
+        except (TypeError, ValueError):
+            payload = None
+
+    if openrank is None and isinstance(payload, dict):
+        for key in ("openrank", "open_rank", "openRank"):
+            if key in payload:
+                try:
+                    openrank = float(payload[key])
+                except (TypeError, ValueError):
+                    openrank = None
+                break
+
+    return openrank
+
+
 def search_tags(keyword: str, limit: int = 5) -> list[dict[str, Any]]:
     """
-    搜索 name_info 表中的标签.
-
-    使用 LIMIT BY 语法为每个 (type, platform) 组合返回最多 limit 条记录。
+    搜索 opensource.labels 表中的标签.
 
     Args:
         keyword: 搜索关键词, 支持模糊匹配
-        limit: 每个 (type, platform) 组合的最大结果数, 默认 5
+        limit: 最大返回条数, 默认 5
 
     Returns:
         标签列表, 每个标签包含:
@@ -41,20 +77,6 @@ def search_tags(keyword: str, limit: int = 5) -> list[dict[str, Any]]:
         - name_display: 显示名称 (name + platform)
         - slug: slug 字段 (与 id 相同)
 
-    Example:
-        >>> search_tags("vscode")
-        [
-            {
-                "id": "github-microsoft-vscode",
-                "type": "repo",
-                "platform": "github",
-                "name": "microsoft/vscode",
-                "openrank": 1234.56,
-                "name_display": "microsoft/vscode (GitHub)",
-                "slug": "github-microsoft-vscode"
-            }
-        ]
-
     """
     if not keyword or not keyword.strip():
         logger.warning("空关键词搜索被拒绝")
@@ -64,13 +86,20 @@ def search_tags(keyword: str, limit: int = 5) -> list[dict[str, Any]]:
 
     try:
         # 使用参数化查询防止 SQL 注入
-        # LIMIT BY 是 ClickHouse 特有语法，为每个 (type, platform) 组合返回最多 limit 条
         sql = """
-            SELECT id, type, platform, name, openrank
-            FROM name_info
+            SELECT
+                id,
+                type,
+                name,
+                name_zh,
+                `platforms.name`,
+                data
+            FROM opensource.labels
             WHERE name ILIKE {keyword:String}
-            ORDER BY openrank DESC
-            LIMIT {limit:UInt32} BY type, platform
+               OR name_zh ILIKE {keyword:String}
+               OR id ILIKE {keyword:String}
+            ORDER BY name
+            LIMIT {limit:UInt32}
         """
 
         result = ClickHouseDB.query(
@@ -82,21 +111,29 @@ def search_tags(keyword: str, limit: int = 5) -> list[dict[str, Any]]:
         for row in _get_result_rows(result):
             tag_id = row[0]
             tag_type = row[1]
-            platform = row[2]
-            name = row[3]
-            openrank = float(row[4])
+            name = row[2] or ""
+            name_zh = row[3] or ""
+            platforms = [platform for platform in (row[4] or []) if platform]
+            raw_data = row[5] if len(row) > 5 else None
+            openrank = _extract_openrank(raw_data)
 
-            # 平台名称首字母大写
-            platform_display = platform.capitalize()
+            display_name = name_zh or name or tag_id
+            platform = "/".join(platforms) if platforms else "unknown"
+            platform_display = (
+                "/".join([platform.capitalize() for platform in platforms])
+                if platforms
+                else "Unknown"
+            )
 
             tags.append(
                 {
                     "id": tag_id,
                     "type": tag_type,
                     "platform": platform,
-                    "name": name,
+                    "platforms": platforms,
+                    "name": display_name,
                     "openrank": openrank,
-                    "name_display": f"{name} ({platform_display})",
+                    "name_display": f"{display_name} ({platform_display})",
                     "slug": tag_id,  # id 作为 Django Tag 的 slug
                 }
             )
@@ -114,7 +151,7 @@ def get_label_users(label_ids: list[Any]) -> dict[str, dict[str, Any]]:
     查询 opensource.labels 表获取标签的平台和用户信息.
 
     Args:
-        label_ids: 标签 ID 列表 (来自 name_info.id, 支持 str 或 int)
+        label_ids: 标签 ID 列表 (来自 opensource.labels.id, 支持 str 或 int)
 
     Returns:
         字典映射, 格式: {label_id: {"platforms": [...], "users": {...}}}
@@ -139,13 +176,7 @@ def get_label_users(label_ids: list[Any]) -> dict[str, dict[str, Any]]:
         logger.warning("空标签列表查询被拒绝")
         return {}
 
-    normalized_ids = []
-    for label_id in label_ids:
-        if label_id is None:
-            continue
-        label_id_str = str(label_id).strip()
-        if label_id_str:
-            normalized_ids.append(label_id_str)
+    normalized_ids = _normalize_label_ids(label_ids)
 
     if not normalized_ids:
         logger.warning("标签列表去空后为空, 跳过查询")
@@ -190,4 +221,102 @@ def get_label_users(label_ids: list[Any]) -> dict[str, dict[str, Any]]:
 
     except Exception as e:
         logger.error("查询标签用户信息失败 (标签数: %s): %s", len(label_ids), e)
+        return {}
+
+
+def get_label_entities(label_ids: list[Any]) -> dict[str, dict[str, Any]]:
+    """
+    查询 opensource.labels 表获取标签关联实体信息.
+
+    Args:
+        label_ids: 标签 ID 列表 (来自 opensource.labels.id, 支持 str 或 int)
+
+    Returns:
+        字典映射, 格式:
+        {
+            label_id: {
+                "id": label_id,
+                "type": label_type,
+                "name": name,
+                "name_zh": name_zh,
+                "children": [...],
+                "platforms": [...],
+                "orgs": {platform: [org_ids]},
+                "repos": {platform: [repo_ids]},
+                "users": {platform: [user_ids]},
+            }
+        }
+
+    """
+    if not label_ids:
+        logger.warning("空标签列表查询被拒绝")
+        return {}
+
+    normalized_ids = _normalize_label_ids(label_ids)
+    if not normalized_ids:
+        logger.warning("标签列表去空后为空, 跳过查询")
+        return {}
+
+    try:
+        sql = """
+            SELECT
+                id,
+                type,
+                name,
+                name_zh,
+                children,
+                `platforms.name`,
+                `platforms.orgs`,
+                `platforms.repos`,
+                `platforms.users`
+            FROM opensource.labels
+            WHERE id IN {label_ids:Array(String)}
+        """
+
+        result = ClickHouseDB.query(sql, parameters={"label_ids": normalized_ids})
+
+        label_info = {}
+        for row in _get_result_rows(result):
+            label_id = row[0]
+            label_type = row[1]
+            name = row[2]
+            name_zh = row[3]
+            children = row[4] or []
+            platforms_names = row[5] or []
+            platforms_orgs = row[6] or []
+            platforms_repos = row[7] or []
+            platforms_users = row[8] or []
+
+            orgs_by_platform = {}
+            repos_by_platform = {}
+            users_by_platform = {}
+
+            for i, platform_name in enumerate(platforms_names):
+                if i < len(platforms_orgs):
+                    orgs_by_platform[platform_name] = platforms_orgs[i] or []
+                if i < len(platforms_repos):
+                    repos_by_platform[platform_name] = platforms_repos[i] or []
+                if i < len(platforms_users):
+                    users_by_platform[platform_name] = platforms_users[i] or []
+
+            label_info[label_id] = {
+                "id": label_id,
+                "type": label_type,
+                "name": name,
+                "name_zh": name_zh,
+                "children": list(children),
+                "platforms": list(platforms_names),
+                "orgs": orgs_by_platform,
+                "repos": repos_by_platform,
+                "users": users_by_platform,
+            }
+
+        logger.info(
+            "查询 %s 个标签实体, 返回 %s 个结果",
+            len(normalized_ids),
+            len(label_info),
+        )
+        return label_info
+    except Exception as e:
+        logger.error("查询标签实体失败 (标签数: %s): %s", len(label_ids), e)
         return {}

@@ -1,110 +1,161 @@
 """Tests for tag operations."""
 
+from unittest.mock import patch
+
 from django.test import TestCase
 
-from points.models import Tag, TagType
 from points.tag_operations import TagOperation
 
 
 class TagOperationTests(TestCase):
     """Tests for tag operations."""
 
-    def setUp(self):
-        """Set up test data."""
-        # 创建组织标签
-        self.tag_alibaba = Tag.objects.create(
-            name="阿里巴巴",
-            slug="alibaba-org",
-            tag_type=TagType.ORG,
-            entity_identifier="alibaba",
-            is_official=True,
-        )
-
-        self.tag_apache = Tag.objects.create(
-            name="Apache",
-            slug="apache-org",
-            tag_type=TagType.ORG,
-            entity_identifier="apache",
-            is_official=True,
-        )
-
-        # 创建仓库标签
-        self.tag_dubbo = Tag.objects.create(
-            name="Dubbo",
-            slug="dubbo-repo",
-            tag_type=TagType.REPO,
-            entity_identifier="alibaba/dubbo",
-            is_official=True,
-        )
-
-        self.tag_kafka = Tag.objects.create(
-            name="Kafka",
-            slug="kafka-repo",
-            tag_type=TagType.REPO,
-            entity_identifier="apache/kafka",
-            is_official=True,
-        )
-
-    def test_evaluate_single_org_tag(self):
-        """Test evaluating a single org tag."""
-        result = TagOperation.evaluate_project_tags(["alibaba-org"])
-        self.assertTrue(len(result) > 0)
-        # 应该返回 alibaba 组织的项目
-        for project in result:
-            self.assertTrue(project.startswith("alibaba/"))
-
-    def test_evaluate_single_repo_tag(self):
+    @patch("chdb.services.get_label_entities")
+    def test_evaluate_single_repo_tag(self, mock_get_labels):
         """Test evaluating a single repo tag."""
-        result = TagOperation.evaluate_project_tags(["dubbo-repo"])
-        self.assertEqual(result, {"alibaba/dubbo"})
+        mock_get_labels.return_value = {
+            "repo-label": {
+                "id": "repo-label",
+                "type": "repo",
+                "name": "org/repo",
+                "name_zh": "",
+                "children": [],
+                "platforms": ["github"],
+                "orgs": {},
+                "repos": {"github": [123]},
+                "users": {},
+            }
+        }
 
-    def test_evaluate_and_operation(self):
+        result = TagOperation.evaluate_project_tags(["repo-label"])
+        self.assertEqual(result, {"repo:github:123"})
+
+    @patch("chdb.services.get_label_entities")
+    def test_evaluate_and_operation(self, mock_get_labels):
         """Test AND operation on tags."""
-        # 由于 fake 实现，alibaba-org 会返回 {alibaba/project1, alibaba/project2, alibaba/project3}
-        # dubbo-repo 会返回 {alibaba/dubbo}
-        # AND 运算结果应该是空集（因为它们没有交集）
-        result = TagOperation.evaluate_project_tags(
-            ["alibaba-org", "dubbo-repo"], operation=TagOperation.AND
-        )
-        # Fake 实现中没有交集
-        self.assertEqual(len(result), 0)
+        mock_get_labels.return_value = {
+            "label-a": {
+                "id": "label-a",
+                "type": "repo",
+                "name": "org/a",
+                "name_zh": "",
+                "children": [],
+                "platforms": ["github"],
+                "orgs": {},
+                "repos": {"github": [1, 2]},
+                "users": {},
+            },
+            "label-b": {
+                "id": "label-b",
+                "type": "repo",
+                "name": "org/b",
+                "name_zh": "",
+                "children": [],
+                "platforms": ["github"],
+                "orgs": {},
+                "repos": {"github": [2]},
+                "users": {},
+            },
+        }
 
-    def test_evaluate_or_operation(self):
+        result = TagOperation.evaluate_project_tags(
+            ["label-a", "label-b"], operation=TagOperation.AND
+        )
+        self.assertEqual(result, {"repo:github:2"})
+
+    @patch("chdb.services.get_label_entities")
+    def test_evaluate_or_operation(self, mock_get_labels):
         """Test OR operation on tags."""
-        result = TagOperation.evaluate_project_tags(
-            ["dubbo-repo", "kafka-repo"], operation=TagOperation.OR
-        )
-        self.assertEqual(result, {"alibaba/dubbo", "apache/kafka"})
+        mock_get_labels.return_value = {
+            "label-a": {
+                "id": "label-a",
+                "type": "repo",
+                "name": "org/a",
+                "name_zh": "",
+                "children": [],
+                "platforms": ["github"],
+                "orgs": {},
+                "repos": {"github": [1]},
+                "users": {},
+            },
+            "label-b": {
+                "id": "label-b",
+                "type": "repo",
+                "name": "org/b",
+                "name_zh": "",
+                "children": [],
+                "platforms": ["github"],
+                "orgs": {},
+                "repos": {"github": [2]},
+                "users": {},
+            },
+        }
 
-    def test_evaluate_not_operation(self):
-        """Test NOT operation on tags."""
         result = TagOperation.evaluate_project_tags(
-            ["alibaba-org", "dubbo-repo"], operation=TagOperation.NOT
+            ["label-a", "label-b"], operation=TagOperation.OR
         )
-        # alibaba-org 的项目减去 dubbo-repo
-        expected = {"alibaba/project1", "alibaba/project2", "alibaba/project3"}
-        self.assertEqual(result, expected)
+        self.assertEqual(result, {"repo:github:1", "repo:github:2"})
+
+    @patch("chdb.services.get_label_entities")
+    def test_evaluate_not_operation(self, mock_get_labels):
+        """Test NOT operation on tags."""
+        mock_get_labels.return_value = {
+            "label-a": {
+                "id": "label-a",
+                "type": "repo",
+                "name": "org/a",
+                "name_zh": "",
+                "children": [],
+                "platforms": ["github"],
+                "orgs": {},
+                "repos": {"github": [1, 2]},
+                "users": {},
+            },
+            "label-b": {
+                "id": "label-b",
+                "type": "repo",
+                "name": "org/b",
+                "name_zh": "",
+                "children": [],
+                "platforms": ["github"],
+                "orgs": {},
+                "repos": {"github": [2]},
+                "users": {},
+            },
+        }
+
+        result = TagOperation.evaluate_project_tags(
+            ["label-a", "label-b"], operation=TagOperation.NOT
+        )
+        self.assertEqual(result, {"repo:github:1"})
 
     def test_evaluate_empty_tags(self):
         """Test evaluating empty tag list."""
         result = TagOperation.evaluate_project_tags([])
         self.assertEqual(result, set())
 
-    def test_evaluate_nonexistent_tag(self):
+    @patch("chdb.services.get_label_entities", return_value={})
+    def test_evaluate_nonexistent_tag(self, _mock_get_labels):
         """Test evaluating non-existent tag."""
         result = TagOperation.evaluate_project_tags(["nonexistent-tag"])
         self.assertEqual(result, set())
 
-    def test_evaluate_user_tags(self):
+    @patch("chdb.services.get_label_entities")
+    def test_evaluate_user_tags(self, mock_get_labels):
         """Test evaluating user tags."""
-        # 创建用户标签
-        Tag.objects.create(
-            name="核心贡献者",
-            slug="core-contributors",
-            tag_type=TagType.USER,
-            is_official=True,
-        )
+        mock_get_labels.return_value = {
+            "user-label": {
+                "id": "user-label",
+                "type": "user",
+                "name": "core",
+                "name_zh": "",
+                "children": [],
+                "platforms": ["github"],
+                "orgs": {},
+                "repos": {},
+                "users": {"github": [101, 202]},
+            }
+        }
 
-        result = TagOperation.evaluate_user_tags(["core-contributors"])
-        # Fake 实现返回固定的用户集合
-        self.assertTrue(len(result) > 0)
+        result = TagOperation.evaluate_user_tags(["user-label"])
+        self.assertEqual(result, {"101", "202"})

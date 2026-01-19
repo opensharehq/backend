@@ -322,8 +322,22 @@ class SearchTagsTests(TestCase):
         # Mock ClickHouse 查询结果
         mock_result = MagicMock()
         mock_result.result_rows = [
-            ["github-microsoft-vscode", "repo", "github", "microsoft/vscode", 1234.56],
-            ["gitee-microsoft-vscode", "repo", "gitee", "microsoft/vscode", 567.89],
+            [
+                "github-linux",
+                "repo",
+                "torvalds/linux",
+                "Linux 内核",
+                ["github", "gitee"],
+                '{"openrank": 1234.56}',
+            ],
+            [
+                "apache",
+                "org",
+                "apache",
+                "",
+                ["github"],
+                None,
+            ],
         ]
         mock_query.return_value = mock_result
 
@@ -334,26 +348,28 @@ class SearchTagsTests(TestCase):
         self.assertEqual(len(tags), 2)
 
         # 验证第一个标签
-        self.assertEqual(tags[0]["id"], "github-microsoft-vscode")
+        self.assertEqual(tags[0]["id"], "github-linux")
         self.assertEqual(tags[0]["type"], "repo")
-        self.assertEqual(tags[0]["platform"], "github")
-        self.assertEqual(tags[0]["name"], "microsoft/vscode")
+        self.assertEqual(tags[0]["platform"], "github/gitee")
+        self.assertEqual(tags[0]["name"], "Linux 内核")
         self.assertEqual(tags[0]["openrank"], 1234.56)
-        self.assertEqual(tags[0]["name_display"], "microsoft/vscode (Github)")
-        self.assertEqual(tags[0]["slug"], "github-microsoft-vscode")
+        self.assertEqual(tags[0]["name_display"], "Linux 内核 (Github/Gitee)")
+        self.assertEqual(tags[0]["slug"], "github-linux")
 
         # 验证第二个标签
-        self.assertEqual(tags[1]["id"], "gitee-microsoft-vscode")
-        self.assertEqual(tags[1]["platform"], "gitee")
-        self.assertEqual(tags[1]["name_display"], "microsoft/vscode (Gitee)")
+        self.assertEqual(tags[1]["id"], "apache")
+        self.assertEqual(tags[1]["platform"], "github")
+        self.assertEqual(tags[1]["name_display"], "apache (Github)")
+        self.assertIsNone(tags[1]["openrank"])
 
         # 验证查询调用
         mock_query.assert_called_once()
         call_args = mock_query.call_args
-        self.assertIn("name_info", call_args[0][0])
-        self.assertIn("ILIKE", call_args[0][0])
+        self.assertIn("opensource.labels", call_args[0][0])
+        self.assertIn("name ILIKE", call_args[0][0])
+        self.assertIn("name_zh ILIKE", call_args[0][0])
+        self.assertIn("id ILIKE", call_args[0][0])
         self.assertIn("LIMIT", call_args[0][0])
-        self.assertIn("BY type, platform", call_args[0][0])
         self.assertEqual(call_args[1]["parameters"]["keyword"], "%vscode%")
         self.assertEqual(call_args[1]["parameters"]["limit"], 5)
 
@@ -606,3 +622,73 @@ class GetLabelUsersTests(TestCase):
         self.assertEqual(info["platforms"], ["github", "gitlab"])
         self.assertEqual(info["users"]["github"], [123])
         self.assertNotIn("gitlab", info["users"])  # gitlab 没有用户数据
+
+
+class GetLabelEntitiesTests(TestCase):
+    """get_label_entities 函数测试."""
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_get_label_entities_basic(self, mock_query):
+        """测试基本实体信息查询."""
+        from chdb import services
+
+        mock_result = MagicMock()
+        mock_result.result_rows = [
+            [
+                "label-1",
+                "repo",
+                "org/repo",
+                "仓库",
+                ["child-1"],
+                ["github", "gitee"],
+                [[1], [2]],
+                [[11, 12], [21]],
+                [[101], [201, 202]],
+            ],
+        ]
+        mock_query.return_value = mock_result
+
+        label_info = services.get_label_entities(["label-1"])
+
+        self.assertIn("label-1", label_info)
+        info = label_info["label-1"]
+        self.assertEqual(info["id"], "label-1")
+        self.assertEqual(info["type"], "repo")
+        self.assertEqual(info["name"], "org/repo")
+        self.assertEqual(info["name_zh"], "仓库")
+        self.assertEqual(info["children"], ["child-1"])
+        self.assertEqual(info["platforms"], ["github", "gitee"])
+        self.assertEqual(info["orgs"]["github"], [1])
+        self.assertEqual(info["orgs"]["gitee"], [2])
+        self.assertEqual(info["repos"]["github"], [11, 12])
+        self.assertEqual(info["repos"]["gitee"], [21])
+        self.assertEqual(info["users"]["github"], [101])
+        self.assertEqual(info["users"]["gitee"], [201, 202])
+
+        mock_query.assert_called_once()
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_get_label_entities_empty_list(self, mock_query):
+        """测试空标签列表处理."""
+        from chdb import services
+
+        label_info = services.get_label_entities([])
+
+        self.assertEqual(label_info, {})
+        mock_query.assert_not_called()
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_get_label_entities_normalizes_ids(self, mock_query):
+        """测试标签 ID 规范化处理."""
+        from chdb import services
+
+        mock_result = MagicMock()
+        mock_result.result_rows = []
+        mock_query.return_value = mock_result
+
+        label_info = services.get_label_entities([123, " 456 ", None, ""])
+
+        self.assertEqual(label_info, {})
+        mock_query.assert_called_once()
+        call_args = mock_query.call_args
+        self.assertEqual(call_args[1]["parameters"]["label_ids"], ["123", "456"])

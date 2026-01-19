@@ -198,7 +198,7 @@
                                                 <span class="badge bg-info ms-1" x-text="tag.type"></span>
                                             </div>
                                             <small class="text-muted">
-                                                OpenRank: <span x-text="tag.openrank.toFixed(2)"></span>
+                                                OpenRank: <span x-text="formatOpenRank(tag.openrank)"></span>
                                             </small>
                                         </div>
                                     </div>
@@ -516,6 +516,14 @@
                     if (tag && !this.config.projectScope.tags.includes(tag)) {
                         this.config.projectScope.tags.push(tag);
                     }
+                },
+
+                formatOpenRank(value) {
+                    const numericValue = Number(value);
+                    if (value === null || value === undefined || Number.isNaN(numericValue)) {
+                        return '-';
+                    }
+                    return numericValue.toFixed(2);
                 },
 
                 async searchProjectTags() {

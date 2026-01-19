@@ -522,7 +522,7 @@ class AllocationExecuteAPIView(LoginRequiredMixin, View):
 
 
 class TagSearchAPIView(LoginRequiredMixin, View):
-    """API: 搜索标签 (ClickHouse name_info 表)."""
+    """API: 搜索标签 (ClickHouse opensource.labels 表)."""
 
     def get(self, request):
         """Search tags by keyword."""

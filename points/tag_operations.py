@@ -1,6 +1,11 @@
 """标签运算逻辑."""
 
-from .models import Tag
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class TagOperation:
@@ -21,22 +26,24 @@ class TagOperation:
             operation: 运算符 (AND/OR/NOT/XOR)
 
         Returns:
-            项目标识集合 {"alibaba/dubbo", "apache/kafka", ...}
+            项目标识集合 {"repo:github:123", "org:gitee:456", ...}
 
         """
-        if not tag_slugs:
+        normalized_slugs = TagOperation._normalize_tag_ids(tag_slugs)
+        if not normalized_slugs:
             return set()
+
+        label_info = TagOperation._fetch_label_entities(normalized_slugs)
 
         # 获取每个标签对应的项目集合
         project_sets = []
-        for slug in tag_slugs:
-            try:
-                tag = Tag.objects.get(slug=slug)
-                projects = TagOperation._get_projects_for_tag(tag)
-                project_sets.append(projects)
-            except Tag.DoesNotExist:
-                # 如果标签不存在，使用空集合
+        for slug in normalized_slugs:
+            label = label_info.get(slug)
+            if not label:
                 project_sets.append(set())
+                continue
+            projects = TagOperation._get_projects_for_label(label)
+            project_sets.append(projects)
 
         if not project_sets:
             return set()
@@ -56,54 +63,60 @@ class TagOperation:
         return result
 
     @staticmethod
-    def _get_projects_for_tag(tag: Tag) -> set[str]:
-        """
-        获取标签对应的项目列表.
+    def _get_projects_for_label(label: dict[str, Any]) -> set[str]:
+        """从 opensource.labels 信息提取项目标识集合."""
+        projects: set[str] = set()
+        repos_by_platform = label.get("repos", {}) or {}
+        orgs_by_platform = label.get("orgs", {}) or {}
+        children = label.get("children") or []
 
-        对于组织标签, 返回该组织下的所有项目(fake数据)
-        对于仓库标签, 直接返回该仓库
-        """
-        if tag.tag_type == "org":
-            # 组织标签: 返回该组织下的所有项目(fake数据)
-            # Future enhancement: fetch real project list from OpenDigger or cache.
-            org_name = tag.entity_identifier
-            return {
-                f"{org_name}/project1",
-                f"{org_name}/project2",
-                f"{org_name}/project3",
-            }
-        elif tag.tag_type == "repo":
-            # 仓库标签：直接返回该仓库
-            return {tag.entity_identifier}
-        else:
-            # 通用标签或用户标签：返回空集合
-            return set()
+        for platform, repo_ids in repos_by_platform.items():
+            for repo_id in repo_ids:
+                projects.add(f"repo:{platform}:{repo_id}")
+
+        if not projects:
+            for platform, org_ids in orgs_by_platform.items():
+                for org_id in org_ids:
+                    projects.add(f"org:{platform}:{org_id}")
+
+        if not projects and children:
+            projects.update({str(child) for child in children if child})
+
+        if not projects:
+            name = label.get("name") or label.get("name_zh") or label.get("id")
+            if name:
+                projects.add(str(name))
+
+        return projects
 
     @staticmethod
     def evaluate_user_tags(tag_slugs: list[str], operation: str = "AND") -> set[str]:
         """
-        计算用户标签运算, 返回 GitHub login 集合.
+        计算用户标签运算, 返回 GitHub user id 集合.
 
         Args:
             tag_slugs: 标签 slug 列表
             operation: 运算符 (AND/OR/NOT/XOR)
 
         Returns:
-            GitHub login 集合 {"alice", "bob", ...}
+            GitHub user id 集合 {"123", "456", ...}
 
         """
-        if not tag_slugs:
+        normalized_slugs = TagOperation._normalize_tag_ids(tag_slugs)
+        if not normalized_slugs:
             return set()
+
+        label_info = TagOperation._fetch_label_entities(normalized_slugs)
 
         # 获取每个标签对应的用户集合
         user_sets = []
-        for slug in tag_slugs:
-            try:
-                tag = Tag.objects.get(slug=slug)
-                users = TagOperation._get_users_for_tag(tag)
-                user_sets.append(users)
-            except Tag.DoesNotExist:
+        for slug in normalized_slugs:
+            label = label_info.get(slug)
+            if not label:
                 user_sets.append(set())
+                continue
+            users = TagOperation._get_users_for_label(label)
+            user_sets.append(users)
 
         if not user_sets:
             return set()
@@ -123,15 +136,32 @@ class TagOperation:
         return result
 
     @staticmethod
-    def _get_users_for_tag(tag: Tag) -> set[str]:
-        """
-        获取标签对应的用户列表.
+    def _get_users_for_label(label: dict[str, Any]) -> set[str]:
+        """从 opensource.labels 信息提取用户集合."""
+        users: set[str] = set()
+        users_by_platform = label.get("users", {}) or {}
+        for _, user_ids in users_by_platform.items():
+            for user_id in user_ids:
+                users.add(str(user_id))
+        return users
 
-        对于用户标签, 返回标记的用户列表(fake数据)
-        """
-        if tag.tag_type == "user":
-            # 用户标签: 返回该标签标记的用户(fake数据)
-            # Future enhancement: fetch real users from database or cache.
-            return {"user1", "user2", "user3"}
-        else:
-            return set()
+    @staticmethod
+    def _fetch_label_entities(tag_slugs: list[str]) -> dict[str, dict[str, Any]]:
+        from chdb import services as chdb_services
+
+        try:
+            return chdb_services.get_label_entities(tag_slugs)
+        except Exception as exc:
+            logger.warning("读取标签实体失败: %s", exc)
+            return {}
+
+    @staticmethod
+    def _normalize_tag_ids(tag_slugs: list[str]) -> list[str]:
+        normalized = []
+        for slug in tag_slugs:
+            if slug is None:
+                continue
+            slug_str = str(slug).strip()
+            if slug_str:
+                normalized.append(slug_str)
+        return normalized

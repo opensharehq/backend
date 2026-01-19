@@ -2,6 +2,7 @@
 
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
@@ -25,6 +26,13 @@ class AllocationServiceTests(TestCase):
 
     def setUp(self):
         """Set up test data."""
+        self.tag_operation_patcher = patch(
+            "points.tag_operations.TagOperation.evaluate_project_tags",
+            return_value={"repo:github:1"},
+        )
+        self.tag_operation_patcher.start()
+        self.addCleanup(self.tag_operation_patcher.stop)
+
         # 创建测试用户
         self.user = User.objects.create_user(
             username="testuser", email="test@example.com"

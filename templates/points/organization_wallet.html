@@ -17,12 +17,6 @@
             <h4 class="mb-3 mb-md-0">{{ org.name }} - 组织钱包</h4>
         </div>
         <div class="d-flex align-items-center flex-wrap text-nowrap gap-2">
-            {% if can_withdraw %}
-                <a href="{% url 'points:org_create_withdrawal' org.slug %}"
-                   class="btn btn-primary btn-icon-text">
-                    <i data-lucide="banknote" class="btn-icon-prepend"></i> 申请提现
-                </a>
-            {% endif %}
             <a href="{% url 'points:org_transactions' org.slug %}"
                class="btn btn-outline-primary btn-icon-text">
                 <i data-lucide="list" class="btn-icon-prepend"></i> 完整记录

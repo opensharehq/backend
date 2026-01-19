@@ -444,6 +444,8 @@ class ContributionPreviewAPIView(LoginRequiredMixin, View):
     def post(self, request):
         """Preview contributions."""
         try:
+            from chdb import services as chdb_services
+
             data = json.loads(request.body)
 
             # 创建临时的 PointAllocation 对象
@@ -465,9 +467,16 @@ class ContributionPreviewAPIView(LoginRequiredMixin, View):
                 if "contribution_score" in item:
                     item["contribution_score"] = float(item["contribution_score"])
 
+            # 查询标签平台信息（如果有项目标签）
+            label_platforms_info = {}
+            project_tags = data.get("project_scope", {}).get("tags", [])
+            if project_tags:
+                label_platforms_info = chdb_services.get_label_users(project_tags)
+
             return JsonResponse(
                 {
                     "contributions": preview,
+                    "label_platforms_info": label_platforms_info,
                     "total_points": sum(c["adjusted_points"] for c in preview),
                     "total_recipients": len(preview),
                 }
@@ -510,3 +519,22 @@ class AllocationExecuteAPIView(LoginRequiredMixin, View):
             return JsonResponse({"allocation_id": allocation.id, **result})
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=400)
+
+
+class TagSearchAPIView(LoginRequiredMixin, View):
+    """API: 搜索标签 (ClickHouse name_info 表)."""
+
+    def get(self, request):
+        """Search tags by keyword."""
+        from chdb import services as chdb_services
+
+        keyword = request.GET.get("q", "").strip()
+
+        if not keyword:
+            return JsonResponse({"tags": []})
+
+        try:
+            tags = chdb_services.search_tags(keyword)
+            return JsonResponse({"tags": tags})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)

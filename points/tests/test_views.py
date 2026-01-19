@@ -412,3 +412,158 @@ class OrgViewEdgeCaseTests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)  # Form re-rendered with error
+
+
+class TagSearchAPIViewTests(TestCase):
+    """Tests for TagSearchAPIView."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.user = User.objects.create_user(username="testuser", password="testpass")
+        self.client = Client()
+        self.client.login(username="testuser", password="testpass")
+
+    def test_tag_search_api_requires_login(self):
+        """Test that tag search API requires login."""
+        self.client.logout()
+        response = self.client.get(reverse("points:api_tag_search") + "?q=vscode")
+        self.assertEqual(response.status_code, 302)
+
+    def test_tag_search_api_empty_query(self):
+        """Test tag search API with empty query."""
+        response = self.client.get(reverse("points:api_tag_search"))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["tags"], [])
+
+    def test_tag_search_api_with_query(self):
+        """Test tag search API with query keyword."""
+        from unittest.mock import patch
+
+        # Mock ClickHouse search results
+        mock_tags = [
+            {
+                "id": "github-microsoft-vscode",
+                "type": "repo",
+                "platform": "github",
+                "name": "microsoft/vscode",
+                "openrank": 1234.56,
+                "name_display": "microsoft/vscode (Github)",
+                "slug": "github-microsoft-vscode",
+            }
+        ]
+
+        with patch("chdb.services.search_tags", return_value=mock_tags):
+            response = self.client.get(reverse("points:api_tag_search") + "?q=vscode")
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(len(data["tags"]), 1)
+            self.assertEqual(data["tags"][0]["id"], "github-microsoft-vscode")
+            self.assertEqual(data["tags"][0]["name"], "microsoft/vscode")
+
+    def test_tag_search_api_exception_handling(self):
+        """Test tag search API handles exceptions gracefully."""
+        from unittest.mock import patch
+
+        with patch(
+            "chdb.services.search_tags", side_effect=Exception("Database error")
+        ):
+            response = self.client.get(reverse("points:api_tag_search") + "?q=vscode")
+            self.assertEqual(response.status_code, 500)
+            data = response.json()
+            self.assertIn("error", data)
+
+
+class ContributionPreviewAPIViewWithLabelsTests(TestCase):
+    """Tests for ContributionPreviewAPIView with label info."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.user = User.objects.create_user(username="testuser", password="testpass")
+        self.client = Client()
+        self.client.login(username="testuser", password="testpass")
+
+    def test_contribution_preview_with_label_info(self):
+        """Test contribution preview API includes label platforms info."""
+        from unittest.mock import patch
+
+        # Mock AllocationService.preview_allocation
+        mock_preview = [
+            {
+                "github_login": "alice",
+                "github_id": "123",
+                "contribution_score": 250.5,
+                "calculated_points": 75150,
+                "adjusted_points": 75150,
+            }
+        ]
+
+        # Mock get_label_users
+        mock_label_info = {
+            "github-microsoft-vscode": {
+                "platforms": ["github", "gitee"],
+                "users": {"github": [[123, 456]], "gitee": [[789]]},
+            }
+        }
+
+        with (
+            patch(
+                "points.allocation_services.AllocationService.preview_allocation",
+                return_value=mock_preview,
+            ),
+            patch("chdb.services.get_label_users", return_value=mock_label_info),
+        ):
+            response = self.client.post(
+                reverse("points:api_contribution_preview"),
+                data={
+                    "project_scope": {"tags": ["github-microsoft-vscode"]},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                    "total_amount": 75150,
+                },
+                content_type="application/json",
+            )
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+
+            # Verify contributions
+            self.assertEqual(len(data["contributions"]), 1)
+            self.assertEqual(data["contributions"][0]["github_login"], "alice")
+
+            # Verify label_platforms_info
+            self.assertIn("label_platforms_info", data)
+            self.assertIn("github-microsoft-vscode", data["label_platforms_info"])
+            label_info = data["label_platforms_info"]["github-microsoft-vscode"]
+            self.assertEqual(label_info["platforms"], ["github", "gitee"])
+            self.assertEqual(label_info["users"]["github"], [[123, 456]])
+
+    def test_contribution_preview_without_project_tags(self):
+        """Test contribution preview without project tags returns empty label info."""
+        from unittest.mock import patch
+
+        mock_preview = []
+
+        with (
+            patch(
+                "points.allocation_services.AllocationService.preview_allocation",
+                return_value=mock_preview,
+            ),
+            patch("chdb.services.get_label_users", return_value={}) as mock_get_labels,
+        ):
+            response = self.client.post(
+                reverse("points:api_contribution_preview"),
+                data={
+                    "project_scope": {},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                    "total_amount": 10000,
+                },
+                content_type="application/json",
+            )
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["label_platforms_info"], {})
+            # When project_scope has no tags, get_label_users should not be called
+            mock_get_labels.assert_not_called()

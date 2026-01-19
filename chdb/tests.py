@@ -309,3 +309,300 @@ class ClickHouseDBErrorHandlingTests(TestCase):
         client.ping.side_effect = RuntimeError("ping fail")
         with mock.patch.object(ClickHouseDB, "get_instance", return_value=client):
             self.assertFalse(ClickHouseDB.ping())
+
+
+class SearchTagsTests(TestCase):
+    """search_tags 函数测试."""
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_search_tags_basic(self, mock_query):
+        """测试基本搜索功能."""
+        from chdb import services
+
+        # Mock ClickHouse 查询结果
+        mock_result = MagicMock()
+        mock_result.result_rows = [
+            ["github-microsoft-vscode", "repo", "github", "microsoft/vscode", 1234.56],
+            ["gitee-microsoft-vscode", "repo", "gitee", "microsoft/vscode", 567.89],
+        ]
+        mock_query.return_value = mock_result
+
+        # 执行搜索
+        tags = services.search_tags("vscode")
+
+        # 验证结果
+        self.assertEqual(len(tags), 2)
+
+        # 验证第一个标签
+        self.assertEqual(tags[0]["id"], "github-microsoft-vscode")
+        self.assertEqual(tags[0]["type"], "repo")
+        self.assertEqual(tags[0]["platform"], "github")
+        self.assertEqual(tags[0]["name"], "microsoft/vscode")
+        self.assertEqual(tags[0]["openrank"], 1234.56)
+        self.assertEqual(tags[0]["name_display"], "microsoft/vscode (Github)")
+        self.assertEqual(tags[0]["slug"], "github-microsoft-vscode")
+
+        # 验证第二个标签
+        self.assertEqual(tags[1]["id"], "gitee-microsoft-vscode")
+        self.assertEqual(tags[1]["platform"], "gitee")
+        self.assertEqual(tags[1]["name_display"], "microsoft/vscode (Gitee)")
+
+        # 验证查询调用
+        mock_query.assert_called_once()
+        call_args = mock_query.call_args
+        self.assertIn("name_info", call_args[0][0])
+        self.assertIn("ILIKE", call_args[0][0])
+        self.assertIn("LIMIT", call_args[0][0])
+        self.assertIn("BY type, platform", call_args[0][0])
+        self.assertEqual(call_args[1]["parameters"]["keyword"], "%vscode%")
+        self.assertEqual(call_args[1]["parameters"]["limit"], 5)
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_search_tags_empty_keyword(self, mock_query):
+        """测试空关键词处理."""
+        from chdb import services
+
+        # 空字符串
+        tags = services.search_tags("")
+        self.assertEqual(tags, [])
+        mock_query.assert_not_called()
+
+        # 仅空格
+        tags = services.search_tags("   ")
+        self.assertEqual(tags, [])
+        mock_query.assert_not_called()
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_search_tags_no_results(self, mock_query):
+        """测试无结果场景."""
+        from chdb import services
+
+        # Mock 空结果
+        mock_result = MagicMock()
+        mock_result.result_rows = []
+        mock_query.return_value = mock_result
+
+        tags = services.search_tags("nonexistent-project-xyz")
+
+        self.assertEqual(tags, [])
+        mock_query.assert_called_once()
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_search_tags_custom_limit(self, mock_query):
+        """测试自定义 limit 参数."""
+        from chdb import services
+
+        # Mock 结果
+        mock_result = MagicMock()
+        mock_result.result_rows = []
+        mock_query.return_value = mock_result
+
+        # 使用自定义 limit
+        services.search_tags("test", limit=10)
+
+        # 验证 limit 参数
+        call_args = mock_query.call_args
+        self.assertEqual(call_args[1]["parameters"]["limit"], 10)
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_search_tags_query_exception(self, mock_query):
+        """测试查询异常处理."""
+        from chdb import services
+
+        # Mock 查询抛出异常
+        mock_query.side_effect = Exception("Database connection error")
+
+        # 执行搜索，应该返回空列表而不是抛出异常
+        tags = services.search_tags("vscode")
+
+        self.assertEqual(tags, [])
+        mock_query.assert_called_once()
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_search_tags_keyword_trimmed(self, mock_query):
+        """测试关键词前后空格被正确去除."""
+        from chdb import services
+
+        # Mock 结果
+        mock_result = MagicMock()
+        mock_result.result_rows = []
+        mock_query.return_value = mock_result
+
+        # 搜索带空格的关键词
+        services.search_tags("  vscode  ")
+
+        # 验证去除空格后的关键词
+        call_args = mock_query.call_args
+        self.assertEqual(call_args[1]["parameters"]["keyword"], "%vscode%")
+
+
+class GetLabelUsersTests(TestCase):
+    """get_label_users 函数测试."""
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_get_label_users_basic(self, mock_query):
+        """测试基本用户信息查询."""
+        from chdb import services
+
+        # Mock ClickHouse 查询结果
+        mock_result = MagicMock()
+        mock_result.result_rows = [
+            [
+                "github-microsoft-vscode",
+                ["github", "gitee"],  # platforms.name
+                [  # platforms.users (嵌套数组)
+                    [123, 456],  # github 用户
+                    [789],  # gitee 用户
+                ],
+            ],
+        ]
+        mock_query.return_value = mock_result
+
+        # 执行查询
+        label_info = services.get_label_users(["github-microsoft-vscode"])
+
+        # 验证结果
+        self.assertEqual(len(label_info), 1)
+        self.assertIn("github-microsoft-vscode", label_info)
+
+        info = label_info["github-microsoft-vscode"]
+        self.assertEqual(info["platforms"], ["github", "gitee"])
+        self.assertEqual(info["users"]["github"], [123, 456])
+        self.assertEqual(info["users"]["gitee"], [789])
+
+        # 验证查询调用
+        mock_query.assert_called_once()
+        call_args = mock_query.call_args
+        self.assertIn("opensource.labels", call_args[0][0])
+        self.assertIn("platforms.name", call_args[0][0])
+        self.assertIn("platforms.users", call_args[0][0])
+        self.assertEqual(
+            call_args[1]["parameters"]["label_ids"], ["github-microsoft-vscode"]
+        )
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_get_label_users_empty_list(self, mock_query):
+        """测试空标签列表处理."""
+        from chdb import services
+
+        label_info = services.get_label_users([])
+
+        self.assertEqual(label_info, {})
+        mock_query.assert_not_called()
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_get_label_users_normalizes_ids(self, mock_query):
+        """测试标签 ID 规范化处理."""
+        from chdb import services
+
+        mock_result = MagicMock()
+        mock_result.result_rows = []
+        mock_query.return_value = mock_result
+
+        label_info = services.get_label_users([16060815, " 37247796 ", None, ""])
+
+        self.assertEqual(label_info, {})
+        mock_query.assert_called_once()
+        call_args = mock_query.call_args
+        self.assertEqual(
+            call_args[1]["parameters"]["label_ids"], ["16060815", "37247796"]
+        )
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_get_label_users_no_results(self, mock_query):
+        """测试无结果场景."""
+        from chdb import services
+
+        # Mock 空结果
+        mock_result = MagicMock()
+        mock_result.result_rows = []
+        mock_query.return_value = mock_result
+
+        label_info = services.get_label_users(["nonexistent-label"])
+
+        self.assertEqual(label_info, {})
+        mock_query.assert_called_once()
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_get_label_users_multiple_labels(self, mock_query):
+        """测试查询多个标签."""
+        from chdb import services
+
+        # Mock 多个标签的结果
+        mock_result = MagicMock()
+        mock_result.result_rows = [
+            [
+                "github-microsoft-vscode",
+                ["github"],
+                [[123, 456]],
+            ],
+            [
+                "github-facebook-react",
+                ["github", "gitlab"],
+                [[789], [321, 654]],
+            ],
+        ]
+        mock_query.return_value = mock_result
+
+        label_info = services.get_label_users(
+            ["github-microsoft-vscode", "github-facebook-react"]
+        )
+
+        # 验证结果
+        self.assertEqual(len(label_info), 2)
+        self.assertIn("github-microsoft-vscode", label_info)
+        self.assertIn("github-facebook-react", label_info)
+
+        # 验证第一个标签
+        self.assertEqual(label_info["github-microsoft-vscode"]["platforms"], ["github"])
+        self.assertEqual(
+            label_info["github-microsoft-vscode"]["users"]["github"], [123, 456]
+        )
+
+        # 验证第二个标签
+        self.assertEqual(
+            label_info["github-facebook-react"]["platforms"], ["github", "gitlab"]
+        )
+        self.assertEqual(label_info["github-facebook-react"]["users"]["github"], [789])
+        self.assertEqual(
+            label_info["github-facebook-react"]["users"]["gitlab"], [321, 654]
+        )
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_get_label_users_query_exception(self, mock_query):
+        """测试查询异常处理."""
+        from chdb import services
+
+        # Mock 查询抛出异常
+        mock_query.side_effect = Exception("Database connection error")
+
+        # 执行查询，应该返回空字典而不是抛出异常
+        label_info = services.get_label_users(["github-microsoft-vscode"])
+
+        self.assertEqual(label_info, {})
+        mock_query.assert_called_once()
+
+    @mock.patch("chdb.services.ClickHouseDB.query")
+    def test_get_label_users_mismatched_array_lengths(self, mock_query):
+        """测试平台名称和用户数组长度不匹配的情况."""
+        from chdb import services
+
+        # Mock 结果：platforms.name 有 2 个元素，但 platforms.users 只有 1 个
+        mock_result = MagicMock()
+        mock_result.result_rows = [
+            [
+                "test-label",
+                ["github", "gitlab"],  # 2 个平台
+                [[123]],  # 只有 1 个用户数组
+            ],
+        ]
+        mock_query.return_value = mock_result
+
+        label_info = services.get_label_users(["test-label"])
+
+        # 验证结果：只映射第一个平台
+        self.assertEqual(len(label_info), 1)
+        info = label_info["test-label"]
+        self.assertEqual(info["platforms"], ["github", "gitlab"])
+        self.assertEqual(info["users"]["github"], [123])
+        self.assertNotIn("gitlab", info["users"])  # gitlab 没有用户数据

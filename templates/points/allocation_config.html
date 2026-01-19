@@ -63,6 +63,33 @@
         .points-input {
             width: 120px;
         }
+        .search-results {
+            position: absolute;
+            z-index: 1000;
+            width: 100%;
+            max-height: 300px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 0.25rem;
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+            margin-top: 0.25rem;
+        }
+        .search-result-item {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.2s;
+        }
+        .search-result-item:hover {
+            background: #f8f9fa;
+        }
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+        [x-cloak] {
+            display: none !important;
+        }
     </style>
 {% endblock extra_css %}
 
@@ -148,20 +175,37 @@
             <div class="card-body">
                 <div class="row">
                     <div class="col-md-12 mb-3">
-                        <label class="form-label">添加项目标签</label>
-                        <div class="input-group">
-                            <input type="text"
-                                   class="form-control"
-                                   x-model="newProjectTag"
-                                   placeholder="输入标签 slug (如: alibaba-org, apache/kafka)"
-                                   @keyup.enter="addProjectTag(newProjectTag); newProjectTag = ''">
-                            <button class="btn btn-primary"
-                                    type="button"
-                                    @click="addProjectTag(newProjectTag); newProjectTag = ''">
-                                <i data-lucide="plus" class="me-1"></i>添加
-                            </button>
+                        <label class="form-label">搜索项目标签</label>
+                        <div class="position-relative">
+                            <div class="input-group">
+                                <input type="text"
+                                       class="form-control"
+                                       x-model="projectTagSearch"
+                                       @input.debounce.300ms="searchProjectTags()"
+                                       placeholder="输入关键词搜索项目 (如: vscode, react, linux)">
+                                <button class="btn btn-outline-secondary" type="button">
+                                    <i data-lucide="search"></i>
+                                </button>
+                            </div>
+                            <!-- 搜索结果下拉列表 -->
+                            <div class="search-results" x-show="projectTagSearchResults.length > 0" x-cloak>
+                                <template x-for="tag in projectTagSearchResults" :key="tag.id">
+                                    <div class="search-result-item" @click="selectProjectTag(tag)">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div class="flex-grow-1">
+                                                <strong x-text="tag.name"></strong>
+                                                <span class="badge bg-secondary ms-2" x-text="tag.platform"></span>
+                                                <span class="badge bg-info ms-1" x-text="tag.type"></span>
+                                            </div>
+                                            <small class="text-muted">
+                                                OpenRank: <span x-text="tag.openrank.toFixed(2)"></span>
+                                            </small>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
                         </div>
-                        <small class="text-muted">提示: 组织标签(如 alibaba-org)或仓库标签(如 alibaba/dubbo)</small>
+                        <small class="text-muted">提示: 输入关键词搜索项目，点击搜索结果添加标签</small>
                     </div>
                 </div>
                 <div class="mb-3" x-show="config.projectScope.tags.length > 0">
@@ -432,6 +476,9 @@
                 userScopeOperation: 'AND',
                 newProjectTag: '',
                 newUserTag: '',
+                projectTagSearch: '',           // 搜索关键词
+                projectTagSearchResults: [],    // 搜索结果
+                labelPlatformsInfo: {},         // opensource.labels 的平台信息
 
                 init() {
                     // 计算最大可选月份（上个月）
@@ -469,6 +516,34 @@
                     if (tag && !this.config.projectScope.tags.includes(tag)) {
                         this.config.projectScope.tags.push(tag);
                     }
+                },
+
+                async searchProjectTags() {
+                    if (!this.projectTagSearch.trim()) {
+                        this.projectTagSearchResults = [];
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch(
+                            `/points/api/tags/search/?q=${encodeURIComponent(this.projectTagSearch)}`
+                        );
+                        const data = await response.json();
+                        this.projectTagSearchResults = data.tags || [];
+                    } catch (error) {
+                        console.error('搜索失败:', error);
+                        this.projectTagSearchResults = [];
+                    }
+                },
+
+                selectProjectTag(tag) {
+                    // 添加标签的 id (slug) 到已选列表
+                    if (!this.config.projectScope.tags.includes(tag.id)) {
+                        this.config.projectScope.tags.push(tag.id);
+                    }
+                    // 清空搜索
+                    this.projectTagSearch = '';
+                    this.projectTagSearchResults = [];
                 },
 
                 removeProjectTag(index) {
@@ -527,6 +602,7 @@
 
                         if (response.ok) {
                             this.contributions = data.contributions;
+                            this.labelPlatformsInfo = data.label_platforms_info || {};  // 保存平台信息
                             // 重新初始化图标
                             this.$nextTick(() => {
                                 if (window.lucide) {

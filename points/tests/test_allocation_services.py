@@ -36,6 +36,12 @@ class AllocationServiceTests(TestCase):
         )
         self.tag_operation_patcher.start()
         self.addCleanup(self.tag_operation_patcher.stop)
+        self.contribution_patcher = patch(
+            "contributions.services.ContributionService.query_from_clickhouse",
+            side_effect=Exception("ClickHouse unavailable"),
+        )
+        self.contribution_patcher.start()
+        self.addCleanup(self.contribution_patcher.stop)
 
         # 创建测试用户
         self.user = User.objects.create_user(

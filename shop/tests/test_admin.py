@@ -5,8 +5,8 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from accounts.models import ShippingAddress
-from points.models import Tag
-from points.services import grant_points
+from points import services as points_services
+from points.models import PointType
 from shop.admin import RedemptionAdmin, ShopItemAdmin
 from shop.models import Redemption, ShopItem
 from shop.services import redeem_item
@@ -70,10 +70,8 @@ class RedemptionAdminTests(TestCase):
             email="test@example.com",
             password="password123",
         )
-        self.default_tag, _ = Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
-        )
+        # Grant gift points for redemption tests
+        points_services.grant_points(self.user, 10000, PointType.GIFT, "Test points")
 
     def test_has_shipping_address_in_list_display(self):
         """Test that has_shipping_address is shown in list display."""
@@ -108,13 +106,7 @@ class RedemptionAdminTests(TestCase):
             is_default=True,
         )
 
-        # Grant points and redeem
-        grant_points(
-            user=self.user,
-            points=200,
-            description="Test",
-            tag_names=["default"],
-        )
+        # Redeem item
         redemption = redeem_item(
             user=self.user,
             item_id=item.id,
@@ -135,13 +127,7 @@ class RedemptionAdminTests(TestCase):
             requires_shipping=False,
         )
 
-        # Grant points and redeem
-        grant_points(
-            user=self.user,
-            points=200,
-            description="Test",
-            tag_names=["default"],
-        )
+        # Redeem item
         redemption = redeem_item(user=self.user, item_id=item.id)
 
         # Test display method
@@ -168,13 +154,7 @@ class RedemptionAdminTests(TestCase):
             is_default=True,
         )
 
-        # Grant points and redeem
-        grant_points(
-            user=self.user,
-            points=200,
-            description="Test",
-            tag_names=["default"],
-        )
+        # Redeem item
         redemption = redeem_item(
             user=self.user,
             item_id=item.id,
@@ -201,13 +181,7 @@ class RedemptionAdminTests(TestCase):
             requires_shipping=False,
         )
 
-        # Grant points and redeem
-        grant_points(
-            user=self.user,
-            points=200,
-            description="Test",
-            tag_names=["default"],
-        )
+        # Redeem item
         redemption = redeem_item(user=self.user, item_id=item.id)
 
         # Test display method

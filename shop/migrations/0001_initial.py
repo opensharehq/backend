@@ -10,7 +10,6 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('points', '0004_add_slug_unique'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
@@ -26,7 +25,6 @@ class Migration(migrations.Migration):
                 ('is_active', models.BooleanField(default=True, verbose_name='是否上架')),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
-                ('allowed_tags', models.ManyToManyField(blank=True, help_text='如果为空，则任何积分都可兑换。如果不为空，则只有带这些标签的积分才能用于兑换。', to='points.tag', verbose_name='允许的积分标签')),
             ],
             options={
                 'verbose_name': '商城商品',
@@ -40,7 +38,6 @@ class Migration(migrations.Migration):
                 ('points_cost_at_redemption', models.PositiveIntegerField(verbose_name='兑换时积分成本')),
                 ('status', models.CharField(choices=[('PENDING', '处理中'), ('COMPLETED', '已完成'), ('CANCELLED', '已取消')], default='PENDING', max_length=10)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('transaction', models.OneToOneField(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='redemption', to='points.pointtransaction')),
                 ('user_profile', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='redemptions', to=settings.AUTH_USER_MODEL)),
                 ('item', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='redemptions', to='shop.shopitem')),
             ],

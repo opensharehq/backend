@@ -27,7 +27,6 @@ from social_django.models import UserSocialAuth
 
 from messages import services as inbox_services
 from messages.models import Message as InboxMessage
-from points.services import InsufficientPointsError
 from shop.models import Redemption, ShopItem
 from shop.services import RedemptionError, redeem_item
 
@@ -142,8 +141,11 @@ def sign_up_view(request):
 @login_required
 def profile_view(request):
     """Display user profile page."""
+    from points import services as points_services
+
     profile, _created = UserProfile.objects.get_or_create(user=request.user)
-    return render(request, "profile.html", {"profile": profile})
+    balance = points_services.get_detailed_balance(request.user)
+    return render(request, "profile.html", {"profile": profile, "balance": balance})
 
 
 def _get_profile_edit_forms(
@@ -467,12 +469,9 @@ def _build_asset_snapshot(user):
         UserSocialAuth.objects.filter(user=user).values_list("provider", flat=True)
     )
     return {
-        "total_points": user.total_points,
-        "point_source_count": user.point_sources.count(),
         "redemption_count": Redemption.objects.filter(user_profile=user).count(),
         "organization_count": user.organizations.count(),
         "social_providers": providers,
-        "withdrawal_count": user.withdrawal_requests.count(),
     }
 
 
@@ -504,11 +503,8 @@ def _send_merge_request_message(merge_request, request):
         f"来自 **{source.username}** ({source.email or '未留邮箱'}) 的账号合并申请。",
         "",
         "资产快照：",
-        f"- 积分：{snapshot.get('total_points', 0)}",
-        f"- 积分池：{snapshot.get('point_source_count', 0)}",
         f"- 兑换记录：{snapshot.get('redemption_count', 0)}",
         f"- 组织成员关系：{snapshot.get('organization_count', 0)}",
-        f"- 提现记录：{snapshot.get('withdrawal_count', 0)}",
         f"- 社交绑定：{', '.join(providers) if providers else '无'}",
         "",
         f"有效期：{merge_request.expires_at:%Y-%m-%d %H:%M}",
@@ -803,17 +799,13 @@ def password_reset_confirm_view(request, uidb64, token):
 def shop_list_view(request):
     """Display list of available shop items for redemption."""
     # Get all active items
-    items = ShopItem.objects.filter(is_active=True).prefetch_related("allowed_tags")
-
-    # Get user's total available points (uses cached value)
-    user_points = request.user.total_points
+    items = ShopItem.objects.filter(is_active=True)
 
     return render(
         request,
         "shop_list.html",
         {
             "items": items,
-            "user_points": user_points,
         },
     )
 
@@ -822,7 +814,7 @@ def shop_list_view(request):
 def redemption_list_view(request):
     """Display user's redemption history."""
     redemptions = Redemption.objects.filter(user_profile=request.user).select_related(
-        "item", "transaction"
+        "item"
     )
 
     return render(
@@ -875,27 +867,13 @@ def redeem_confirm_view(request, item_id):
         except RedemptionError as e:
             messages.error(request, f"兑换失败：{e}")
             return redirect("accounts:shop_list")
-        except InsufficientPointsError as e:
-            messages.error(request, f"积分不足：{e}")
-            return redirect("accounts:shop_list")
 
     # GET request - show confirmation page
-    # Use cached total_points for better performance
-    user_points = request.user.total_points
-
-    can_afford = user_points >= item.cost
-    remaining_after_redeem = user_points - item.cost if can_afford else 0
-    points_needed = item.cost - user_points if not can_afford else 0
-
     return render(
         request,
         "redeem_confirm.html",
         {
             "item": item,
-            "user_points": user_points,
-            "can_afford": can_afford,
-            "remaining_after_redeem": remaining_after_redeem,
-            "points_needed": points_needed,
             "requires_shipping": item.requires_shipping,
             "addresses": user_addresses,
             "default_address": default_address,
@@ -913,9 +891,6 @@ def public_profile_view(request, username):
     work_experiences = profile.work_experiences.all()
     educations = profile.educations.all()
 
-    # Get user's total points (public information)
-    total_points = user.total_points
-
     return render(
         request,
         "public_profile.html",
@@ -924,7 +899,6 @@ def public_profile_view(request, username):
             "profile": profile,
             "work_experiences": work_experiences,
             "educations": educations,
-            "total_points": total_points,
         },
     )
 
@@ -1169,6 +1143,8 @@ def organization_detail(request, slug):
         slug: Organization slug
 
     """
+    from points import services as points_services
+
     organization = get_object_or_404(Organization, slug=slug)
 
     # Check if user is a member
@@ -1188,12 +1164,16 @@ def organization_detail(request, slug):
     )
     memberships_count = len(memberships)
 
+    # Get organization points balance
+    balance = points_services.get_detailed_balance(organization)
+
     context = {
         "organization": organization,
         "membership": membership,
         "memberships": memberships,
         "memberships_count": memberships_count,
         "is_admin": membership.is_admin_or_owner(),
+        "balance": balance,
     }
 
     return render(request, "accounts/organization_detail.html", context)

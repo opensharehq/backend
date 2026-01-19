@@ -115,7 +115,7 @@ class ClickHouseDB:
         """
         client = cls.get_instance()
         try:
-            logger.debug("执行查询: %s, 参数: %s", query_sql, parameters)
+            logger.info("执行查询: %s, 参数: %s", query_sql, parameters)
             return client.query(
                 query_sql, parameters=parameters, settings=settings_dict
             )

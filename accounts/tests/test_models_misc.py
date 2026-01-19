@@ -3,12 +3,10 @@
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
-from django.core.cache import cache
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.utils import timezone
 
 from accounts.models import (
-    WITHDRAWABLE_POINTS_CACHE_KEY_TEMPLATE,
     AccountMergeLog,
     AccountMergeRequest,
     Organization,
@@ -23,24 +21,6 @@ class AccountModelMiscTests(TestCase):
         self.user = get_user_model().objects.create_user(
             username="cache-user", email="c@example.com", password="pwd123456"
         )
-
-    @override_settings(
-        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
-    )
-    def test_withdrawable_points_uses_cache_and_clear_points_cache(self):
-        """withdrawable_points should respect cache and clear_points_cache clears it."""
-        cache_key = WITHDRAWABLE_POINTS_CACHE_KEY_TEMPLATE.format(user_id=self.user.pk)
-        cache.set(cache_key, 99, None)
-
-        # Cached value should be returned without hitting DB
-        self.assertEqual(self.user.withdrawable_points, 99)
-
-        # Populate the attribute cache then ensure it is removed
-        self.user.__dict__["withdrawable_points"] = 42
-        self.user.clear_points_cache()
-
-        self.assertIsNone(cache.get(cache_key))
-        self.assertNotIn("withdrawable_points", self.user.__dict__)
 
     def test_organization_membership_str(self):
         """__str__ should include username, org name and role display."""

@@ -5,7 +5,8 @@ import logging
 from django.db import transaction
 from django.db.models import F
 
-from points.services import spend_points
+from points import services as points_services
+from points.models import PointType
 
 from .models import Redemption, ShopItem
 
@@ -17,7 +18,7 @@ class RedemptionError(Exception):
 
 
 @transaction.atomic
-def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:
+def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # noqa: PLR0912, PLR0915
     """
     执行商品兑换的核心业务逻辑.
 
@@ -33,12 +34,10 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:
 
     Raises:
         RedemptionError: 如果商品无效、下架、库存不足或缺少收货地址.
-        InsufficientPointsError: 如果用户积分不足(由 points 服务层抛出).
 
     """
     try:
-        # 使用 prefetch_related 优化查询，一次性获取商品及其关联的标签
-        item = ShopItem.objects.prefetch_related("allowed_tags").get(id=item_id)
+        item = ShopItem.objects.get(id=item_id)
     except ShopItem.DoesNotExist as err:
         msg = "商品不存在。"
         raise RedemptionError(msg) from err
@@ -92,46 +91,83 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:
             msg = "无效的收货地址。"
             raise RedemptionError(msg) from err
 
-    # 2. 确定积分标签约束
-    allowed_tags = list(item.allowed_tags.values_list("name", flat=True))
+    # 2. 积分验证和扣除
+    tag_slug = None
+    allowed_tags = list(item.allowed_tags.all())
 
-    # 3. 调用积分服务进行扣除 (核心交互)
-    # InsufficientPointsError 会在这里被抛出并传递到上层
-    # If there are allowed tags, use the first one as priority tag
-    # Note: Future enhancement could support multiple allowed tags
-    priority_tag = allowed_tags[0] if allowed_tags else None
+    if allowed_tags:
+        # 商品有标签限制，查找用户拥有的、商品允许的标签积分
+        for tag in allowed_tags:
+            balance = points_services.get_balance(user, PointType.GIFT, tag.slug)
+            if balance >= item.cost:
+                tag_slug = tag.slug
+                break
 
-    spend_transaction = spend_points(
-        user=user,
-        amount=item.cost,
-        description=f"兑换商品: {item.name}",
-        priority_tag_name=priority_tag,
-    )
+        if tag_slug is None:
+            msg = "您没有足够的符合条件的积分来兑换此商品"
+            logger.warning(
+                "兑换失败（标签积分不足）: 用户=%s (ID=%s), 商品=%s (ID=%s), 需要标签=%s",
+                user.username,
+                user.id,
+                item.name,
+                item.id,
+                [t.slug for t in allowed_tags],
+            )
+            raise RedemptionError(msg)
+    else:
+        # 无标签限制，使用任意礼物积分
+        balance = points_services.get_balance(user, PointType.GIFT)
+        if balance < item.cost:
+            msg = f"积分不足：需要 {item.cost}，当前可用 {balance}"
+            logger.warning(
+                "兑换失败（积分不足）: 用户=%s (ID=%s), 商品=%s (ID=%s), 需要=%s, 可用=%s",
+                user.username,
+                user.id,
+                item.name,
+                item.id,
+                item.cost,
+                balance,
+            )
+            raise RedemptionError(msg)
 
-    # 4. 创建兑换记录
+    # 扣除积分
+    try:
+        transactions = points_services.spend_points(
+            owner=user,
+            amount=item.cost,
+            point_type=PointType.GIFT,
+            description=f"兑换商品: {item.name}",
+            tag_slug=tag_slug,
+            reference_id=f"shop:item:{item.id}",
+            created_by=user,
+        )
+    except points_services.InsufficientPointsError as err:
+        msg = f"积分不足：{err}"
+        raise RedemptionError(msg) from err
+
+    # 3. 创建兑换记录
     redemption = Redemption.objects.create(
         user_profile=user,
         item=item,
-        points_cost_at_redemption=item.cost,  # 记录兑换时的价格
-        transaction=spend_transaction,
-        status=Redemption.StatusChoices.COMPLETED,  # 成功则直接完成
-        shipping_address=shipping_address,  # 关联收货地址（如果需要）
+        points_cost_at_redemption=item.cost,
+        status=Redemption.StatusChoices.COMPLETED,
+        shipping_address=shipping_address,
+        point_transaction=transactions[0] if transactions else None,
     )
 
-    # 5. 更新库存 (使用 F() 表达式防止并发问题)
+    # 4. 更新库存 (使用 F() 表达式防止并发问题)
     if item.stock is not None:
         item.stock = F("stock") - 1
         item.save(update_fields=["stock"])
 
     logger.info(
-        "商品兑换成功: 用户=%s (ID=%s), 商品=%s (ID=%s), 消费积分=%s, 兑换记录ID=%s, 优先标签=%s",
+        "商品兑换成功: 用户=%s (ID=%s), 商品=%s (ID=%s), 消费积分=%s, 兑换记录ID=%s",
         user.username,
         user.id,
         item.name,
         item.id,
         item.cost,
         redemption.id,
-        priority_tag or "无",
     )
 
     return redemption

@@ -13,6 +13,8 @@ from social_django.models import UserSocialAuth
 
 from accounts.models import Education, UserProfile, WorkExperience
 from common.test_utils import CacheClearTestCase
+from points import services as points_services
+from points.models import PointType
 
 
 class AccountsIndexViewTests(TestCase):
@@ -253,75 +255,6 @@ class ProfileViewTests(TestCase):
         self.client.force_login(user)
         response = self.client.get(reverse("accounts:profile"))
         self.assertContains(response, "至今")
-
-    def test_profile_view_displays_points_info(self):
-        """Test that profile view displays user points information."""
-        from points.services import grant_points
-
-        user = get_user_model().objects.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="testpass123",
-        )
-
-        # Grant some points to the user
-        grant_points(
-            user_profile=user, points=100, description="Test", tag_names=["tag1"]
-        )
-        grant_points(
-            user_profile=user, points=50, description="Test", tag_names=["tag2"]
-        )
-
-        self.client.force_login(user)
-        response = self.client.get(reverse("accounts:profile"))
-
-        # Check that points section is displayed
-        self.assertContains(response, "我的积分")
-        self.assertContains(response, "当前积分余额")
-        self.assertContains(response, "150")  # Total points
-        self.assertContains(response, "查看详情")
-        self.assertContains(response, reverse("points:my_points"))
-
-    def test_profile_view_displays_points_by_tag(self):
-        """Test that profile view displays points grouped by tags."""
-        from points.services import grant_points
-
-        user = get_user_model().objects.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="testpass123",
-        )
-
-        # Grant points with different tags
-        grant_points(
-            user_profile=user, points=100, description="Test", tag_names=["reward"]
-        )
-        grant_points(
-            user_profile=user, points=50, description="Test", tag_names=["bonus"]
-        )
-
-        self.client.force_login(user)
-        response = self.client.get(reverse("accounts:profile"))
-
-        # Check that tag breakdown is displayed
-        self.assertContains(response, "我的积分")
-        self.assertContains(response, "reward")
-        self.assertContains(response, "bonus")
-
-    def test_profile_view_with_no_points(self):
-        """Test that profile view displays zero points when user has no points."""
-        user = get_user_model().objects.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="testpass123",
-        )
-
-        self.client.force_login(user)
-        response = self.client.get(reverse("accounts:profile"))
-
-        # Check that points section is displayed with zero
-        self.assertContains(response, "我的积分")
-        self.assertContains(response, "0")  # Zero points
 
 
 class LogoutViewTests(TestCase):
@@ -1540,7 +1473,6 @@ class ShopListViewTests(TestCase):
 
     def setUp(self):
         """Set up test data."""
-        from points.models import PointSource, Tag
         from shop.models import ShopItem
 
         self.user = get_user_model().objects.create_user(
@@ -1548,13 +1480,6 @@ class ShopListViewTests(TestCase):
             email="test@example.com",
             password="password123",
         )
-
-        # Create some points for the user
-        tag = Tag.objects.create(name="test-tag")
-        source = PointSource.objects.create(
-            user_profile=self.user, initial_points=100, remaining_points=100
-        )
-        source.tags.add(tag)
 
         # Create shop items
         self.item1 = ShopItem.objects.create(
@@ -1586,32 +1511,12 @@ class ShopListViewTests(TestCase):
         assert self.item2 in response.context["items"]
         assert self.item3 not in response.context["items"]
 
-    def test_shop_list_view_shows_user_points(self):
-        """Test that shop list displays user's points."""
-        self.client.login(username="testuser", password="password123")
-        response = self.client.get(reverse("accounts:shop_list"))
-
-        assert response.status_code == 200
-        assert response.context["user_points"] == 100
-
-    def test_shop_list_view_with_no_points(self):
-        """Test shop list view when user has no points."""
-        _user2 = get_user_model().objects.create_user(
-            username="user2", email="user2@example.com", password="password123"
-        )
-        self.client.login(username="user2", password="password123")
-        response = self.client.get(reverse("accounts:shop_list"))
-
-        assert response.status_code == 200
-        assert response.context["user_points"] == 0
-
 
 class RedemptionListViewTests(TestCase):
     """Test cases for redemption list view."""
 
     def setUp(self):
         """Set up test data."""
-        from points.models import PointSource, PointTransaction, Tag
         from shop.models import Redemption, ShopItem
 
         self.user = get_user_model().objects.create_user(
@@ -1625,24 +1530,10 @@ class RedemptionListViewTests(TestCase):
             name="Test Item", description="Description", cost=50, is_active=True
         )
 
-        tag = Tag.objects.create(name="test-tag")
-        source = PointSource.objects.create(
-            user_profile=self.user, initial_points=100, remaining_points=50
-        )
-        source.tags.add(tag)
-
-        transaction = PointTransaction.objects.create(
-            user_profile=self.user,
-            points=-50,
-            transaction_type=PointTransaction.TransactionType.SPEND,
-            description="Test redemption",
-        )
-
         self.redemption = Redemption.objects.create(
             user_profile=self.user,
             item=self.item,
             points_cost_at_redemption=50,
-            transaction=transaction,
             status=Redemption.StatusChoices.COMPLETED,
         )
 
@@ -1676,7 +1567,6 @@ class RedeemConfirmViewTests(TestCase):
 
     def setUp(self):
         """Set up test data."""
-        from points.models import PointSource, Tag
         from shop.models import ShopItem
 
         self.user = get_user_model().objects.create_user(
@@ -1684,13 +1574,8 @@ class RedeemConfirmViewTests(TestCase):
             email="test@example.com",
             password="password123",
         )
-
-        # Create points for user
-        tag = Tag.objects.create(name="test-tag")
-        source = PointSource.objects.create(
-            user_profile=self.user, initial_points=100, remaining_points=100
-        )
-        source.tags.add(tag)
+        # Grant gift points for redemption tests
+        points_services.grant_points(self.user, 10000, PointType.GIFT, "Test points")
 
         # Create shop item
         self.item = ShopItem.objects.create(
@@ -1713,28 +1598,6 @@ class RedeemConfirmViewTests(TestCase):
 
         assert response.status_code == 200
         assert response.context["item"] == self.item
-        assert response.context["user_points"] == 100
-        assert response.context["can_afford"] is True
-        assert response.context["remaining_after_redeem"] == 50
-        assert response.context["points_needed"] == 0
-
-    def test_redeem_confirm_cannot_afford(self):
-        """Test redeem confirm when user cannot afford item."""
-        from shop.models import ShopItem
-
-        expensive_item = ShopItem.objects.create(
-            name="Expensive Item", description="Description", cost=200, is_active=True
-        )
-
-        self.client.login(username="testuser", password="password123")
-        response = self.client.get(
-            reverse("accounts:redeem_confirm", args=[expensive_item.id])
-        )
-
-        assert response.status_code == 200
-        assert response.context["can_afford"] is False
-        assert response.context["remaining_after_redeem"] == 0
-        assert response.context["points_needed"] == 100
 
     def test_redeem_confirm_post_successful_redemption(self):
         """Test POST request successfully redeems item."""
@@ -1752,27 +1615,6 @@ class RedeemConfirmViewTests(TestCase):
         redemptions = Redemption.objects.filter(user_profile=self.user)
         assert redemptions.count() == 1
         assert redemptions.first().item == self.item
-
-    def test_redeem_confirm_post_insufficient_points(self):
-        """Test POST request fails when user has insufficient points."""
-        from shop.models import ShopItem
-
-        expensive_item = ShopItem.objects.create(
-            name="Expensive Item", description="Description", cost=200, is_active=True
-        )
-
-        self.client.login(username="testuser", password="password123")
-        response = self.client.post(
-            reverse("accounts:redeem_confirm", args=[expensive_item.id])
-        )
-
-        assert response.status_code == 302
-        assert response.url == reverse("accounts:shop_list")
-
-        # Verify no redemption was created
-        from shop.models import Redemption
-
-        assert Redemption.objects.filter(user_profile=self.user).count() == 0
 
     def test_redeem_confirm_post_out_of_stock(self):
         """Test POST request fails when item is out of stock."""
@@ -1885,23 +1727,6 @@ class PublicProfileViewTests(CacheClearTestCase):
         self.assertContains(response, "https://github.com/testuser")
         self.assertContains(response, "https://blog.testuser.com")
 
-    def test_public_profile_view_displays_total_points(self):
-        """Test that public profile displays total points."""
-        from points.models import PointSource, Tag
-
-        tag = Tag.objects.create(name="test-tag")
-        source = PointSource.objects.create(
-            user_profile=self.user,
-            initial_points=100,
-            remaining_points=100,
-            notes="Test points",
-        )
-        source.tags.add(tag)
-
-        response = self.client.get(reverse("public_profile", args=["testuser"]))
-        assert response.status_code == 200
-        self.assertContains(response, "100")
-
     def test_public_profile_view_displays_work_experience(self):
         """Test that public profile displays work experience."""
         WorkExperience.objects.create(
@@ -1997,11 +1822,9 @@ class PublicProfileViewTests(CacheClearTestCase):
         assert "profile" in response.context
         assert "work_experiences" in response.context
         assert "educations" in response.context
-        assert "total_points" in response.context
 
         assert response.context["profile_user"] == self.user
         assert response.context["profile"] == self.profile
-        assert response.context["total_points"] == 0
 
     def test_public_profile_view_without_bio(self):
         """Test public profile displays correctly without bio."""

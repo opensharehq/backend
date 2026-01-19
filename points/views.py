@@ -1,423 +1,599 @@
-"""Views for the points app."""
+"""Views for points application."""
 
 import json
-from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
-from django.db.models import F, Sum
-from django.db.models.functions import TruncDate
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.views import View
+from django.views.decorators.csrf import csrf_exempt
+from django.views.generic import TemplateView
 
-from points.forms import WithdrawalRequestForm
-from points.models import PointSource, Tag, WithdrawalRequest
-from points.services import (
-    PointSourceNotWithdrawableError,
-    WithdrawalAmountError,
-    WithdrawalData,
-    WithdrawalError,
-    cancel_withdrawal,
-    create_withdrawal_request,
-)
+from accounts.models import Organization, OrganizationMembership
 
-TREND_DAYS = 30
-
-
-def _trend_date_range():
-    end_date = timezone.now().date()
-    start_date = end_date - timedelta(days=TREND_DAYS - 1)
-    return start_date, end_date
-
-
-def _build_trend_labels(start_date):
-    return [
-        (start_date + timedelta(days=offset)).strftime("%m/%d")
-        for offset in range(TREND_DAYS)
-    ]
-
-
-def _user_tags(user):
-    return Tag.objects.filter(point_sources__user=user).distinct().order_by("name")
-
-
-def _build_tag_trends(user, tags, start_date):
-    """
-    Build per-tag trend datasets via two aggregates and one balance lookup.
-
-    Keeps query count O(1) regardless of标签数量。
-    """
-    tag_ids = list(tags.values_list("id", flat=True))
-
-    earn_rows = (
-        user.point_sources.filter(created_at__date__gte=start_date, tags__in=tag_ids)
-        .annotate(
-            date=TruncDate("created_at"), tag_id=F("tags__id"), tag_name=F("tags__name")
-        )
-        .values("tag_id", "tag_name", "date")
-        .annotate(total=Sum("initial_points"))
-    )
-
-    spend_rows = (
-        user.point_transactions.filter(
-            created_at__date__gte=start_date,
-            transaction_type="SPEND",
-            consumed_sources__tags__in=tag_ids,
-        )
-        .annotate(
-            date=TruncDate("created_at"),
-            tag_id=F("consumed_sources__tags__id"),
-            tag_name=F("consumed_sources__tags__name"),
-        )
-        .values("tag_id", "tag_name", "date")
-        .annotate(total=Sum("points"))
-    )
-
-    balances = {
-        row["tags__id"]: row["total"]
-        for row in user.point_sources.filter(remaining_points__gt=0, tags__in=tag_ids)
-        .values("tags__id")
-        .annotate(total=Sum("remaining_points"))
-    }
-
-    daily = defaultdict(lambda: defaultdict(int))
-    tag_names = {}
-
-    for row in earn_rows:
-        daily[row["tag_id"]][row["date"]] += row["total"]
-        tag_names[row["tag_id"]] = row["tag_name"]
-
-    for row in spend_rows:
-        daily[row["tag_id"]][row["date"]] += row["total"]
-        tag_names[row["tag_id"]] = row["tag_name"]
-
-    datasets = []
-    for tag in tags:
-        tag_id = tag.id
-        tag_daily = daily.get(tag_id, {})
-        current_points = balances.get(tag_id, 0)
-        total_change = sum(tag_daily.values())
-        starting_points = current_points - total_change
-
-        cumulative = starting_points
-        trend_data = []
-        for offset in range(TREND_DAYS):
-            current_date = start_date + timedelta(days=offset)
-            cumulative += tag_daily.get(current_date, 0)
-            trend_data.append(cumulative)
-
-        if current_points > 0 or total_change != 0:
-            datasets.append({"label": tag.name, "data": trend_data})
-
-    return datasets
+from . import services
+from .allocation_services import AllocationService
+from .forms import WithdrawalRequestForm
+from .models import PointAllocation, PointSource, PointType, Tag, WithdrawalStatus
 
 
 @login_required
-def my_points(request):
-    """
-    Display user's points information.
-
-    Shows:
-    - Total points
-    - Points by tag
-    - Point sources
-    - Transaction history
-
-    """
+def user_wallet_view(request):
+    """用户钱包页面."""
     user = request.user
+    balance = services.get_detailed_balance(user)
 
-    # Get points by tag
-    points_by_tag = user.get_points_by_tag()
-
-    # Get active point sources (with remaining points)
-    active_sources = user.point_sources.filter(remaining_points__gt=0).order_by(
+    # 获取最近的交易记录
+    wallet = services.get_or_create_wallet(user)
+    recent_transactions = wallet.transactions.select_related("tag").order_by(
         "-created_at"
-    )
+    )[:10]
 
-    # Get transaction history with pagination
-    transactions = user.point_transactions.select_related().order_by("-created_at")
-    paginator = Paginator(transactions, 20)  # 20 transactions per page
+    context = {
+        "balance": balance,
+        "recent_transactions": recent_transactions,
+        "wallet": wallet,
+    }
+    return render(request, "points/user_wallet.html", context)
+
+
+@login_required
+def user_transactions_view(request):
+    """用户交易记录页面."""
+    user = request.user
+    wallet = services.get_or_create_wallet(user)
+
+    # 获取筛选参数
+    point_type = request.GET.get("point_type", "")
+    transaction_type = request.GET.get("transaction_type", "")
+
+    # 构建查询
+    transactions = wallet.transactions.select_related("tag").order_by("-created_at")
+
+    if point_type:
+        transactions = transactions.filter(point_type=point_type)
+
+    if transaction_type:
+        transactions = transactions.filter(transaction_type=transaction_type)
+
+    # 分页
+    paginator = Paginator(transactions, 20)
     page_number = request.GET.get("page")
     page_obj = paginator.get_page(page_number)
 
-    start_date, _ = _trend_date_range()
-    trend_labels = _build_trend_labels(start_date)
-    user_tags = _user_tags(user)
-    trend_datasets = _build_tag_trends(user, user_tags, start_date)
-
     context = {
-        "total_points": user.total_points,
-        "points_by_tag": points_by_tag,
-        "active_sources": active_sources,
         "page_obj": page_obj,
-        "trend_labels_json": json.dumps(trend_labels),
-        "trend_datasets_json": json.dumps(trend_datasets),
+        "point_type": point_type,
+        "transaction_type": transaction_type,
+        "point_types": PointType.choices,
+        "transaction_types": [
+            ("earn", "获取"),
+            ("spend", "消费"),
+            ("withdraw", "提现"),
+        ],
     }
-
-    return render(request, "points/my_points.html", context)
+    return render(request, "points/user_transactions.html", context)
 
 
 @login_required
-def withdrawal_create(request, point_source_id):
-    """
-    Create a withdrawal request for a specific point source.
+def create_withdrawal_view(request):
+    """创建提现申请页面."""
+    user = request.user
+    balance = services.get_detailed_balance(user)
 
-    Args:
-        request: HTTP request
-        point_source_id: ID of the point source to withdraw from
-
-    """
-    # Get the point source and verify it belongs to the user
-    point_source = get_object_or_404(PointSource, id=point_source_id, user=request.user)
-
-    # Check if the point source is withdrawable
-    if not point_source.is_withdrawable:
-        messages.error(request, "该积分来源不支持提现。")
-        return redirect("points:my_points")
-
-    # Check if there are remaining points
-    if point_source.remaining_points <= 0:
-        messages.error(request, "该积分来源没有可提现的积分。")
-        return redirect("points:my_points")
+    # 检查是否有待处理的提现申请
+    wallet = services.get_or_create_wallet(user)
+    has_pending = wallet.withdrawals.filter(status=WithdrawalStatus.PENDING).exists()
 
     if request.method == "POST":
-        form = WithdrawalRequestForm(request.POST, point_source=point_source)
+        form = WithdrawalRequestForm(user, request.POST)
         if form.is_valid():
             try:
-                withdrawal_data = WithdrawalData(
+                withdrawal = services.create_withdrawal_request(
+                    owner=user,
+                    amount=form.cleaned_data["amount"],
                     real_name=form.cleaned_data["real_name"],
-                    id_number=form.cleaned_data["id_number"],
-                    phone_number=form.cleaned_data["phone_number"],
+                    phone=form.cleaned_data["phone"],
                     bank_name=form.cleaned_data["bank_name"],
                     bank_account=form.cleaned_data["bank_account"],
                 )
-                withdrawal_request = create_withdrawal_request(
-                    user=request.user,
-                    point_source_id=point_source.id,
-                    points=form.cleaned_data["points"],
-                    withdrawal_data=withdrawal_data,
-                )
                 messages.success(
                     request,
-                    f"提现申请已提交！申请编号: #{withdrawal_request.id}，请等待审核。",
+                    f"提现申请已提交，申请金额: {withdrawal.amount}，请等待审核。",
                 )
                 return redirect("points:withdrawal_list")
             except (
-                PointSource.DoesNotExist,
-                PointSourceNotWithdrawableError,
-                WithdrawalAmountError,
+                services.InsufficientPointsError,
+                services.WithdrawalError,
             ) as e:
                 messages.error(request, str(e))
     else:
-        form = WithdrawalRequestForm(point_source=point_source)
+        form = WithdrawalRequestForm(user)
 
     context = {
         "form": form,
-        "point_source": point_source,
+        "balance": balance,
+        "has_pending": has_pending,
     }
-
-    return render(request, "points/withdrawal_create.html", context)
+    return render(request, "points/withdrawal_form.html", context)
 
 
 @login_required
-def withdrawal_list(request):
-    """
-    Display user's withdrawal requests.
+def withdrawal_list_view(request):
+    """提现记录列表页面."""
+    user = request.user
+    wallet = services.get_or_create_wallet(user)
 
-    Shows all withdrawal requests with their status.
+    withdrawals = wallet.withdrawals.order_by("-created_at")
 
-    """
-    # Get user's withdrawal requests with pagination
-    withdrawals = request.user.withdrawal_requests.select_related(
-        "point_source", "processed_by"
-    ).order_by("-created_at")
-
-    paginator = Paginator(withdrawals, 20)  # 20 requests per page
+    # 分页
+    paginator = Paginator(withdrawals, 20)
     page_number = request.GET.get("page")
     page_obj = paginator.get_page(page_number)
 
     context = {
         "page_obj": page_obj,
     }
-
     return render(request, "points/withdrawal_list.html", context)
 
 
 @login_required
-def withdrawal_detail(request, withdrawal_id):
-    """
-    Display details of a specific withdrawal request.
-
-    Args:
-        request: HTTP request
-        withdrawal_id: ID of the withdrawal request
-
-    """
-    withdrawal = get_object_or_404(
-        WithdrawalRequest.objects.select_related("point_source", "processed_by"),
-        id=withdrawal_id,
-        user=request.user,
-    )
-
-    context = {
-        "withdrawal": withdrawal,
-    }
-
-    return render(request, "points/withdrawal_detail.html", context)
-
-
-@login_required
-def withdrawal_cancel(request, withdrawal_id):
-    """
-    Cancel a pending withdrawal request.
-
-    Args:
-        request: HTTP request
-        withdrawal_id: ID of the withdrawal request
-
-    """
-    withdrawal = get_object_or_404(
-        WithdrawalRequest, id=withdrawal_id, user=request.user
-    )
-
+def cancel_withdrawal_view(request, pk):
+    """取消提现申请."""
     if request.method == "POST":
         try:
-            cancel_withdrawal(withdrawal)
-            messages.success(request, "提现申请已取消。")
-            return redirect("points:withdrawal_list")
-        except WithdrawalError as e:
+            services.cancel_withdrawal(pk, request.user)
+            messages.success(request, "提现申请已取消")
+        except services.WithdrawalError as e:
             messages.error(request, str(e))
-            return redirect("points:withdrawal_detail", withdrawal_id=withdrawal_id)
 
-    # If not POST, redirect to detail page
-    return redirect("points:withdrawal_detail", withdrawal_id=withdrawal_id)
+    return redirect("points:withdrawal_list")
 
 
 @login_required
-def recharge(request, point_source_id):
-    """
-    Display recharge page for a specific point source.
+def org_wallet_view(request, slug):
+    """组织钱包页面."""
+    org = get_object_or_404(Organization, slug=slug)
 
-    Args:
-        request: HTTP request
-        point_source_id: ID of the point source to recharge
+    # 检查用户是否是组织成员
+    membership = OrganizationMembership.objects.filter(
+        user=request.user,
+        organization=org,
+    ).first()
 
-    """
-    # Get the point source and verify it belongs to the user
-    point_source = get_object_or_404(PointSource, id=point_source_id, user=request.user)
+    if not membership:
+        messages.error(request, "您不是该组织的成员")
+        return redirect("homepage:index")
 
-    # Check if the point source allows recharge (based on settings or tags)
-    if not point_source.is_rechargeable:
-        messages.error(request, "该积分池不支持充值。")
-        return redirect("points:my_points")
+    balance = services.get_detailed_balance(org)
+
+    # 获取最近的交易记录
+    wallet = services.get_or_create_wallet(org)
+    recent_transactions = wallet.transactions.select_related("tag").order_by(
+        "-created_at"
+    )[:10]
 
     context = {
-        "point_source": point_source,
+        "org": org,
+        "membership": membership,
+        "balance": balance,
+        "recent_transactions": recent_transactions,
+        "wallet": wallet,
+        "can_withdraw": membership.is_admin_or_owner(),
     }
-
-    return render(request, "points/recharge.html", context)
+    return render(request, "points/organization_wallet.html", context)
 
 
 @login_required
-def batch_withdrawal(request):
-    """
-    Batch withdrawal page for multiple point sources.
+def org_transactions_view(request, slug):
+    """组织交易记录页面."""
+    org = get_object_or_404(Organization, slug=slug)
 
-    Shows all withdrawable point sources and allows user to create
-    multiple withdrawal requests at once.
+    # 检查用户是否是组织成员
+    membership = OrganizationMembership.objects.filter(
+        user=request.user,
+        organization=org,
+    ).first()
 
-    """
-    from points.forms import BatchWithdrawalInfoForm
-    from points.services import create_batch_withdrawal_requests
+    if not membership:
+        messages.error(request, "您不是该组织的成员")
+        return redirect("homepage:index")
 
-    # Get all withdrawable point sources for the user
-    withdrawable_sources = [
-        source
-        for source in request.user.point_sources.filter(
-            remaining_points__gt=0
-        ).prefetch_related("tags")
-        if source.is_withdrawable
-    ]
+    wallet = services.get_or_create_wallet(org)
 
-    # Check if user has any withdrawable sources
-    if not withdrawable_sources:
-        messages.warning(request, "您没有可提现的积分池。")
-        return redirect("points:my_points")
+    # 获取筛选参数
+    point_type = request.GET.get("point_type", "")
+    transaction_type = request.GET.get("transaction_type", "")
+
+    # 构建查询
+    transactions = wallet.transactions.select_related("tag").order_by("-created_at")
+
+    if point_type:
+        transactions = transactions.filter(point_type=point_type)
+
+    if transaction_type:
+        transactions = transactions.filter(transaction_type=transaction_type)
+
+    # 分页
+    paginator = Paginator(transactions, 20)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
+
+    context = {
+        "org": org,
+        "membership": membership,
+        "page_obj": page_obj,
+        "point_type": point_type,
+        "transaction_type": transaction_type,
+        "point_types": PointType.choices,
+        "transaction_types": [
+            ("earn", "获取"),
+            ("spend", "消费"),
+            ("withdraw", "提现"),
+        ],
+    }
+    return render(request, "points/organization_transactions.html", context)
+
+
+@login_required
+def org_create_withdrawal_view(request, slug):
+    """组织创建提现申请页面."""
+    org = get_object_or_404(Organization, slug=slug)
+
+    # 检查用户是否是组织管理员或所有者
+    membership = OrganizationMembership.objects.filter(
+        user=request.user,
+        organization=org,
+        role__in=[OrganizationMembership.Role.OWNER, OrganizationMembership.Role.ADMIN],
+    ).first()
+
+    if not membership:
+        messages.error(request, "只有组织管理员可以申请提现")
+        return redirect("points:org_wallet", slug=slug)
+
+    balance = services.get_detailed_balance(org)
+
+    # 检查是否有待处理的提现申请
+    wallet = services.get_or_create_wallet(org)
+    has_pending = wallet.withdrawals.filter(status=WithdrawalStatus.PENDING).exists()
 
     if request.method == "POST":
-        form = BatchWithdrawalInfoForm(request.POST)
-
-        # Collect withdrawal amounts from POST data
-        withdrawal_amounts = {}
-        has_any_amount = False
-
-        for source in withdrawable_sources:
-            field_name = f"points_{source.id}"
-            points_str = request.POST.get(field_name, "").strip()
-
-            if points_str:
-                try:
-                    points = int(points_str)
-                    if points > 0:
-                        # Validate amount doesn't exceed remaining points
-                        if points > source.remaining_points:
-                            messages.error(
-                                request,
-                                f"积分池 #{source.id} 的提现数量不能超过剩余积分 {source.remaining_points}。",
-                            )
-                            form.add_error(
-                                None,
-                                f"积分池 #{source.id} 的提现数量不能超过剩余积分。",
-                            )
-                        else:
-                            withdrawal_amounts[source.id] = points
-                            has_any_amount = True
-                except ValueError:
-                    messages.error(
-                        request, f"积分池 #{source.id} 的提现数量格式不正确。"
-                    )
-                    form.add_error(None, f"积分池 #{source.id} 的提现数量必须是整数。")
-
-        # Validate that at least one amount is provided
-        if not has_any_amount:
-            form.add_error(None, "至少需要为一个积分池设置提现数量。")
-
-        if form.is_valid() and has_any_amount:
+        form = WithdrawalRequestForm(org, request.POST)
+        if form.is_valid():
             try:
-                withdrawal_data = WithdrawalData(
+                withdrawal = services.create_withdrawal_request(
+                    owner=org,
+                    amount=form.cleaned_data["amount"],
                     real_name=form.cleaned_data["real_name"],
-                    id_number=form.cleaned_data["id_number"],
-                    phone_number=form.cleaned_data["phone_number"],
+                    phone=form.cleaned_data["phone"],
                     bank_name=form.cleaned_data["bank_name"],
                     bank_account=form.cleaned_data["bank_account"],
                 )
-
-                withdrawal_requests = create_batch_withdrawal_requests(
-                    user=request.user,
-                    withdrawal_amounts=withdrawal_amounts,
-                    withdrawal_data=withdrawal_data,
-                )
-
                 messages.success(
                     request,
-                    f"批量提现申请已提交！共创建了 {len(withdrawal_requests)} 个提现申请，总计 {sum(wr.points for wr in withdrawal_requests)} 积分。请等待审核。",
+                    f"提现申请已提交，申请金额: {withdrawal.amount}，请等待审核。",
                 )
-                return redirect("points:withdrawal_list")
+                return redirect("points:org_wallet", slug=slug)
             except (
-                PointSource.DoesNotExist,
-                PointSourceNotWithdrawableError,
-                WithdrawalAmountError,
-                WithdrawalError,
+                services.InsufficientPointsError,
+                services.WithdrawalError,
             ) as e:
                 messages.error(request, str(e))
     else:
-        form = BatchWithdrawalInfoForm()
+        form = WithdrawalRequestForm(org)
 
     context = {
+        "org": org,
         "form": form,
-        "withdrawable_sources": withdrawable_sources,
+        "balance": balance,
+        "has_pending": has_pending,
     }
+    return render(request, "points/organization_withdrawal_form.html", context)
 
-    return render(request, "points/batch_withdrawal.html", context)
+
+# ============================================================================
+# 积分分配相关视图
+# ============================================================================
+
+
+class PointAllocationConfigView(LoginRequiredMixin, TemplateView):
+    """积分分配配置页面."""
+
+    template_name = "points/allocation_config.html"
+
+    def get_context_data(self, **kwargs):
+        """Get context data."""
+        context = super().get_context_data(**kwargs)
+
+        user = self.request.user
+
+        # 获取用户可用的积分池（按类型和标签分组汇总）
+        user_pools = self._get_aggregated_pools(
+            wallet_content_type=ContentType.objects.get_for_model(user),
+            wallet_object_id=user.id,
+            wallet_owner=user,
+        )
+
+        # 获取用户所在组织的积分池（如果是 OWNER/ADMIN）
+        org_pools = []
+        memberships = user.organization_memberships.filter(role__in=["owner", "admin"])
+        for membership in memberships:
+            org_content_type = ContentType.objects.get_for_model(
+                membership.organization
+            )
+            pools = self._get_aggregated_pools(
+                wallet_content_type=org_content_type,
+                wallet_object_id=membership.organization.id,
+                wallet_owner=membership.organization,
+            )
+            org_pools.extend(pools)
+
+        context["user_pools"] = user_pools
+        context["org_pools"] = org_pools
+
+        return context
+
+    def _get_aggregated_pools(
+        self, wallet_content_type, wallet_object_id, wallet_owner=None
+    ):
+        """
+        获取按类型和标签分组汇总的积分池.
+
+        Args:
+            wallet_content_type: 钱包的 ContentType
+            wallet_object_id: 钱包所有者的 ID
+            wallet_owner: 钱包所有者对象 (用于组织池显示名称)
+
+        Returns:
+            list: 包含分组汇总后积分池信息的字典列表
+
+        """
+        from django.db.models import Min, Sum
+
+        from .models import Tag
+
+        # 查询所有有余额的 PointSource
+        sources = PointSource.objects.filter(
+            wallet__content_type=wallet_content_type,
+            wallet__object_id=wallet_object_id,
+            remaining_amount__gt=0,
+        )
+
+        # 按 point_type 和 tag 分组汇总
+        aggregated = (
+            sources.values("point_type", "tag")
+            .annotate(
+                total_remaining=Sum("remaining_amount"),
+                min_id=Min("id"),
+            )
+            .order_by("point_type", "tag")
+        )
+
+        # 构建结果列表
+        pools = []
+        for item in aggregated:
+            point_type = item["point_type"]
+            tag_id = item["tag"]
+            total_remaining = item["total_remaining"]
+
+            # 获取 tag 对象（如果有）
+            tag = Tag.objects.get(id=tag_id) if tag_id else None
+
+            # 构建虚拟的积分池对象（字典）
+            pool = {
+                "id": item["min_id"],
+                "point_type": point_type,
+                "get_point_type_display": dict(PointType.choices)[point_type],
+                "remaining_amount": total_remaining,
+                "tag": tag,
+                "wallet": {"owner": wallet_owner} if wallet_owner else None,
+            }
+            pools.append(pool)
+
+        return pools
+
+
+class PoolListAPIView(LoginRequiredMixin, View):
+    """API: 获取可用积分池列表."""
+
+    def get(self, request):
+        """Get available point pools."""
+        user = request.user
+
+        # 获取用户积分池
+        user_content_type = ContentType.objects.get_for_model(user)
+        user_pools = PointSource.objects.filter(
+            wallet__content_type=user_content_type,
+            wallet__object_id=user.id,
+            remaining_amount__gt=0,
+        ).select_related("tag")
+
+        # 获取组织积分池
+        org_pools = []
+        memberships = user.organization_memberships.filter(role__in=["owner", "admin"])
+        for membership in memberships:
+            org_content_type = ContentType.objects.get_for_model(
+                membership.organization
+            )
+            pools = PointSource.objects.filter(
+                wallet__content_type=org_content_type,
+                wallet__object_id=membership.organization.id,
+                remaining_amount__gt=0,
+            ).select_related("tag")
+            org_pools.extend(pools)
+
+        # 序列化数据
+        user_pools_data = [
+            {
+                "id": pool.id,
+                "type": pool.point_type,
+                "type_display": pool.get_point_type_display(),
+                "balance": pool.remaining_amount,
+                "tag": pool.tag.slug if pool.tag else None,
+                "tag_name": pool.tag.name if pool.tag else None,
+                "owner": "个人",
+            }
+            for pool in user_pools
+        ]
+
+        org_pools_data = [
+            {
+                "id": pool.id,
+                "type": pool.point_type,
+                "type_display": pool.get_point_type_display(),
+                "balance": pool.remaining_amount,
+                "tag": pool.tag.slug if pool.tag else None,
+                "tag_name": pool.tag.name if pool.tag else None,
+                "owner": str(pool.wallet.owner),
+            }
+            for pool in org_pools
+        ]
+
+        return JsonResponse(
+            {"user_pools": user_pools_data, "org_pools": org_pools_data}
+        )
+
+
+class TagListAPIView(LoginRequiredMixin, View):
+    """API: 获取标签列表."""
+
+    def get(self, request):
+        """Get tag list."""
+        tag_type = request.GET.get("type")  # org/repo/user
+        is_official = request.GET.get("official")  # true/false
+
+        tags = Tag.objects.all()
+
+        if tag_type:
+            tags = tags.filter(tag_type=tag_type)
+
+        if is_official is not None:
+            tags = tags.filter(is_official=is_official == "true")
+
+        # Future enhancement: include user/org private tags.
+
+        tags_data = [
+            {
+                "slug": tag.slug,
+                "name": tag.name,
+                "type": tag.tag_type,
+                "is_official": tag.is_official,
+                "entity_identifier": tag.entity_identifier,
+            }
+            for tag in tags
+        ]
+
+        return JsonResponse({"tags": tags_data})
+
+
+class ContributionPreviewAPIView(LoginRequiredMixin, View):
+    """API: 预览贡献度列表."""
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        """Dispatch."""
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request):
+        """Preview contributions."""
+        try:
+            from chdb import services as chdb_services
+
+            data = json.loads(request.body)
+
+            # 创建临时的 PointAllocation 对象
+            allocation = PointAllocation(
+                project_scope=data["project_scope"],
+                user_scope=data.get("user_scope"),
+                start_month=datetime.strptime(data["start_month"], "%Y-%m-%d").date(),
+                end_month=datetime.strptime(data["end_month"], "%Y-%m-%d").date(),
+                total_amount=data["total_amount"],
+                adjustment_ratio=data.get("adjustment_ratio", 1.0),
+                individual_adjustments=data.get("individual_adjustments", {}),
+            )
+
+            # 预览
+            preview = AllocationService.preview_allocation(allocation)
+
+            # 转换 Decimal 为 float 以便 JSON 序列化
+            for item in preview:
+                if "contribution_score" in item:
+                    item["contribution_score"] = float(item["contribution_score"])
+
+            # 查询标签平台信息（如果有项目标签）
+            label_platforms_info = {}
+            project_tags = data.get("project_scope", {}).get("tags", [])
+            if project_tags:
+                label_platforms_info = chdb_services.get_label_users(project_tags)
+
+            return JsonResponse(
+                {
+                    "contributions": preview,
+                    "label_platforms_info": label_platforms_info,
+                    "total_points": sum(c["adjusted_points"] for c in preview),
+                    "total_recipients": len(preview),
+                }
+            )
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=400)
+
+
+class AllocationExecuteAPIView(LoginRequiredMixin, View):
+    """API: 执行积分分配."""
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        """Dispatch."""
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request):
+        """Execute allocation."""
+        try:
+            data = json.loads(request.body)
+
+            # 创建 PointAllocation 记录
+            user_content_type = ContentType.objects.get_for_model(request.user)
+            allocation = PointAllocation.objects.create(
+                initiator_type=user_content_type,
+                initiator_id=request.user.id,
+                source_pool_id=data["pool_id"],
+                total_amount=data["total_amount"],
+                project_scope=data["project_scope"],
+                user_scope=data.get("user_scope"),
+                start_month=datetime.strptime(data["start_month"], "%Y-%m-%d").date(),
+                end_month=datetime.strptime(data["end_month"], "%Y-%m-%d").date(),
+                adjustment_ratio=data.get("adjustment_ratio", 1.0),
+                individual_adjustments=data.get("individual_adjustments", {}),
+            )
+
+            # 执行
+            result = AllocationService.execute_allocation(allocation)
+
+            return JsonResponse({"allocation_id": allocation.id, **result})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=400)
+
+
+class TagSearchAPIView(LoginRequiredMixin, View):
+    """API: 搜索标签 (ClickHouse opensource.labels 表)."""
+
+    def get(self, request):
+        """Search tags by keyword."""
+        from chdb import services as chdb_services
+
+        keyword = request.GET.get("q", "").strip()
+
+        if not keyword:
+            return JsonResponse({"tags": []})
+
+        try:
+            tags = chdb_services.search_tags(keyword)
+            return JsonResponse({"tags": tags})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)

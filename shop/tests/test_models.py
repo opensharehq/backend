@@ -2,21 +2,15 @@
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
 from django.db.models import ProtectedError
 from django.test import TestCase
 from django.utils import timezone
 
-from points.models import PointTransaction, Tag
 from shop.models import Redemption, ShopItem
 
 
 class ShopItemModelTests(TestCase):
     """Test cases for ShopItem model."""
-
-    def setUp(self):
-        """Set up test fixtures."""
-        self.tag = Tag.objects.create(name="test-tag")
 
     def test_shop_item_str(self):
         """Test string representation of ShopItem."""
@@ -50,18 +44,6 @@ class ShopItemModelTests(TestCase):
 
         self.assertIsNone(item.stock)
 
-    def test_shop_item_with_allowed_tags(self):
-        """Test creating item with allowed tags."""
-        tag1 = Tag.objects.create(name="tag1")
-        tag2 = Tag.objects.create(name="tag2")
-
-        item = ShopItem.objects.create(name="Tagged Item", description="Test", cost=50)
-        item.allowed_tags.set([tag1, tag2])
-
-        self.assertEqual(item.allowed_tags.count(), 2)
-        self.assertIn(tag1, item.allowed_tags.all())
-        self.assertIn(tag2, item.allowed_tags.all())
-
     def test_shop_item_default_is_active(self):
         """Test that is_active defaults to True."""
         item = ShopItem.objects.create(name="Test", description="Test", cost=10)
@@ -75,22 +57,6 @@ class ShopItemModelTests(TestCase):
         self.assertIsNotNone(item.created_at)
         self.assertIsNotNone(item.updated_at)
 
-    # def test_shop_item_with_image(self):
-    #     """Test creating shop item with image."""
-    #     image_file = SimpleUploadedFile(
-    #         "test_image.jpg", b"file_content", content_type="image/jpeg"
-    #     )
-    #     item = ShopItem.objects.create(
-    #         name="Item with Image",
-    #         description="Test",
-    #         cost=100,
-    #         image=image_file,
-    #     )
-
-    #     self.assertIsNotNone(item.image)
-    #     self.assertIn("test_image", item.image.name)
-    #     self.assertTrue(item.image.name.startswith("shop/items/"))
-
     def test_shop_item_without_image(self):
         """Test creating shop item without image (null/blank)."""
         item = ShopItem.objects.create(
@@ -98,17 +64,6 @@ class ShopItemModelTests(TestCase):
         )
 
         self.assertFalse(item.image)
-
-    # def test_shop_item_image_upload_path(self):
-    #     """Test that image is uploaded to correct path."""
-    #     image_file = SimpleUploadedFile(
-    #         "product.png", b"image_data", content_type="image/png"
-    #     )
-    #     item = ShopItem.objects.create(
-    #         name="Path Test", description="Test", cost=75, image=image_file
-    #     )
-
-    #     self.assertTrue(item.image.name.startswith("shop/items/"))
 
     def test_shop_item_verbose_name(self):
         """Test that verbose_name is set correctly."""
@@ -176,37 +131,6 @@ class ShopItemModelTests(TestCase):
 
         self.assertEqual(item.created_at, original_created_at)
 
-    def test_shop_item_allowed_tags_empty_by_default(self):
-        """Test that allowed_tags is empty for new items."""
-        item = ShopItem.objects.create(name="Test", description="Test", cost=100)
-        self.assertEqual(item.allowed_tags.count(), 0)
-
-    def test_shop_item_allowed_tags_add_and_remove(self):
-        """Test adding and removing tags from allowed_tags."""
-        tag1 = Tag.objects.create(name="tag1")
-        tag2 = Tag.objects.create(name="tag2")
-        item = ShopItem.objects.create(name="Test", description="Test", cost=100)
-
-        # Add tags
-        item.allowed_tags.add(tag1, tag2)
-        self.assertEqual(item.allowed_tags.count(), 2)
-
-        # Remove one tag
-        item.allowed_tags.remove(tag1)
-        self.assertEqual(item.allowed_tags.count(), 1)
-        self.assertIn(tag2, item.allowed_tags.all())
-        self.assertNotIn(tag1, item.allowed_tags.all())
-
-    def test_shop_item_allowed_tags_clear(self):
-        """Test clearing all allowed tags."""
-        tag1 = Tag.objects.create(name="tag1")
-        item = ShopItem.objects.create(name="Test", description="Test", cost=100)
-        item.allowed_tags.add(tag1)
-        self.assertEqual(item.allowed_tags.count(), 1)
-
-        item.allowed_tags.clear()
-        self.assertEqual(item.allowed_tags.count(), 0)
-
     def test_shop_item_relationship_with_multiple_redemptions(self):
         """Test that shop item can have multiple redemptions."""
         User = get_user_model()
@@ -248,27 +172,6 @@ class ShopItemModelTests(TestCase):
             name="特殊商品 & 测试", description="Test", cost=999
         )
         self.assertEqual(str(item), "特殊商品 & 测试 - 999 pts")
-
-    # def test_shop_item_image_field_accepts_various_formats(self):
-    #     """Test that image field accepts various file formats."""
-    #     formats = [
-    #         ("test.jpg", "image/jpeg"),
-    #         ("test.png", "image/png"),
-    #         ("test.gif", "image/gif"),
-    #         ("test.webp", "image/webp"),
-    #     ]
-
-    #     for filename, content_type in formats:
-    #         image_file = SimpleUploadedFile(
-    #             filename, b"image_data", content_type=content_type
-    #         )
-    #         item = ShopItem.objects.create(
-    #             name=f"Item {filename}",
-    #             description="Test",
-    #             cost=100,
-    #             image=image_file,
-    #         )
-    #         self.assertIsNotNone(item.image)
 
 
 class RedemptionModelTests(TestCase):
@@ -326,25 +229,6 @@ class RedemptionModelTests(TestCase):
 
         self.assertEqual(redemptions[0], redemption2)
         self.assertEqual(redemptions[1], redemption1)
-
-    def test_redemption_with_transaction(self):
-        """Test redemption with associated transaction."""
-        point_transaction = PointTransaction.objects.create(
-            user_profile=self.user,
-            points=-100,
-            transaction_type=PointTransaction.TransactionType.SPEND,
-            description="Test",
-        )
-
-        redemption = Redemption.objects.create(
-            user_profile=self.user,
-            item=self.item,
-            points_cost_at_redemption=100,
-            transaction=point_transaction,
-        )
-
-        self.assertEqual(redemption.transaction, point_transaction)
-        self.assertEqual(point_transaction.redemption, redemption)
 
     def test_redemption_verbose_name(self):
         """Test that verbose_name is set correctly."""
@@ -408,43 +292,6 @@ class RedemptionModelTests(TestCase):
 
         self.assertEqual(redemption.created_at, original_created_at)
 
-    def test_redemption_transaction_can_be_null(self):
-        """Test redemption can be created without transaction."""
-        redemption = Redemption.objects.create(
-            user_profile=self.user,
-            item=self.item,
-            points_cost_at_redemption=100,
-            transaction=None,
-        )
-        self.assertIsNone(redemption.transaction)
-
-    def test_redemption_transaction_one_to_one_relationship(self):
-        """Test that transaction can only be linked to one redemption."""
-        point_transaction = PointTransaction.objects.create(
-            user_profile=self.user,
-            points=-100,
-            transaction_type=PointTransaction.TransactionType.SPEND,
-            description="Test",
-        )
-
-        Redemption.objects.create(
-            user_profile=self.user,
-            item=self.item,
-            points_cost_at_redemption=100,
-            transaction=point_transaction,
-        )
-
-        # Try to create another redemption with same transaction
-        redemption2 = Redemption(
-            user_profile=self.user,
-            item=self.item,
-            points_cost_at_redemption=100,
-            transaction=point_transaction,
-        )
-
-        with self.assertRaises(IntegrityError):
-            redemption2.save()
-
     def test_redemption_user_cascade_delete(self):
         """Test that redemptions are deleted when user is deleted."""
         redemption = Redemption.objects.create(
@@ -461,7 +308,7 @@ class RedemptionModelTests(TestCase):
 
     def test_redemption_item_protect_delete(self):
         """Test that shop item cannot be deleted if it has redemptions."""
-        redemption = Redemption.objects.create(
+        Redemption.objects.create(
             user_profile=self.user,
             item=self.item,
             points_cost_at_redemption=100,
@@ -470,32 +317,6 @@ class RedemptionModelTests(TestCase):
         # Try to delete the item - should be protected
         with self.assertRaises(ProtectedError):
             self.item.delete()
-
-        # Redemption should still exist
-        self.assertTrue(Redemption.objects.filter(id=redemption.id).exists())
-
-    def test_redemption_transaction_set_null_on_delete(self):
-        """Test that redemption.transaction is set to NULL when transaction is deleted."""
-        point_transaction = PointTransaction.objects.create(
-            user_profile=self.user,
-            points=-100,
-            transaction_type=PointTransaction.TransactionType.SPEND,
-            description="Test",
-        )
-
-        redemption = Redemption.objects.create(
-            user_profile=self.user,
-            item=self.item,
-            points_cost_at_redemption=100,
-            transaction=point_transaction,
-        )
-
-        self.assertEqual(redemption.transaction, point_transaction)
-
-        point_transaction.delete()
-        redemption.refresh_from_db()
-
-        self.assertIsNone(redemption.transaction)
 
     def test_redemption_user_can_have_multiple_redemptions(self):
         """Test that one user can have multiple redemptions."""

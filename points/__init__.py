@@ -1,1 +1,1 @@
-"""Points app for managing user points and rewards system."""
+"""Points application for managing user and organization point systems."""

@@ -3,15 +3,9 @@
 from django.conf import settings
 from django.db import models
 
-from points.models import PointTransaction, Tag
-
 
 class ShopItem(models.Model):
-    """
-    商城商品模型.
-
-    新增了 allowed_tags 字段,用于实现带约束的积分兑换.
-    """
+    """商城商品模型."""
 
     name = models.CharField(max_length=100, verbose_name="商品名称")
     description = models.TextField(verbose_name="商品描述")
@@ -28,17 +22,19 @@ class ShopItem(models.Model):
         help_text="商品展示图片",
     )
 
-    allowed_tags = models.ManyToManyField(
-        Tag,
-        blank=True,
-        verbose_name="允许的积分标签",
-        help_text="如果为空，则任何积分都可兑换。如果不为空，则只有带这些标签的积分才能用于兑换。",
-    )
-
     requires_shipping = models.BooleanField(
         default=False,
         verbose_name="需要线下发货",
         help_text="如果选中，用户兑换时需要提供收货地址",
+    )
+
+    # 积分标签限制
+    allowed_tags = models.ManyToManyField(
+        "points.Tag",
+        blank=True,
+        related_name="shop_items",
+        verbose_name="允许的积分标签",
+        help_text="如果为空，任何礼物积分都可兑换；否则只有指定标签的积分可用",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -56,11 +52,7 @@ class ShopItem(models.Model):
 
 
 class Redemption(models.Model):
-    """
-    用户兑换记录.
-
-    与积分流水 (PointTransaction) 强关联,保证每一笔兑换都有据可查.
-    """
+    """用户兑换记录."""
 
     class StatusChoices(models.TextChoices):
         """Status choices for redemption."""
@@ -83,13 +75,6 @@ class Redemption(models.Model):
     status = models.CharField(
         max_length=10, choices=StatusChoices.choices, default=StatusChoices.PENDING
     )
-    transaction = models.OneToOneField(
-        PointTransaction,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="redemption",
-    )
     shipping_address = models.ForeignKey(
         "accounts.ShippingAddress",
         on_delete=models.SET_NULL,
@@ -98,6 +83,15 @@ class Redemption(models.Model):
         related_name="redemptions",
         verbose_name="收货地址",
         help_text="兑换时用户选择的收货地址（仅需要线下发货的商品）",
+    )
+    # 关联积分交易记录
+    point_transaction = models.OneToOneField(
+        "points.PointTransaction",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="redemption",
+        verbose_name="积分交易记录",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 

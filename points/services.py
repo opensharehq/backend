@@ -1,588 +1,683 @@
-"""积分系统的业务逻辑服务层, 提供积分发放和消费功能."""
+"""Service layer for points application business logic."""
 
 import logging
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections import defaultdict
 
-from django.contrib.auth import get_user_model
+from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
-from django.db.models import F, Q
-from django.utils.text import slugify
+from django.db.models import Sum
+from django.utils import timezone
 
-from .models import PointSource, PointTransaction, Tag, WithdrawalRequest
+from accounts.models import Organization, User
 
-User = get_user_model()
+from .models import (
+    PointSource,
+    PointTransaction,
+    PointType,
+    PointWallet,
+    Tag,
+    TransactionType,
+    WithdrawalRequest,
+    WithdrawalStatus,
+)
+
 logger = logging.getLogger(__name__)
 
 
-def _normalize_user(user: User | None = None, user_profile: User | None = None) -> User:
-    """Return a concrete user instance from legacy arguments."""
-    if user is None and user_profile is None:
-        msg = "必须提供 user 或 user_profile 参数。"
-        raise ValueError(msg)
-
-    if user is not None and user_profile is not None and user != user_profile:
-        msg = "user 与 user_profile 参数指向不同的用户。"
-        raise ValueError(msg)
-
-    return user or user_profile
-
-
-# 定义一个自定义异常，便于上层逻辑捕获
 class InsufficientPointsError(Exception):
-    """当用户积分不足时抛出此异常."""
-
-    pass
+    """积分不足异常."""
 
 
-@transaction.atomic
-def grant_points(
-    user: User | None = None,
-    *,
-    points: int,
-    description: str,
-    tag_names: Iterable[str] | None = None,
-    source_object=None,
-    **legacy_kwargs,
-) -> PointSource:
-    """
-    为用户发放积分.
-
-    这是一个原子操作.
-
-    Args:
-        user (User | None): 获得积分的用户 (兼容旧版参数名)。
-        points (int): 发放的积分数量, 必须为正数.
-        description (str): 积分来源描述, 将记录在流水中.
-        tag_names (Iterable[str] | None): 一个包含标签名称的集合. 如果标签不存在, 会自动创建.
-        source_object (models.Model, optional): 关联的源对象, 用于追溯.
-        **legacy_kwargs: 接受 legacy user_profile 参数.
-
-    Returns:
-        PointSource: 新创建的积分来源对象.
-
-    Raises:
-        ValueError: 如果 points 不是正数.
-
-    """
-    legacy_user_profile = legacy_kwargs.pop("user_profile", None)
-    if legacy_kwargs:
-        unexpected = ", ".join(sorted(legacy_kwargs))
-        msg = f"Unsupported legacy kwargs: {unexpected}"
-        raise TypeError(msg)
-
-    resolved_user = _normalize_user(user=user, user_profile=legacy_user_profile)
-
-    if not isinstance(points, int) or points <= 0:
-        msg = "发放的积分必须是正整数。"
-        raise ValueError(msg)
-
-    tag_names = list(tag_names or [])
-
-    # 1. 处理标签：获取或创建（Get or Create）
-    # 支持使用 name 或 slug 来查找标签
-    tags_to_add = []
-    for name_or_slug in tag_names:
-        # 先尝试通过 slug 或 name 查找
-        tag = Tag.objects.filter(Q(slug=name_or_slug) | Q(name=name_or_slug)).first()
-
-        if tag is None:
-            # 如果不存在，创建新标签（使用输入作为 name，生成 slug）
-            tag_slug = slugify(name_or_slug)
-            # 如果 slug 为空（如纯中文），使用原值
-            if not tag_slug:
-                tag_slug = name_or_slug
-            tag, _ = Tag.objects.get_or_create(
-                name=name_or_slug, defaults={"slug": tag_slug}
-            )
-
-        tags_to_add.append(tag)
-
-    # 2. 创建积分来源（积分桶）
-    new_source = PointSource.objects.create(
-        user=resolved_user,
-        initial_points=points,
-        remaining_points=points,
-    )
-    # 关联标签
-    new_source.tags.set(tags_to_add)
-
-    # 3. 记录积分流水（账本）
-    PointTransaction.objects.create(
-        user=resolved_user,
-        points=points,  # 正数表示增加
-        transaction_type=PointTransaction.TransactionType.EARN,
-        description=description,
-    )
-
-    logger.info(
-        "积分发放成功: 用户=%s (ID=%s), 积分=%s, 标签=%s, 描述=%s",
-        resolved_user.username,
-        resolved_user.id,
-        points,
-        tag_names,
-        description,
-    )
-
-    if hasattr(resolved_user, "clear_points_cache"):
-        resolved_user.clear_points_cache()
-
-    return new_source
-
-
-@transaction.atomic
-def spend_points(
-    user: User | None = None,
-    *,
-    amount: int,
-    description: str,
-    priority_tag_name: str | None = None,
-    **legacy_kwargs,
-) -> PointTransaction:
-    """
-    消费用户的积分.
-
-    这是一个原子操作, 并实现了优先扣除逻辑.
-
-    Args:
-        user (User | None): 消费积分的用户 (兼容旧版参数名)。
-        amount (int): 消费的积分数量, 必须为正数.
-        description (str): 消费描述, 将记录在流水中.
-        priority_tag_name (str | None, optional): 优先扣除的标签名称.
-        **legacy_kwargs: 接受 legacy user_profile 参数.
-
-    Returns:
-        PointTransaction: 新创建的消费流水对象.
-
-    Raises:
-        ValueError: 如果 amount 不是正数.
-        InsufficientPointsError: 如果用户总积分不足以消费.
-
-    """
-    legacy_user_profile = legacy_kwargs.pop("user_profile", None)
-    if legacy_kwargs:
-        unexpected = ", ".join(sorted(legacy_kwargs))
-        msg = f"Unsupported legacy kwargs: {unexpected}"
-        raise TypeError(msg)
-
-    resolved_user = _normalize_user(user=user, user_profile=legacy_user_profile)
-
-    if not isinstance(amount, int) or amount <= 0:
-        msg = "消费的积分必须是正整数。"
-        raise ValueError(msg)
-
-    active_sources = PointSource.objects.filter(
-        user=resolved_user, remaining_points__gt=0
-    ).select_for_update()
-    current_balance = sum(source.remaining_points for source in active_sources)
-    _ensure_sufficient_balance(resolved_user, amount, current_balance, description)
-
-    amount_to_deduct = amount
-    consumed_sources_list: list[PointSource] = []
-    consumed_ids: set[int] = set()
-
-    for filters in _deduction_conditions(priority_tag_name):
-        if amount_to_deduct <= 0:
-            break
-
-        queryset = (
-            PointSource.objects.filter(
-                user=resolved_user,
-                remaining_points__gt=0,
-                **filters,
-            )
-            .exclude(id__in=list(consumed_ids))
-            .order_by("created_at")
-        )
-
-        amount_to_deduct, consumed = _deduct_from_queryset(queryset, amount_to_deduct)
-        consumed_sources_list.extend(consumed)
-        consumed_ids.update(source.id for source in consumed)
-
-    if amount_to_deduct > 0:  # pragma: no cover
-        msg = "积分扣除逻辑异常：最终应扣除额度大于0。"
-        raise Exception(msg)
-
-    # 5. 创建消费流水记录
-    spend_transaction = PointTransaction.objects.create(
-        user=resolved_user,
-        points=-amount,  # 负数表示减少
-        transaction_type=PointTransaction.TransactionType.SPEND,
-        description=description,
-    )
-    # 关联此次消费涉及到的所有积分来源
-    spend_transaction.consumed_sources.set(consumed_sources_list)
-
-    logger.info(
-        "积分消费成功: 用户=%s (ID=%s), 消费=%s, 剩余=%s, 消费源数量=%s, 优先标签=%s, 描述=%s",
-        resolved_user.username,
-        resolved_user.id,
-        amount,
-        current_balance - amount,
-        len(consumed_sources_list),
-        priority_tag_name or "无",
-        description,
-    )
-
-    if hasattr(resolved_user, "clear_points_cache"):
-        resolved_user.clear_points_cache()
-
-    return spend_transaction
-
-
-def _deduct_from_queryset(queryset, needed):
-    """Deduct points from the provided queryset in FIFO order."""
-    consumed = []
-    for source in queryset.select_for_update():
-        if needed <= 0:
-            break
-
-        deduct_amount = min(source.remaining_points, needed)
-        source.remaining_points = F("remaining_points") - deduct_amount
-        source.save(update_fields=["remaining_points"])
-        consumed.append(source)
-        needed -= deduct_amount
-
-    return needed, consumed
-
-
-def _deduction_conditions(priority_tag_name: str | None):
-    """Yield successive deduction filters based on priority rules."""
-    if priority_tag_name:
-        yield {"tags__name": priority_tag_name}
-    yield {"tags__is_default": True}
-    yield {}
-
-
-def _ensure_sufficient_balance(user, amount, current_balance, description):
-    """Raise InsufficientPointsError when the balance is too low."""
-    if current_balance >= amount:
-        return
-
-    msg = f"积分不足。当前余额: {current_balance}, 需要: {amount}"
-    logger.warning(
-        "积分消费失败（余额不足）: 用户=%s (ID=%s), 需要=%s, 当前余额=%s, 描述=%s",
-        user.username,
-        user.id,
-        amount,
-        current_balance,
-        description,
-    )
-    raise InsufficientPointsError(msg)
+class InvalidPointOperationError(Exception):
+    """无效的积分操作异常."""
 
 
 class WithdrawalError(Exception):
-    """提现相关错误的基类."""
-
-    pass
+    """提现错误异常."""
 
 
-class PointSourceNotWithdrawableError(WithdrawalError):
-    """当积分来源不支持提现时抛出此异常."""
+def get_or_create_wallet(owner: User | Organization) -> PointWallet:
+    """
+    获取或创建积分钱包.
 
-    pass
+    Args:
+        owner: User 或 Organization 实例
+
+    Returns:
+        PointWallet: 积分钱包实例
+
+    """
+    content_type = ContentType.objects.get_for_model(owner)
+    wallet, created = PointWallet.objects.get_or_create(
+        content_type=content_type,
+        object_id=owner.pk,
+    )
+    if created:
+        logger.info(
+            "创建积分钱包: owner_type=%s, owner_id=%s, wallet_id=%s",
+            content_type.model,
+            owner.pk,
+            wallet.id,
+        )
+    return wallet
 
 
-class WithdrawalAmountError(WithdrawalError):
-    """当提现金额不合法时抛出此异常."""
+def get_balance(
+    owner: User | Organization,
+    point_type: str | None = None,
+    tag_slug: str | None = None,
+) -> int:
+    """
+    获取积分余额.
 
-    pass
+    Args:
+        owner: User 或 Organization 实例
+        point_type: 积分类型 (cash/gift), 为 None 时返回总余额
+        tag_slug: 标签别名, 仅对 gift 类型有效
+
+    Returns:
+        int: 积分余额
+
+    """
+    wallet = get_or_create_wallet(owner)
+
+    if point_type is None:
+        return wallet.get_total_balance()
+    elif point_type == PointType.CASH:
+        return wallet.get_cash_balance()
+    elif point_type == PointType.GIFT:
+        return wallet.get_gift_balance(tag_slug=tag_slug)
+    else:
+        msg = f"无效的积分类型: {point_type}"
+        raise InvalidPointOperationError(msg)
 
 
-@dataclass
-class WithdrawalData:
-    """提现申请数据."""
+def get_detailed_balance(owner: User | Organization) -> dict:
+    """
+    获取详细的积分余额信息.
 
-    real_name: str
-    id_number: str
-    phone_number: str
-    bank_name: str
-    bank_account: str
+    Args:
+        owner: User 或 Organization 实例
+
+    Returns:
+        dict: 包含 cash, gift, by_tag 的详细余额信息
+
+    """
+    wallet = get_or_create_wallet(owner)
+
+    # 获取现金积分
+    cash_balance = wallet.get_cash_balance()
+
+    # 获取礼物积分（按标签分组）
+    gift_sources = wallet.sources.filter(
+        point_type=PointType.GIFT,
+        remaining_amount__gt=0,
+    ).select_related("tag")
+
+    gift_total = 0
+    by_tag = defaultdict(int)
+    no_tag_total = 0
+
+    for source in gift_sources:
+        gift_total += source.remaining_amount
+        if source.tag:
+            by_tag[source.tag.slug] += source.remaining_amount
+        else:
+            no_tag_total += source.remaining_amount
+
+    return {
+        "total": cash_balance + gift_total,
+        "cash": cash_balance,
+        "gift": gift_total,
+        "gift_no_tag": no_tag_total,
+        "by_tag": dict(by_tag),
+    }
 
 
 @transaction.atomic
-def create_withdrawal_request(
-    user: User,
-    point_source_id: int,
-    points: int,
-    withdrawal_data: WithdrawalData,
+def grant_points(  # noqa: PLR0913
+    owner: User | Organization,
+    amount: int,
+    point_type: str,
+    reason: str,
+    *,
+    tag_slug: str | None = None,
+    expires_at=None,
+    reference_id: str = "",
+    created_by: User | None = None,
+) -> PointSource:
+    """
+    发放积分.
+
+    Args:
+        owner: User 或 Organization 实例
+        amount: 发放数量
+        point_type: 积分类型 (cash/gift)
+        reason: 发放原因
+        tag_slug: 标签别名(仅 gift 类型可用)
+        expires_at: 过期时间
+        reference_id: 关联ID
+        created_by: 创建者
+
+    Returns:
+        PointSource: 积分来源记录
+
+    Raises:
+        InvalidPointOperationError: 如果参数无效
+
+    """
+    if amount <= 0:
+        msg = "发放数量必须大于 0"
+        raise InvalidPointOperationError(msg)
+
+    if point_type not in [PointType.CASH, PointType.GIFT]:
+        msg = f"无效的积分类型: {point_type}"
+        raise InvalidPointOperationError(msg)
+
+    if tag_slug and point_type != PointType.GIFT:
+        msg = "只有礼物积分可以设置标签"
+        raise InvalidPointOperationError(msg)
+
+    wallet = get_or_create_wallet(owner)
+
+    # 获取标签
+    tag = None
+    if tag_slug:
+        try:
+            tag = Tag.objects.get(slug=tag_slug)
+        except Tag.DoesNotExist as err:
+            msg = f"标签不存在: {tag_slug}"
+            raise InvalidPointOperationError(msg) from err
+
+    # 创建积分来源
+    source = PointSource.objects.create(
+        wallet=wallet,
+        point_type=point_type,
+        tag=tag,
+        original_amount=amount,
+        remaining_amount=amount,
+        reason=reason,
+        reference_id=reference_id,
+        expires_at=expires_at,
+        created_by=created_by,
+    )
+
+    # 获取新余额
+    if point_type == PointType.CASH:
+        balance_after = wallet.get_cash_balance()
+    else:
+        balance_after = wallet.get_gift_balance()
+
+    # 创建交易记录
+    PointTransaction.objects.create(
+        wallet=wallet,
+        transaction_type=TransactionType.EARN,
+        point_type=point_type,
+        amount=amount,
+        balance_after=balance_after,
+        description=reason,
+        reference_id=reference_id,
+        source=source,
+        tag=tag,
+        created_by=created_by,
+    )
+
+    logger.info(
+        "发放积分成功: wallet_id=%s, type=%s, amount=%s, tag=%s, reason=%s",
+        wallet.id,
+        point_type,
+        amount,
+        tag_slug or "无",
+        reason,
+    )
+
+    return source
+
+
+def _get_available_balance(
+    wallet: PointWallet,
+    point_type: str,
+    tag_slug: str | None,
+    tag_is_null: bool,
+) -> int:
+    if tag_slug:
+        return wallet.get_gift_balance(tag_slug=tag_slug)
+    if point_type == PointType.GIFT and tag_is_null:
+        return (
+            wallet.sources.filter(
+                point_type=PointType.GIFT,
+                remaining_amount__gt=0,
+                tag__isnull=True,
+            ).aggregate(total=Sum("remaining_amount"))["total"]
+            or 0
+        )
+    if point_type == PointType.CASH:
+        return wallet.get_cash_balance()
+    return wallet.get_gift_balance()
+
+
+def _get_spend_sources_queryset(
+    wallet: PointWallet,
+    point_type: str,
+    tag_slug: str | None,
+    tag_is_null: bool,
+):
+    sources_queryset = wallet.sources.filter(
+        point_type=point_type,
+        remaining_amount__gt=0,
+    ).order_by("created_at")
+
+    if tag_slug:
+        return sources_queryset.filter(tag__slug=tag_slug)
+    if tag_is_null:
+        return sources_queryset.filter(tag__isnull=True)
+    return sources_queryset
+
+
+@transaction.atomic
+def spend_points(  # noqa: PLR0913
+    owner: User | Organization,
+    amount: int,
+    point_type: str,
+    description: str,
+    *,
+    tag_slug: str | None = None,
+    tag_is_null: bool = False,
+    reference_id: str = "",
+    created_by: User | None = None,
+) -> list[PointTransaction]:
+    """
+    消费积分(FIFO 方式).
+
+    Args:
+        owner: User 或 Organization 实例
+        amount: 消费数量
+        point_type: 积分类型 (cash/gift)
+        description: 消费描述
+        tag_slug: 标签别名(仅限使用特定标签的积分)
+        tag_is_null: 仅消费无标签礼物积分
+        reference_id: 关联ID
+        created_by: 创建者
+
+    Returns:
+        list[PointTransaction]: 交易记录列表
+
+    Raises:
+        InvalidPointOperationError: 如果参数无效
+        InsufficientPointsError: 如果积分不足
+
+    """
+    if amount <= 0:
+        msg = "消费数量必须大于 0"
+        raise InvalidPointOperationError(msg)
+
+    if point_type not in [PointType.CASH, PointType.GIFT]:
+        msg = f"无效的积分类型: {point_type}"
+        raise InvalidPointOperationError(msg)
+
+    wallet = get_or_create_wallet(owner)
+
+    # 获取可用余额
+    if tag_slug and tag_is_null:
+        msg = "tag_slug 与 tag_is_null 不能同时使用"
+        raise InvalidPointOperationError(msg)
+
+    if tag_slug and point_type != PointType.GIFT:
+        msg = "只有礼物积分可以按标签筛选"
+        raise InvalidPointOperationError(msg)
+
+    available = _get_available_balance(wallet, point_type, tag_slug, tag_is_null)
+
+    if available < amount:
+        msg = f"积分不足：需要 {amount}，可用 {available}"
+        raise InsufficientPointsError(msg)
+
+    # 获取可消费的积分来源（FIFO）
+    sources = list(
+        _get_spend_sources_queryset(
+            wallet, point_type, tag_slug, tag_is_null
+        ).select_for_update()
+    )
+
+    # 消费积分
+    remaining_to_spend = amount
+    transactions = []
+
+    for source in sources:
+        if remaining_to_spend <= 0:
+            break
+
+        spend_from_source = min(source.remaining_amount, remaining_to_spend)
+        source.remaining_amount -= spend_from_source
+        source.save(update_fields=["remaining_amount"])
+
+        remaining_to_spend -= spend_from_source
+
+        # 获取当前余额
+        if point_type == PointType.CASH:
+            balance_after = wallet.get_cash_balance()
+        else:
+            balance_after = wallet.get_gift_balance()
+
+        # 创建交易记录
+        txn = PointTransaction.objects.create(
+            wallet=wallet,
+            transaction_type=TransactionType.SPEND,
+            point_type=point_type,
+            amount=-spend_from_source,
+            balance_after=balance_after,
+            description=description,
+            reference_id=reference_id,
+            source=source,
+            tag=source.tag,
+            created_by=created_by,
+        )
+        transactions.append(txn)
+
+    logger.info(
+        "消费积分成功: wallet_id=%s, type=%s, amount=%s, tag=%s, description=%s",
+        wallet.id,
+        point_type,
+        amount,
+        tag_slug or "无",
+        description,
+    )
+
+    return transactions
+
+
+@transaction.atomic
+def create_withdrawal_request(  # noqa: PLR0913
+    owner: User | Organization,
+    amount: int,
+    real_name: str,
+    phone: str,
+    bank_name: str,
+    bank_account: str,
 ) -> WithdrawalRequest:
     """
     创建提现申请.
 
-    这是一个原子操作.
-
     Args:
-        user (User): 申请提现的用户。
-        point_source_id (int): 积分来源ID。
-        points (int): 提现积分数量。
-        withdrawal_data (WithdrawalData): 提现申请数据(姓名、身份证、银行信息等)。
+        owner: User 或 Organization 实例
+        amount: 提现金额
+        real_name: 真实姓名
+        phone: 联系电话
+        bank_name: 银行名称
+        bank_account: 银行账号
 
     Returns:
-        WithdrawalRequest: 新创建的提现申请对象。
+        WithdrawalRequest: 提现申请记录
 
     Raises:
-        PointSource.DoesNotExist: 如果积分来源不存在。
-        PointSourceNotWithdrawableError: 如果积分来源不支持提现。
-        WithdrawalAmountError: 如果提现金额不合法。
+        InsufficientPointsError: 如果现金积分不足
+        WithdrawalError: 如果有待处理的提现申请
 
     """
-    # 1. 验证积分来源
-    try:
-        point_source = PointSource.objects.select_for_update().get(
-            id=point_source_id, user=user
-        )
-    except PointSource.DoesNotExist as e:
-        logger.warning(
-            "提现申请失败（积分来源不存在）: 用户=%s (ID=%s), 积分来源ID=%s",
-            user.username,
-            user.id,
-            point_source_id,
-        )
-        msg = "积分来源不存在或不属于您。"
-        raise PointSource.DoesNotExist(msg) from e
+    if amount <= 0:
+        msg = "提现金额必须大于 0"
+        raise WithdrawalError(msg)
 
-    # 2. 验证是否可提现
-    if not point_source.is_withdrawable:
-        logger.warning(
-            "提现申请失败（积分来源不可提现）: 用户=%s (ID=%s), 积分来源ID=%s",
-            user.username,
-            user.id,
-            point_source_id,
-        )
-        msg = "该积分来源不支持提现。"
-        raise PointSourceNotWithdrawableError(msg)
+    wallet = get_or_create_wallet(owner)
 
-    # 3. 验证提现金额
-    if not isinstance(points, int) or points <= 0:
-        msg = "提现积分必须是正整数。"
-        raise WithdrawalAmountError(msg)
+    # 检查现金积分余额
+    available = wallet.get_cash_balance()
+    if available < amount:
+        msg = f"现金积分不足：需要 {amount}，可用 {available}"
+        raise InsufficientPointsError(msg)
 
-    if points > point_source.remaining_points:
-        msg = f"提现积分不能超过剩余积分。剩余积分: {point_source.remaining_points}, 申请提现: {points}"
-        logger.warning(
-            "提现申请失败（积分不足）: 用户=%s (ID=%s), 剩余=%s, 申请=%s",
-            user.username,
-            user.id,
-            point_source.remaining_points,
-            points,
-        )
-        raise WithdrawalAmountError(msg)
+    # 检查是否有待处理的提现申请
+    pending_withdrawals = wallet.withdrawals.filter(
+        status=WithdrawalStatus.PENDING
+    ).count()
+    if pending_withdrawals > 0:
+        msg = "您有待处理的提现申请，请等待处理完成后再申请"
+        raise WithdrawalError(msg)
 
-    # 4. 创建提现申请
-    withdrawal_request = WithdrawalRequest.objects.create(
-        user=user,
-        point_source=point_source,
-        points=points,
-        real_name=withdrawal_data.real_name,
-        id_number=withdrawal_data.id_number,
-        phone_number=withdrawal_data.phone_number,
-        bank_name=withdrawal_data.bank_name,
-        bank_account=withdrawal_data.bank_account,
+    # 创建提现申请
+    withdrawal = WithdrawalRequest.objects.create(
+        wallet=wallet,
+        amount=amount,
+        status=WithdrawalStatus.PENDING,
+        real_name=real_name,
+        phone=phone,
+        bank_name=bank_name,
+        bank_account=bank_account,
     )
 
     logger.info(
-        "提现申请创建成功: 用户=%s (ID=%s), 积分=%s, 申请ID=%s",
-        user.username,
-        user.id,
-        points,
-        withdrawal_request.id,
+        "创建提现申请: wallet_id=%s, amount=%s, withdrawal_id=%s",
+        wallet.id,
+        amount,
+        withdrawal.id,
     )
 
-    return withdrawal_request
+    return withdrawal
 
 
 @transaction.atomic
 def approve_withdrawal(
-    withdrawal_request: WithdrawalRequest, admin_user: User, admin_note: str = ""
-) -> PointTransaction:
+    withdrawal_id: int,
+    admin_user: User,
+    note: str = "",
+) -> WithdrawalRequest:
     """
-    批准提现申请并扣除相应积分.
-
-    将申请状态直接变为"已完成", 扣除积分并创建提现交易记录.
-
-    这是一个原子操作.
+    批准提现申请并扣除积分.
 
     Args:
-        withdrawal_request (WithdrawalRequest): 提现申请对象。
-        admin_user (User): 处理该申请的管理员。
-        admin_note (str, optional): 管理员备注。
+        withdrawal_id: 提现申请 ID
+        admin_user: 管理员用户
+        note: 管理员备注
 
     Returns:
-        PointTransaction: 提现交易记录。
+        WithdrawalRequest: 更新后的提现申请
 
     Raises:
-        WithdrawalError: 如果申请状态不是待处理。
-        InsufficientPointsError: 如果积分不足。
+        WithdrawalError: 如果提现申请状态无效
+        InsufficientPointsError: 如果现金积分不足
 
     """
-    from django.utils import timezone
+    try:
+        withdrawal = WithdrawalRequest.objects.select_for_update().get(id=withdrawal_id)
+    except WithdrawalRequest.DoesNotExist as err:
+        msg = f"提现申请不存在: {withdrawal_id}"
+        raise WithdrawalError(msg) from err
 
-    # 验证申请状态
-    if withdrawal_request.status != WithdrawalRequest.Status.PENDING:
-        msg = f"只能批准待处理状态的申请。当前状态: {withdrawal_request.get_status_display()}"
+    if withdrawal.status != WithdrawalStatus.PENDING:
+        msg = f"提现申请状态无效: {withdrawal.get_status_display()}"
         raise WithdrawalError(msg)
 
-    # 扣除积分（使用现有的 spend_points 服务）
-    transaction = spend_points(
-        user=withdrawal_request.user,
-        amount=withdrawal_request.points,
-        description=f"提现申请 #{withdrawal_request.id}",
+    wallet = withdrawal.wallet
+
+    # 检查余额
+    available = wallet.get_cash_balance()
+    if available < withdrawal.amount:
+        msg = f"现金积分不足：需要 {withdrawal.amount}，可用 {available}"
+        raise InsufficientPointsError(msg)
+
+    # 扣除积分
+    transactions = spend_points(
+        owner=wallet.owner,
+        amount=withdrawal.amount,
+        point_type=PointType.CASH,
+        description=f"提现申请 #{withdrawal.id}",
+        reference_id=f"withdrawal:{withdrawal.id}",
+        created_by=admin_user,
     )
 
-    # 更新交易类型为提现
-    transaction.transaction_type = PointTransaction.TransactionType.WITHDRAW
-    transaction.save(update_fields=["transaction_type"])
-
-    # 更新提现申请状态为已完成
-    withdrawal_request.status = WithdrawalRequest.Status.COMPLETED
-    withdrawal_request.processed_by = admin_user
-    withdrawal_request.processed_at = timezone.now()
-    withdrawal_request.admin_note = admin_note
-    withdrawal_request.save()
+    # 更新提现申请状态
+    withdrawal.status = WithdrawalStatus.APPROVED
+    withdrawal.admin_note = note
+    withdrawal.processed_by = admin_user
+    withdrawal.processed_at = timezone.now()
+    withdrawal.transaction = transactions[0] if transactions else None
+    withdrawal.save()
 
     logger.info(
-        "提现申请已完成: 申请ID=%s, 用户=%s (ID=%s), 积分=%s, 处理人=%s",
-        withdrawal_request.id,
-        withdrawal_request.user.username,
-        withdrawal_request.user.id,
-        withdrawal_request.points,
+        "批准提现申请: withdrawal_id=%s, admin=%s",
+        withdrawal.id,
         admin_user.username,
     )
 
-    return transaction
+    return withdrawal
+
+
+@transaction.atomic
+def complete_withdrawal(
+    withdrawal_id: int,
+    admin_user: User,
+    note: str = "",
+) -> WithdrawalRequest:
+    """
+    完成提现(打款后).
+
+    Args:
+        withdrawal_id: 提现申请 ID
+        admin_user: 管理员用户
+        note: 管理员备注
+
+    Returns:
+        WithdrawalRequest: 更新后的提现申请
+
+    Raises:
+        WithdrawalError: 如果提现申请状态无效
+
+    """
+    try:
+        withdrawal = WithdrawalRequest.objects.select_for_update().get(id=withdrawal_id)
+    except WithdrawalRequest.DoesNotExist as err:
+        msg = f"提现申请不存在: {withdrawal_id}"
+        raise WithdrawalError(msg) from err
+
+    if withdrawal.status != WithdrawalStatus.APPROVED:
+        msg = f"提现申请状态无效: {withdrawal.get_status_display()}"
+        raise WithdrawalError(msg)
+
+    withdrawal.status = WithdrawalStatus.COMPLETED
+    if note:
+        withdrawal.admin_note = f"{withdrawal.admin_note}\n{note}".strip()
+    withdrawal.processed_by = admin_user
+    withdrawal.processed_at = timezone.now()
+    withdrawal.save()
+
+    logger.info(
+        "完成提现: withdrawal_id=%s, admin=%s",
+        withdrawal.id,
+        admin_user.username,
+    )
+
+    return withdrawal
 
 
 @transaction.atomic
 def reject_withdrawal(
-    withdrawal_request: WithdrawalRequest, admin_user: User, admin_note: str = ""
-):
+    withdrawal_id: int,
+    admin_user: User,
+    reason: str,
+) -> WithdrawalRequest:
     """
     拒绝提现申请.
 
     Args:
-        withdrawal_request (WithdrawalRequest): 提现申请对象。
-        admin_user (User): 处理该申请的管理员。
-        admin_note (str, optional): 拒绝原因。
-
-    Raises:
-        WithdrawalError: 如果申请状态不是待处理。
-
-    """
-    from django.utils import timezone
-
-    # 验证申请状态
-    if withdrawal_request.status != WithdrawalRequest.Status.PENDING:
-        msg = f"只能拒绝待处理状态的申请。当前状态: {withdrawal_request.get_status_display()}"
-        raise WithdrawalError(msg)
-
-    # 更新申请状态
-    withdrawal_request.status = WithdrawalRequest.Status.REJECTED
-    withdrawal_request.processed_by = admin_user
-    withdrawal_request.processed_at = timezone.now()
-    withdrawal_request.admin_note = admin_note
-    withdrawal_request.save()
-
-    logger.info(
-        "提现申请已拒绝: 申请ID=%s, 用户=%s (ID=%s), 处理人=%s, 原因=%s",
-        withdrawal_request.id,
-        withdrawal_request.user.username,
-        withdrawal_request.user.id,
-        admin_user.username,
-        admin_note,
-    )
-
-
-@transaction.atomic
-def cancel_withdrawal(withdrawal_request: WithdrawalRequest):
-    """
-    用户取消提现申请.
-
-    Args:
-        withdrawal_request (WithdrawalRequest): 提现申请对象。
-
-    Raises:
-        WithdrawalError: 如果申请状态不是待处理。
-
-    """
-    from django.utils import timezone
-
-    # 验证申请状态
-    if withdrawal_request.status != WithdrawalRequest.Status.PENDING:
-        msg = f"只能取消待处理状态的申请。当前状态: {withdrawal_request.get_status_display()}"
-        raise WithdrawalError(msg)
-
-    # 更新申请状态
-    withdrawal_request.status = WithdrawalRequest.Status.CANCELLED
-    withdrawal_request.processed_at = timezone.now()
-    withdrawal_request.save()
-
-    logger.info(
-        "提现申请已取消: 申请ID=%s, 用户=%s (ID=%s)",
-        withdrawal_request.id,
-        withdrawal_request.user.username,
-        withdrawal_request.user.id,
-    )
-
-
-@transaction.atomic
-def create_batch_withdrawal_requests(
-    user: User,
-    withdrawal_amounts: dict[int, int],
-    withdrawal_data: WithdrawalData,
-) -> list[WithdrawalRequest]:
-    """
-    批量创建提现申请.
-
-    这是一个原子操作, 如果任何一个申请创建失败, 所有申请都会回滚。
-
-    Args:
-        user (User): 申请提现的用户。
-        withdrawal_amounts (dict[int, int]): 积分来源ID到提现数量的映射。
-        withdrawal_data (WithdrawalData): 提现申请数据(姓名、身份证、银行信息等)。
+        withdrawal_id: 提现申请 ID
+        admin_user: 管理员用户
+        reason: 拒绝原因
 
     Returns:
-        list[WithdrawalRequest]: 创建的提现申请列表。
+        WithdrawalRequest: 更新后的提现申请
 
     Raises:
-        PointSource.DoesNotExist: 如果任何积分来源不存在。
-        PointSourceNotWithdrawableError: 如果任何积分来源不支持提现。
-        WithdrawalAmountError: 如果任何提现金额不合法。
+        WithdrawalError: 如果提现申请状态无效
 
     """
-    # 验证至少有一个提现请求
-    if not withdrawal_amounts:
-        msg = "至少需要选择一个积分池进行提现。"
+    try:
+        withdrawal = WithdrawalRequest.objects.select_for_update().get(id=withdrawal_id)
+    except WithdrawalRequest.DoesNotExist as err:
+        msg = f"提现申请不存在: {withdrawal_id}"
+        raise WithdrawalError(msg) from err
+
+    if withdrawal.status != WithdrawalStatus.PENDING:
+        msg = f"提现申请状态无效: {withdrawal.get_status_display()}"
         raise WithdrawalError(msg)
 
-    withdrawal_requests = []
-
-    # 为每个积分池创建提现申请
-    for point_source_id, points in withdrawal_amounts.items():
-        # 跳过提现数量为0或None的项
-        if not points or points <= 0:
-            continue
-
-        # 创建单个提现申请
-        withdrawal_request = create_withdrawal_request(
-            user=user,
-            point_source_id=point_source_id,
-            points=points,
-            withdrawal_data=withdrawal_data,
-        )
-        withdrawal_requests.append(withdrawal_request)
-
-    # 验证至少创建了一个提现申请
-    if not withdrawal_requests:
-        msg = "至少需要为一个积分池设置提现数量。"
-        raise WithdrawalError(msg)
+    withdrawal.status = WithdrawalStatus.REJECTED
+    withdrawal.admin_note = reason
+    withdrawal.processed_by = admin_user
+    withdrawal.processed_at = timezone.now()
+    withdrawal.save()
 
     logger.info(
-        "批量提现申请创建成功: 用户=%s (ID=%s), 申请数量=%s, 总积分=%s",
-        user.username,
-        user.id,
-        len(withdrawal_requests),
-        sum(wr.points for wr in withdrawal_requests),
+        "拒绝提现申请: withdrawal_id=%s, admin=%s, reason=%s",
+        withdrawal.id,
+        admin_user.username,
+        reason,
     )
 
-    return withdrawal_requests
+    return withdrawal
+
+
+@transaction.atomic
+def cancel_withdrawal(
+    withdrawal_id: int,
+    user: User,
+) -> WithdrawalRequest:
+    """
+    取消提现申请(用户自行取消).
+
+    Args:
+        withdrawal_id: 提现申请 ID
+        user: 取消的用户
+
+    Returns:
+        WithdrawalRequest: 更新后的提现申请
+
+    Raises:
+        WithdrawalError: 如果提现申请状态无效或无权限
+
+    """
+    try:
+        withdrawal = WithdrawalRequest.objects.select_for_update().get(id=withdrawal_id)
+    except WithdrawalRequest.DoesNotExist as err:
+        msg = f"提现申请不存在: {withdrawal_id}"
+        raise WithdrawalError(msg) from err
+
+    # 验证权限
+    wallet = withdrawal.wallet
+    owner = wallet.owner
+
+    has_permission = False
+    if isinstance(owner, User) and owner.pk == user.pk:
+        has_permission = True
+    elif isinstance(owner, Organization):
+        # 检查用户是否是组织的管理员或所有者
+        from accounts.models import OrganizationMembership
+
+        membership = OrganizationMembership.objects.filter(
+            user=user,
+            organization=owner,
+            role__in=[
+                OrganizationMembership.Role.OWNER,
+                OrganizationMembership.Role.ADMIN,
+            ],
+        ).first()
+        if membership:
+            has_permission = True
+
+    if not has_permission:
+        msg = "您没有权限取消此提现申请"
+        raise WithdrawalError(msg)
+
+    if withdrawal.status != WithdrawalStatus.PENDING:
+        msg = f"只能取消待审核的提现申请，当前状态: {withdrawal.get_status_display()}"
+        raise WithdrawalError(msg)
+
+    withdrawal.status = WithdrawalStatus.CANCELLED
+    withdrawal.save()
+
+    logger.info(
+        "取消提现申请: withdrawal_id=%s, user=%s",
+        withdrawal.id,
+        user.username,
+    )
+
+    return withdrawal

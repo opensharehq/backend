@@ -36,7 +36,6 @@ class ShopItemAdmin(admin.ModelAdmin):
         "is_active",
         "requires_shipping",
         "has_image",
-        "display_tags",
         "redemption_count",
         "created_at",
         "updated_at",
@@ -46,10 +45,8 @@ class ShopItemAdmin(admin.ModelAdmin):
         "requires_shipping",
         "created_at",
         "updated_at",
-        "allowed_tags",
     )
     search_fields = ("name", "description")
-    filter_horizontal = ("allowed_tags",)
     readonly_fields = ("created_at", "updated_at", "redemption_count")
     ordering = ("-created_at",)
     date_hierarchy = "created_at"
@@ -66,13 +63,6 @@ class ShopItemAdmin(admin.ModelAdmin):
             "库存和状态",
             {
                 "fields": ("stock", "is_active", "requires_shipping"),
-            },
-        ),
-        (
-            "标签限制",
-            {
-                "fields": ("allowed_tags",),
-                "description": "如果为空，则任何积分都可兑换。如果不为空，则只有带这些标签的积分才能用于兑换。",
             },
         ),
         (
@@ -107,14 +97,6 @@ class ShopItemAdmin(admin.ModelAdmin):
         """Check if item has an image."""
         return bool(obj.image)
 
-    @admin.display(description="允许标签")
-    def display_tags(self, obj):
-        """Display allowed tags."""
-        tags = obj.allowed_tags.all()
-        if not tags:
-            return format_html('<span style="color: gray;">不限</span>')
-        return ", ".join([tag.name for tag in tags])
-
     @admin.display(description="兑换次数")
     def redemption_count(self, obj):
         """Display redemption count."""
@@ -132,7 +114,6 @@ class RedemptionAdmin(admin.ModelAdmin):
         "item",
         "points_cost_at_redemption",
         "status_display",
-        "has_transaction",
         "has_shipping_address",
         "created_at",
     )
@@ -144,7 +125,7 @@ class RedemptionAdmin(admin.ModelAdmin):
         "shipping_address__receiver_name",
         "shipping_address__phone",
     )
-    readonly_fields = ("created_at", "transaction", "shipping_address_display")
+    readonly_fields = ("created_at", "shipping_address_display")
     ordering = ("-created_at",)
     date_hierarchy = "created_at"
 
@@ -165,12 +146,6 @@ class RedemptionAdmin(admin.ModelAdmin):
             {
                 "fields": ("shipping_address", "shipping_address_display"),
                 "description": "如果商品需要线下发货，这里会显示用户选择的收货地址",
-            },
-        ),
-        (
-            "关联信息",
-            {
-                "fields": ("transaction",),
             },
         ),
         (
@@ -197,11 +172,6 @@ class RedemptionAdmin(admin.ModelAdmin):
             color,
             obj.get_status_display(),
         )
-
-    @admin.display(boolean=True, description="有交易记录")
-    def has_transaction(self, obj):
-        """Check if redemption has a transaction."""
-        return obj.transaction is not None
 
     @admin.display(boolean=True, description="有收货地址")
     def has_shipping_address(self, obj):

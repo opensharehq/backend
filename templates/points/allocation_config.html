@@ -1,0 +1,741 @@
+{% extends "horizontal_base.html" %}
+{% load static %}
+
+{% block title %}积分分配配置{% endblock title %}
+
+{% block extra_css %}
+    <style>
+        .step-card {
+            margin-bottom: 1.5rem;
+            transition: all 0.3s ease;
+        }
+        .step-card:hover {
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1);
+        }
+        .step-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem 1.5rem;
+            border-radius: 0.25rem 0.25rem 0 0;
+        }
+        .tag-badge {
+            display: inline-block;
+            padding: 0.35rem 0.75rem;
+            margin: 0.25rem;
+            border-radius: 1rem;
+            background: #e0e7ff;
+            color: #4338ca;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .tag-badge:hover {
+            background: #c7d2fe;
+        }
+        .tag-badge .remove-btn {
+            margin-left: 0.5rem;
+            cursor: pointer;
+            opacity: 0.7;
+        }
+        .tag-badge .remove-btn:hover {
+            opacity: 1;
+        }
+        .contributor-row {
+            transition: background 0.2s;
+        }
+        .contributor-row:hover {
+            background: #f9fafb;
+        }
+        .stats-card {
+            border-left: 4px solid;
+        }
+        .stats-card.success {
+            border-color: #10b981;
+        }
+        .stats-card.warning {
+            border-color: #f59e0b;
+        }
+        .stats-card.info {
+            border-color: #3b82f6;
+        }
+        .adjustment-input {
+            width: 100px;
+        }
+        .points-input {
+            width: 120px;
+        }
+        .search-results {
+            position: absolute;
+            z-index: 1000;
+            width: 100%;
+            max-height: 300px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 0.25rem;
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+            margin-top: 0.25rem;
+        }
+        .search-result-item {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.2s;
+        }
+        .search-result-item:hover {
+            background: #f8f9fa;
+        }
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+        [x-cloak] {
+            display: none !important;
+        }
+    </style>
+{% endblock extra_css %}
+
+{% block content %}
+    <div x-data="allocationConfigManager()" x-init="init()">
+        <!-- 页面标题 -->
+        <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+            <div>
+                <h4 class="mb-3 mb-md-0">积分分配配置</h4>
+                <p class="text-muted">根据贡献度向开源项目贡献者批量发放积分</p>
+            </div>
+        </div>
+        <!-- 步骤1: 积分池选择 -->
+        <div class="card step-card">
+            <div class="step-header">
+                <h5 class="mb-0">
+                    <i data-lucide="coins" class="me-2"></i>步骤 1: 选择积分池
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">积分池</label>
+                        <select class="form-select" x-model="config.poolId" @change="updatePoolInfo()">
+                            <option value="">-- 请选择积分池 --</option>
+                            {% if user_pools %}
+                                <optgroup label="个人积分池">
+                                    {% for pool in user_pools %}
+                                        <option value="{{ pool.id }}"
+                                                data-type="{{ pool.point_type }}"
+                                                data-balance="{{ pool.remaining_amount }}"
+                                                data-tag="{{ pool.tag.slug|default:'' }}">
+                                            {{ pool.get_point_type_display }}
+                                            {% if pool.tag %}({{ pool.tag.name }}){% endif %}
+                                            - 余额: {{ pool.remaining_amount }}
+                                        </option>
+                                    {% endfor %}
+                                </optgroup>
+                            {% endif %}
+                            {% if org_pools %}
+                                <optgroup label="组织积分池">
+                                    {% for pool in org_pools %}
+                                        <option value="{{ pool.id }}"
+                                                data-type="{{ pool.point_type }}"
+                                                data-balance="{{ pool.remaining_amount }}"
+                                                data-tag="{{ pool.tag.slug|default:'' }}">
+                                            {{ pool.wallet.owner }} - {{ pool.get_point_type_display }}
+                                            {% if pool.tag %}({{ pool.tag.name }}){% endif %}
+                                            - 余额: {{ pool.remaining_amount }}
+                                        </option>
+                                    {% endfor %}
+                                </optgroup>
+                            {% endif %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3" x-show="poolInfo.balance > 0">
+                        <label class="form-label">
+                            本次发放总量
+                            <span class="text-muted">(最大: <span x-text="poolInfo.balance"></span>)</span>
+                        </label>
+                        <input type="number"
+                               class="form-control"
+                               x-model.number="config.totalAmount"
+                               :max="poolInfo.balance"
+                               min="0"
+                               placeholder="请输入发放总量">
+                    </div>
+                </div>
+                <div class="alert alert-info" x-show="poolInfo.balance > 0">
+                    <i data-lucide="info" class="me-2"></i>
+                    <span>积分类型: <strong x-text="poolInfo.type"></strong></span>
+                    <span x-show="poolInfo.tag"> | 标签: <strong x-text="poolInfo.tag"></strong></span>
+                </div>
+            </div>
+        </div>
+        <!-- 步骤2: 项目范围 -->
+        <div class="card step-card">
+            <div class="step-header">
+                <h5 class="mb-0">
+                    <i data-lucide="folder" class="me-2"></i>步骤 2: 选择项目范围 (必选)
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-12 mb-3">
+                        <label class="form-label">搜索项目标签</label>
+                        <div class="position-relative">
+                            <div class="input-group">
+                                <input type="text"
+                                       class="form-control"
+                                       x-model="projectTagSearch"
+                                       @input.debounce.300ms="searchProjectTags()"
+                                       placeholder="输入关键词搜索项目 (如: vscode, react, linux)">
+                                <button class="btn btn-outline-secondary" type="button">
+                                    <i data-lucide="search"></i>
+                                </button>
+                            </div>
+                            <!-- 搜索结果下拉列表 -->
+                            <div class="search-results" x-show="projectTagSearchResults.length > 0" x-cloak>
+                                <template x-for="tag in projectTagSearchResults" :key="tag.id">
+                                    <div class="search-result-item" @click="selectProjectTag(tag)">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div class="flex-grow-1">
+                                                <strong x-text="tag.name"></strong>
+                                                <span class="badge bg-secondary ms-2" x-text="tag.platform"></span>
+                                                <span class="badge bg-info ms-1" x-text="tag.type"></span>
+                                            </div>
+                                            <small class="text-muted">
+                                                OpenRank: <span x-text="formatOpenRank(tag.openrank)"></span>
+                                            </small>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                        <small class="text-muted">提示: 输入关键词搜索项目，点击搜索结果添加标签</small>
+                    </div>
+                </div>
+                <div class="mb-3" x-show="config.projectScope.tags.length > 0">
+                    <label class="form-label">已选标签</label>
+                    <div>
+                        <template x-for="(tag, index) in config.projectScope.tags" :key="tag">
+                            <span class="tag-badge">
+                                <span x-text="tag"></span>
+                                <span class="remove-btn" @click="removeProjectTag(index)">×</span>
+                            </span>
+                        </template>
+                    </div>
+                </div>
+                <div class="mb-3" x-show="config.projectScope.tags.length >= 2">
+                    <label class="form-label">标签运算</label>
+                    <select class="form-select" x-model="config.projectScope.operation">
+                        <option value="AND">交集 (AND) - 同时属于所有标签</option>
+                        <option value="OR">并集 (OR) - 属于任一标签</option>
+                        <option value="NOT">差集 (NOT) - 第一个减去其他</option>
+                        <option value="XOR">对称差 (XOR) - 只属于一个标签</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <!-- 步骤3: 用户范围 (可选) -->
+        <div class="card step-card">
+            <div class="step-header">
+                <h5 class="mb-0">
+                    <i data-lucide="users" class="me-2"></i>步骤 3: 选择用户范围 (可选)
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="form-check mb-3">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           id="enableUserScope"
+                           x-model="enableUserScope">
+                    <label class="form-check-label" for="enableUserScope">
+                        启用用户范围筛选 (不启用则包含所有贡献者)
+                    </label>
+                </div>
+                <div x-show="enableUserScope">
+                    <div class="row">
+                        <div class="col-md-12 mb-3">
+                            <label class="form-label">添加用户标签</label>
+                            <div class="input-group">
+                                <input type="text"
+                                       class="form-control"
+                                       x-model="newUserTag"
+                                       placeholder="输入用户标签 slug"
+                                       @keyup.enter="addUserTag(newUserTag); newUserTag = ''">
+                                <button class="btn btn-primary"
+                                        type="button"
+                                        @click="addUserTag(newUserTag); newUserTag = ''">
+                                    <i data-lucide="plus" class="me-1"></i>添加
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3" x-show="userScopeTags.length > 0">
+                        <label class="form-label">已选标签</label>
+                        <div>
+                            <template x-for="(tag, index) in userScopeTags" :key="tag">
+                                <span class="tag-badge">
+                                    <span x-text="tag"></span>
+                                    <span class="remove-btn" @click="removeUserTag(index)">×</span>
+                                </span>
+                            </template>
+                        </div>
+                    </div>
+                    <div class="mb-3" x-show="userScopeTags.length >= 2">
+                        <label class="form-label">标签运算</label>
+                        <select class="form-select" x-model="userScopeOperation">
+                            <option value="AND">交集 (AND)</option>
+                            <option value="OR">并集 (OR)</option>
+                            <option value="NOT">差集 (NOT)</option>
+                            <option value="XOR">对称差 (XOR)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- 步骤4: 时间区间 -->
+        <div class="card step-card">
+            <div class="step-header">
+                <h5 class="mb-0">
+                    <i data-lucide="calendar" class="me-2"></i>步骤 4: 选择时间区间
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">起始月份</label>
+                        <input type="month"
+                               class="form-control"
+                               x-model="config.startMonth"
+                               min="2015-01"
+                               :max="maxMonth">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">结束月份</label>
+                        <input type="month"
+                               class="form-control"
+                               x-model="config.endMonth"
+                               :min="config.startMonth"
+                               :max="maxMonth">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- 预览按钮 -->
+        <div class="text-center mb-3">
+            <button class="btn btn-primary btn-lg"
+                    @click="previewContributions()"
+                    :disabled="!canPreview()">
+                <i data-lucide="eye" class="me-2"></i>预览贡献度列表
+            </button>
+        </div>
+        <!-- 加载状态 -->
+        <div class="text-center my-4" x-show="loading">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">加载中...</span>
+            </div>
+            <p class="mt-2 text-muted">正在加载贡献度数据...</p>
+        </div>
+        <!-- 贡献度列表 -->
+        <div class="card" x-show="contributions.length > 0 && !loading">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">贡献度列表</h5>
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="mb-0">全局调整比例:</label>
+                        <input type="number"
+                               class="form-control adjustment-input"
+                               x-model.number="config.adjustmentRatio"
+                               min="0"
+                               step="0.1"
+                               @input="applyGlobalAdjustment()">
+                    </div>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>用户</th>
+                                <th>状态</th>
+                                <th>贡献度</th>
+                                <th>计算积分</th>
+                                <th>调整后积分</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="contrib in contributions" :key="contrib.github_login">
+                                <tr class="contributor-row">
+                                    <td>
+                                        <div>
+                                            <strong x-text="contrib.github_login"></strong>
+                                            <br>
+                                            <small class="text-muted" x-text="contrib.email"></small>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="badge"
+                                              :class="contrib.is_registered ? 'bg-success' : 'bg-warning'"
+                                              x-text="contrib.is_registered ? '已注册' : '未注册'">
+                                        </span>
+                                    </td>
+                                    <td x-text="contrib.contribution_score.toFixed(2)"></td>
+                                    <td x-text="contrib.calculated_points"></td>
+                                    <td>
+                                        <input type="number"
+                                               class="form-control form-control-sm points-input"
+                                               :value="contrib.adjusted_points"
+                                               @input="updateIndividualAdjustment(contrib, $event.target.value)"
+                                               min="0">
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-secondary"
+                                                @click="resetIndividualAdjustment(contrib)">
+                                            重置
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer">
+                <!-- 统计卡片 -->
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <div class="card stats-card info">
+                            <div class="card-body">
+                                <h6 class="text-muted mb-2">总人数</h6>
+                                <h3 class="mb-0" x-text="contributions.length"></h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card stats-card success">
+                            <div class="card-body">
+                                <h6 class="text-muted mb-2">已注册</h6>
+                                <h3 class="mb-0" x-text="registeredCount"></h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card stats-card warning">
+                            <div class="card-body">
+                                <h6 class="text-muted mb-2">未注册</h6>
+                                <h3 class="mb-0" x-text="unregisteredCount"></h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card stats-card" :class="totalAdjustedPoints <= config.totalAmount ? 'success' : 'bg-danger text-white'">
+                            <div class="card-body">
+                                <h6 class="mb-2" :class="totalAdjustedPoints <= config.totalAmount ? 'text-muted' : ''">总积分</h6>
+                                <h3 class="mb-0" x-text="totalAdjustedPoints"></h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- 执行按钮 -->
+                <div class="text-end">
+                    <button class="btn btn-success btn-lg"
+                            @click="executeAllocation()"
+                            :disabled="!canExecute()">
+                        <i data-lucide="check-circle" class="me-2"></i>确认发放
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}
+
+{% block extra_js %}
+    <script>
+        function allocationConfigManager() {
+            return {
+                config: {
+                    poolId: '',
+                    totalAmount: 0,
+                    projectScope: {
+                        tags: [],
+                        operation: 'AND'
+                    },
+                    userScope: null,
+                    startMonth: '',
+                    endMonth: '',
+                    adjustmentRatio: 1.0,
+                    individualAdjustments: {}
+                },
+                poolInfo: {
+                    type: '',
+                    balance: 0,
+                    tag: ''
+                },
+                contributions: [],
+                maxMonth: '',
+                loading: false,
+                enableUserScope: false,
+                userScopeTags: [],
+                userScopeOperation: 'AND',
+                newProjectTag: '',
+                newUserTag: '',
+                projectTagSearch: '',           // 搜索关键词
+                projectTagSearchResults: [],    // 搜索结果
+                labelPlatformsInfo: {},         // opensource.labels 的平台信息
+
+                init() {
+                    // 计算最大可选月份（上个月）
+                    const now = new Date();
+                    now.setMonth(now.getMonth() - 1);
+                    this.maxMonth = now.toISOString().slice(0, 7);
+
+                    // 默认时间范围：上上月到上个月
+                    const lastMonth = new Date(now);
+                    lastMonth.setMonth(lastMonth.getMonth() - 1);
+                    this.config.startMonth = lastMonth.toISOString().slice(0, 7);
+                    this.config.endMonth = this.maxMonth;
+
+                    // 初始化 Lucide 图标
+                    if (window.lucide) {
+                        window.lucide.createIcons();
+                    }
+                },
+
+                updatePoolInfo() {
+                    const select = document.querySelector('select[x-model="config.poolId"]');
+                    const option = select.selectedOptions[0];
+                    if (option && option.value) {
+                        this.poolInfo = {
+                            type: option.dataset.type,
+                            balance: parseInt(option.dataset.balance),
+                            tag: option.dataset.tag
+                        };
+                        this.config.totalAmount = this.poolInfo.balance;
+                    }
+                },
+
+                addProjectTag(tag) {
+                    tag = tag.trim();
+                    if (tag && !this.config.projectScope.tags.includes(tag)) {
+                        this.config.projectScope.tags.push(tag);
+                    }
+                },
+
+                formatOpenRank(value) {
+                    const numericValue = Number(value);
+                    if (value === null || value === undefined || Number.isNaN(numericValue)) {
+                        return '-';
+                    }
+                    return numericValue.toFixed(2);
+                },
+
+                async searchProjectTags() {
+                    if (!this.projectTagSearch.trim()) {
+                        this.projectTagSearchResults = [];
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch(
+                            `/points/api/tags/search/?q=${encodeURIComponent(this.projectTagSearch)}`
+                        );
+                        const data = await response.json();
+                        this.projectTagSearchResults = data.tags || [];
+                    } catch (error) {
+                        console.error('搜索失败:', error);
+                        this.projectTagSearchResults = [];
+                    }
+                },
+
+                selectProjectTag(tag) {
+                    // 添加标签的 id (slug) 到已选列表
+                    if (!this.config.projectScope.tags.includes(tag.id)) {
+                        this.config.projectScope.tags.push(tag.id);
+                    }
+                    // 清空搜索
+                    this.projectTagSearch = '';
+                    this.projectTagSearchResults = [];
+                },
+
+                removeProjectTag(index) {
+                    this.config.projectScope.tags.splice(index, 1);
+                },
+
+                addUserTag(tag) {
+                    tag = tag.trim();
+                    if (tag && !this.userScopeTags.includes(tag)) {
+                        this.userScopeTags.push(tag);
+                    }
+                },
+
+                removeUserTag(index) {
+                    this.userScopeTags.splice(index, 1);
+                },
+
+                canPreview() {
+                    return this.config.poolId &&
+                           this.config.totalAmount > 0 &&
+                           this.config.projectScope.tags.length > 0 &&
+                           this.config.startMonth &&
+                           this.config.endMonth;
+                },
+
+                async previewContributions() {
+                    this.loading = true;
+
+                    // 构建用户范围
+                    const userScope = this.enableUserScope && this.userScopeTags.length > 0
+                        ? {
+                            tags: this.userScopeTags,
+                            operation: this.userScopeOperation
+                        }
+                        : null;
+
+                    try {
+                        const response = await fetch('{% url "points:api_contribution_preview" %}', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': this.getCsrfToken()
+                            },
+                            body: JSON.stringify({
+                                project_scope: this.config.projectScope,
+                                user_scope: userScope,
+                                start_month: this.config.startMonth + '-01',
+                                end_month: this.config.endMonth + '-01',
+                                total_amount: this.config.totalAmount,
+                                adjustment_ratio: this.config.adjustmentRatio,
+                                individual_adjustments: this.config.individualAdjustments
+                            })
+                        });
+
+                        const data = await response.json();
+
+                        if (response.ok) {
+                            this.contributions = data.contributions;
+                            this.labelPlatformsInfo = data.label_platforms_info || {};  // 保存平台信息
+                            // 重新初始化图标
+                            this.$nextTick(() => {
+                                if (window.lucide) {
+                                    window.lucide.createIcons();
+                                }
+                            });
+                        } else {
+                            alert('预览失败: ' + (data.error || '未知错误'));
+                        }
+                    } catch (error) {
+                        alert('预览失败: ' + error.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                applyGlobalAdjustment() {
+                    // 重新计算所有贡献者的调整后积分
+                    this.contributions.forEach(contrib => {
+                        if (!this.config.individualAdjustments[contrib.github_login]) {
+                            contrib.adjusted_points = Math.floor(
+                                contrib.calculated_points * this.config.adjustmentRatio
+                            );
+                        }
+                    });
+                },
+
+                updateIndividualAdjustment(contrib, value) {
+                    const amount = parseInt(value) || 0;
+                    contrib.adjusted_points = amount;
+                    this.config.individualAdjustments[contrib.github_login] = amount;
+                },
+
+                resetIndividualAdjustment(contrib) {
+                    delete this.config.individualAdjustments[contrib.github_login];
+                    contrib.adjusted_points = Math.floor(
+                        contrib.calculated_points * this.config.adjustmentRatio
+                    );
+                },
+
+                get totalAdjustedPoints() {
+                    return this.contributions.reduce(
+                        (sum, c) => sum + c.adjusted_points,
+                        0
+                    );
+                },
+
+                get registeredCount() {
+                    return this.contributions.filter(c => c.is_registered).length;
+                },
+
+                get unregisteredCount() {
+                    return this.contributions.filter(c => !c.is_registered).length;
+                },
+
+                canExecute() {
+                    return this.contributions.length > 0 &&
+                           this.totalAdjustedPoints <= this.config.totalAmount;
+                },
+
+                async executeAllocation() {
+                    if (!confirm('确认发放积分？此操作不可撤销。\n\n' +
+                                 `总人数: ${this.contributions.length}\n` +
+                                 `总积分: ${this.totalAdjustedPoints}\n` +
+                                 `已注册: ${this.registeredCount} 人\n` +
+                                 `未注册: ${this.unregisteredCount} 人`)) {
+                        return;
+                    }
+
+                    this.loading = true;
+
+                    // 构建用户范围
+                    const userScope = this.enableUserScope && this.userScopeTags.length > 0
+                        ? {
+                            tags: this.userScopeTags,
+                            operation: this.userScopeOperation
+                        }
+                        : null;
+
+                    try {
+                        const response = await fetch('{% url "points:api_allocation_execute" %}', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': this.getCsrfToken()
+                            },
+                            body: JSON.stringify({
+                                pool_id: this.config.poolId,
+                                total_amount: this.config.totalAmount,
+                                project_scope: this.config.projectScope,
+                                user_scope: userScope,
+                                start_month: this.config.startMonth + '-01',
+                                end_month: this.config.endMonth + '-01',
+                                adjustment_ratio: this.config.adjustmentRatio,
+                                individual_adjustments: this.config.individualAdjustments
+                            })
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok) {
+                            alert(`发放成功！\n\n` +
+                                  `成功: ${result.success} 人\n` +
+                                  `待领取: ${result.pending} 人\n` +
+                                  `失败: ${result.failed} 人\n` +
+                                  `总积分: ${result.total_points}`);
+
+                            // 重定向到钱包页面
+                            window.location.href = '{% url "points:user_wallet" %}';
+                        } else {
+                            alert('发放失败: ' + (result.error || '未知错误'));
+                        }
+                    } catch (error) {
+                        alert('发放失败: ' + error.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                getCsrfToken() {
+                    return document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
+                           document.querySelector('input[name="csrftoken"]')?.value ||
+                           '';
+                }
+            }
+        }
+    </script>
+{% endblock extra_js %}

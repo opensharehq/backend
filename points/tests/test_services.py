@@ -1,1337 +1,570 @@
-"""Tests for points service layer."""
+"""Tests for points services."""
 
-from django.contrib.auth import get_user_model
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
+from django.utils import timezone
 
-from points.models import PointSource, PointTransaction, Tag
-from points.services import (
-    InsufficientPointsError,
-    PointSourceNotWithdrawableError,
-    WithdrawalAmountError,
-    WithdrawalData,
-    WithdrawalError,
-    _normalize_user,
-    approve_withdrawal,
-    cancel_withdrawal,
-    create_withdrawal_request,
-    grant_points,
-    reject_withdrawal,
-    spend_points,
+from accounts.models import Organization, OrganizationMembership, User
+from points import services
+from points.models import (
+    PointTransaction,
+    PointType,
+    Tag,
+    TransactionType,
+    WithdrawalStatus,
 )
 
 
-class NormalizeUserTests(TestCase):
-    """Validate the user normalization helper."""
+class GetOrCreateWalletTests(TestCase):
+    """Tests for get_or_create_wallet function."""
 
-    def setUp(self):
-        """Create users for normalization scenarios."""
-        self.user = get_user_model().objects.create_user(
-            username="normalize-user", email="norm@example.com", password="password123"
-        )
-        self.other_user = get_user_model().objects.create_user(
-            username="other-user", email="other@example.com", password="password123"
-        )
+    def test_creates_wallet_for_user(self):
+        """Test creating wallet for user."""
+        user = User.objects.create_user(username="testuser", password="testpass")
+        wallet = services.get_or_create_wallet(user)
 
-    def test_normalize_user_requires_arguments(self):
-        """_normalize_user raises when both arguments are empty."""
-        with self.assertRaisesMessage(
-            ValueError, "必须提供 user 或 user_profile 参数。"
-        ):
-            _normalize_user()
+        self.assertIsNotNone(wallet)
+        self.assertEqual(wallet.owner, user)
 
-    def test_normalize_user_rejects_mismatched_arguments(self):
-        """_normalize_user rejects conflicting user references."""
-        with self.assertRaisesMessage(
-            ValueError, "user 与 user_profile 参数指向不同的用户。"
-        ):
-            _normalize_user(user=self.user, user_profile=self.other_user)
+    def test_creates_wallet_for_organization(self):
+        """Test creating wallet for organization."""
+        org = Organization.objects.create(name="Test Org", slug="test-org")
+        wallet = services.get_or_create_wallet(org)
+
+        self.assertIsNotNone(wallet)
+        self.assertEqual(wallet.owner, org)
+
+    def test_returns_existing_wallet(self):
+        """Test that existing wallet is returned."""
+        user = User.objects.create_user(username="testuser", password="testpass")
+        wallet1 = services.get_or_create_wallet(user)
+        wallet2 = services.get_or_create_wallet(user)
+
+        self.assertEqual(wallet1.id, wallet2.id)
 
 
-class GrantPointsTests(TestCase):
-    """Test cases for grant_points service function."""
+class GetBalanceTests(TestCase):
+    """Tests for get_balance function."""
 
     def setUp(self):
         """Set up test fixtures."""
-        self.user = get_user_model().objects.create_user(
-            username="testuser", email="test@example.com", password="password123"
+        self.user = User.objects.create_user(username="testuser", password="testpass")
+        self.tag = Tag.objects.create(name="活动", slug="event")
+
+    def test_get_total_balance_empty(self):
+        """Test getting total balance when empty."""
+        balance = services.get_balance(self.user)
+        self.assertEqual(balance, 0)
+
+    def test_get_cash_balance(self):
+        """Test getting cash balance."""
+        services.grant_points(self.user, 100, PointType.CASH, "Test")
+        balance = services.get_balance(self.user, PointType.CASH)
+        self.assertEqual(balance, 100)
+
+    def test_get_gift_balance(self):
+        """Test getting gift balance."""
+        services.grant_points(self.user, 50, PointType.GIFT, "Test")
+        balance = services.get_balance(self.user, PointType.GIFT)
+        self.assertEqual(balance, 50)
+
+    def test_get_gift_balance_with_tag(self):
+        """Test getting gift balance filtered by tag."""
+        services.grant_points(
+            self.user, 100, PointType.GIFT, "Event reward", tag_slug="event"
+        )
+        services.grant_points(self.user, 50, PointType.GIFT, "General")
+
+        total_gift = services.get_balance(self.user, PointType.GIFT)
+        event_gift = services.get_balance(self.user, PointType.GIFT, tag_slug="event")
+
+        self.assertEqual(total_gift, 150)
+        self.assertEqual(event_gift, 100)
+
+    def test_get_balance_invalid_type(self):
+        """Test that invalid point type raises error."""
+        with self.assertRaises(services.InvalidPointOperationError):
+            services.get_balance(self.user, "invalid")
+
+
+class GetDetailedBalanceTests(TestCase):
+    """Tests for get_detailed_balance function."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.user = User.objects.create_user(username="testuser", password="testpass")
+        self.tag = Tag.objects.create(name="活动", slug="event")
+
+    def test_detailed_balance_empty(self):
+        """Test detailed balance when empty."""
+        balance = services.get_detailed_balance(self.user)
+
+        self.assertEqual(balance["total"], 0)
+        self.assertEqual(balance["cash"], 0)
+        self.assertEqual(balance["gift"], 0)
+        self.assertEqual(balance["by_tag"], {})
+
+    def test_detailed_balance_with_points(self):
+        """Test detailed balance with various points."""
+        services.grant_points(self.user, 100, PointType.CASH, "Cash")
+        services.grant_points(self.user, 50, PointType.GIFT, "Gift no tag")
+        services.grant_points(self.user, 30, PointType.GIFT, "Event", tag_slug="event")
+
+        balance = services.get_detailed_balance(self.user)
+
+        self.assertEqual(balance["total"], 180)
+        self.assertEqual(balance["cash"], 100)
+        self.assertEqual(balance["gift"], 80)
+        self.assertEqual(balance["gift_no_tag"], 50)
+        self.assertEqual(balance["by_tag"]["event"], 30)
+
+
+class GrantPointsTests(TestCase):
+    """Tests for grant_points function."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.user = User.objects.create_user(username="testuser", password="testpass")
+        self.admin = User.objects.create_user(username="admin", password="adminpass")
+        self.tag = Tag.objects.create(name="活动", slug="event")
+
+    def test_grant_cash_points(self):
+        """Test granting cash points."""
+        source = services.grant_points(self.user, 100, PointType.CASH, "注册奖励")
+
+        self.assertEqual(source.point_type, PointType.CASH)
+        self.assertEqual(source.original_amount, 100)
+        self.assertEqual(source.remaining_amount, 100)
+
+        # Check transaction was created
+        txn = PointTransaction.objects.get(source=source)
+        self.assertEqual(txn.transaction_type, TransactionType.EARN)
+        self.assertEqual(txn.amount, 100)
+
+    def test_grant_gift_points(self):
+        """Test granting gift points."""
+        source = services.grant_points(self.user, 50, PointType.GIFT, "活动奖励")
+
+        self.assertEqual(source.point_type, PointType.GIFT)
+        self.assertEqual(source.original_amount, 50)
+
+    def test_grant_points_with_tag(self):
+        """Test granting points with tag."""
+        source = services.grant_points(
+            self.user, 100, PointType.GIFT, "Event reward", tag_slug="event"
         )
 
-    def test_grant_points_success(self):
-        """Test granting points creates source and transaction."""
-        source = grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Test grant",
-            tag_names=["tag1", "tag2"],
+        self.assertEqual(source.tag, self.tag)
+
+    def test_grant_points_with_expiration(self):
+        """Test granting points with expiration."""
+        expires = timezone.now() + timezone.timedelta(days=30)
+        source = services.grant_points(
+            self.user, 100, PointType.GIFT, "Limited time", expires_at=expires
         )
 
-        self.assertEqual(source.initial_points, 100)
-        self.assertEqual(source.remaining_points, 100)
-        self.assertEqual(source.tags.count(), 2)
+        self.assertEqual(source.expires_at, expires)
 
-        self.assertEqual(self.user.point_transactions.count(), 1)
-        transaction = self.user.point_transactions.first()
-        self.assertEqual(transaction.points, 100)
-        self.assertEqual(transaction.transaction_type, "EARN")
+    def test_grant_points_with_reference(self):
+        """Test granting points with reference ID."""
+        source = services.grant_points(
+            self.user, 100, PointType.CASH, "External", reference_id="ext:123"
+        )
 
-    def test_grant_points_invalid_amount(self):
-        """Test granting negative or zero points raises ValueError."""
-        with self.assertRaisesMessage(ValueError, "发放的积分必须是正整数"):
-            grant_points(
-                user_profile=self.user,
-                points=0,
-                description="Invalid",
-                tag_names=["tag1"],
+        self.assertEqual(source.reference_id, "ext:123")
+
+    def test_grant_points_with_creator(self):
+        """Test granting points with creator."""
+        source = services.grant_points(
+            self.user, 100, PointType.CASH, "Admin grant", created_by=self.admin
+        )
+
+        self.assertEqual(source.created_by, self.admin)
+
+    def test_grant_points_zero_amount_fails(self):
+        """Test that granting zero points fails."""
+        with self.assertRaises(services.InvalidPointOperationError):
+            services.grant_points(self.user, 0, PointType.CASH, "Test")
+
+    def test_grant_points_negative_amount_fails(self):
+        """Test that granting negative points fails."""
+        with self.assertRaises(services.InvalidPointOperationError):
+            services.grant_points(self.user, -100, PointType.CASH, "Test")
+
+    def test_grant_cash_with_tag_fails(self):
+        """Test that granting cash points with tag fails."""
+        with self.assertRaises(services.InvalidPointOperationError):
+            services.grant_points(
+                self.user, 100, PointType.CASH, "Test", tag_slug="event"
             )
 
-        with self.assertRaisesMessage(ValueError, "发放的积分必须是正整数"):
-            grant_points(
-                user_profile=self.user,
-                points=-10,
-                description="Invalid",
-                tag_names=["tag1"],
-            )
-
-    def test_grant_points_non_integer_amount(self):
-        """Test granting non-integer points raises ValueError."""
-        with self.assertRaisesMessage(ValueError, "发放的积分必须是正整数"):
-            grant_points(
-                user_profile=self.user,
-                points=10.5,
-                description="Float amount",
-                tag_names=["tag1"],
-            )
-
-        with self.assertRaisesMessage(ValueError, "发放的积分必须是正整数"):
-            grant_points(
-                user_profile=self.user,
-                points="100",
-                description="String amount",
-                tag_names=["tag1"],
-            )
-
-    def test_grant_points_creates_tags(self):
-        """Test granting points creates tags if they don't exist."""
-        grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Test",
-            tag_names=["new-tag"],
-        )
-
-        self.assertTrue(Tag.objects.filter(name="new-tag").exists())
-
-    def test_grant_points_with_slug(self):
-        """Test granting points using tag slug."""
-        # Create a tag with known slug
-        Tag.objects.create(name="Premium", slug="premium")
-
-        source = grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Test with slug",
-            tag_names=["premium"],  # Use slug instead of name
-        )
-
-        self.assertEqual(source.tags.count(), 1)
-        self.assertEqual(source.tags.first().name, "Premium")
-        # Ensure no duplicate tag was created
-        self.assertEqual(Tag.objects.filter(name="Premium").count(), 1)
-
-    def test_grant_points_with_name(self):
-        """Test granting points using tag name."""
-        # Create a tag
-        Tag.objects.create(name="Premium", slug="premium")
-
-        source = grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Test with name",
-            tag_names=["Premium"],  # Use name instead of slug
-        )
-
-        self.assertEqual(source.tags.count(), 1)
-        self.assertEqual(source.tags.first().slug, "premium")
-        # Ensure no duplicate tag was created
-        self.assertEqual(Tag.objects.filter(slug="premium").count(), 1)
-
-    def test_grant_points_mixed_slug_and_name(self):
-        """Test granting points with mix of slug and name."""
-        Tag.objects.create(name="Tag One", slug="tag-one")
-        Tag.objects.create(name="Tag Two", slug="tag-two")
-
-        source = grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Test mixed",
-            tag_names=["tag-one", "Tag Two"],  # One slug, one name
-        )
-
-        self.assertEqual(source.tags.count(), 2)
-        tag_names = [tag.name for tag in source.tags.all()]
-        self.assertIn("Tag One", tag_names)
-        self.assertIn("Tag Two", tag_names)
-
-    def test_grant_points_chinese_tag_name(self):
-        """Test granting points with Chinese tag name (slugify returns empty)."""
-        # Chinese characters will make slugify return empty string
-        source = grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Test Chinese tag",
-            tag_names=["签到奖励"],  # Pure Chinese, slugify returns ""
-        )
-
-        self.assertEqual(source.tags.count(), 1)
-        tag = source.tags.first()
-        self.assertEqual(tag.name, "签到奖励")
-        # When slugify returns empty, the slug should be the original name
-        self.assertEqual(tag.slug, "签到奖励")
-
-    def test_grant_points_existing_chinese_tag(self):
-        """Test granting points with existing Chinese tag."""
-        # Create a Chinese tag first
-        Tag.objects.create(name="推荐奖励", slug="推荐奖励")
-
-        source = grant_points(
-            user_profile=self.user,
-            points=50,
-            description="Test existing Chinese",
-            tag_names=["推荐奖励"],
-        )
-
-        self.assertEqual(source.tags.count(), 1)
-        # Should not create duplicate
-        self.assertEqual(Tag.objects.filter(name="推荐奖励").count(), 1)
-
-    def test_grant_points_rejects_unknown_legacy_kwargs(self):
-        """Passing unexpected legacy kwargs raises TypeError."""
-        with self.assertRaisesMessage(TypeError, "Unsupported legacy kwargs: legacy"):
-            grant_points(
-                user=self.user,
-                points=10,
-                description="Invalid legacy",
-                legacy="value",
+    def test_grant_points_invalid_tag_fails(self):
+        """Test that invalid tag slug fails."""
+        with self.assertRaises(services.InvalidPointOperationError):
+            services.grant_points(
+                self.user, 100, PointType.GIFT, "Test", tag_slug="nonexistent"
             )
 
 
 class SpendPointsTests(TestCase):
-    """Test cases for spend_points service function."""
+    """Tests for spend_points function."""
 
     def setUp(self):
         """Set up test fixtures."""
-        self.user = get_user_model().objects.create_user(
-            username="testuser", email="test@example.com", password="password123"
+        self.user = User.objects.create_user(username="testuser", password="testpass")
+        self.tag = Tag.objects.create(name="活动", slug="event")
+        # Grant some initial points
+        services.grant_points(self.user, 100, PointType.CASH, "Initial cash")
+        services.grant_points(self.user, 200, PointType.GIFT, "Initial gift")
+        services.grant_points(
+            self.user, 50, PointType.GIFT, "Event gift", tag_slug="event"
         )
 
-    def test_spend_points_success(self):
-        """Test spending points deducts from sources."""
-        Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
+    def test_spend_cash_points(self):
+        """Test spending cash points."""
+        transactions = services.spend_points(
+            self.user, 50, PointType.CASH, "Withdrawal"
         )
 
-        grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Initial",
-            tag_names=["default"],
+        self.assertEqual(len(transactions), 1)
+        self.assertEqual(transactions[0].amount, -50)
+        self.assertEqual(services.get_balance(self.user, PointType.CASH), 50)
+
+    def test_spend_gift_points(self):
+        """Test spending gift points."""
+        transactions = services.spend_points(self.user, 100, PointType.GIFT, "Redeem")
+
+        self.assertGreater(len(transactions), 0)
+        total_spent = sum(abs(t.amount) for t in transactions)
+        self.assertEqual(total_spent, 100)
+
+    def test_spend_points_with_tag_filter(self):
+        """Test spending points filtered by tag."""
+        transactions = services.spend_points(
+            self.user, 30, PointType.GIFT, "Event redeem", tag_slug="event"
         )
 
-        transaction = spend_points(
-            user_profile=self.user, amount=30, description="Spend test"
+        self.assertGreater(len(transactions), 0)
+        for txn in transactions:
+            self.assertEqual(txn.tag, self.tag)
+
+        # Check event balance reduced
+        self.assertEqual(
+            services.get_balance(self.user, PointType.GIFT, tag_slug="event"), 20
         )
 
-        self.assertEqual(transaction.points, -30)
-        self.assertEqual(transaction.transaction_type, "SPEND")
-        self.assertEqual(self.user.total_points, 70)
+    def test_spend_points_fifo(self):
+        """Test that points are spent in FIFO order."""
+        # Grant more points with delay (to ensure different created_at)
+        services.grant_points(self.user, 50, PointType.CASH, "Second cash")
 
-    def test_spend_points_insufficient(self):
-        """Test spending more points than available raises error."""
-        grant_points(
-            user_profile=self.user,
-            points=50,
-            description="Initial",
-            tag_names=["default"],
-        )
+        # Spend more than first grant
+        services.spend_points(self.user, 120, PointType.CASH, "Large spend")
 
-        with self.assertRaises(InsufficientPointsError):
-            spend_points(user_profile=self.user, amount=100, description="Too much")
+        # Check remaining
+        self.assertEqual(services.get_balance(self.user, PointType.CASH), 30)
 
-    def test_spend_points_invalid_amount(self):
-        """Test spending negative or zero points raises ValueError."""
-        with self.assertRaisesMessage(ValueError, "消费的积分必须是正整数"):
-            spend_points(user_profile=self.user, amount=0, description="Invalid")
+    def test_spend_points_insufficient_fails(self):
+        """Test that spending more than available fails."""
+        with self.assertRaises(services.InsufficientPointsError):
+            services.spend_points(self.user, 1000, PointType.CASH, "Too much")
 
-        with self.assertRaisesMessage(ValueError, "消费的积分必须是正整数"):
-            spend_points(user_profile=self.user, amount=-10, description="Invalid")
+    def test_spend_zero_amount_fails(self):
+        """Test that spending zero fails."""
+        with self.assertRaises(services.InvalidPointOperationError):
+            services.spend_points(self.user, 0, PointType.CASH, "Zero")
 
-    def test_spend_points_non_integer_amount(self):
-        """Test spending non-integer points raises ValueError."""
-        with self.assertRaisesMessage(ValueError, "消费的积分必须是正整数"):
-            spend_points(user_profile=self.user, amount=10.5, description="Float")
-
-        with self.assertRaisesMessage(ValueError, "消费的积分必须是正整数"):
-            spend_points(user_profile=self.user, amount="50", description="String")
-
-    def test_spend_points_with_priority_tag(self):
-        """Test spending points with priority tag preference."""
-        # Grant points with different tags
-        grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Priority",
-            tag_names=["priority"],
-        )
-        grant_points(
-            user_profile=self.user,
-            points=50,
-            description="Default",
-            tag_names=["default"],
-        )
-
-        # Spend with priority tag
-        spend_points(
-            user_profile=self.user,
-            amount=30,
-            description="Priority spend",
-            priority_tag_name="priority",
-        )
-
-        # Priority tag points should be used first
-        priority_source = PointSource.objects.filter(tags__name="priority").first()
-        default_source = PointSource.objects.filter(tags__slug="default").first()
-
-        priority_source.refresh_from_db()
-        default_source.refresh_from_db()
-
-        self.assertEqual(priority_source.remaining_points, 70)
-        self.assertEqual(default_source.remaining_points, 50)
-
-    def test_spend_points_multiple_sources(self):
-        """Test spending points across multiple sources."""
-        Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
-        )
-
-        # Grant points in multiple batches
-        grant_points(
-            user_profile=self.user,
-            points=30,
-            description="First",
-            tag_names=["default"],
-        )
-        grant_points(
-            user_profile=self.user,
-            points=30,
-            description="Second",
-            tag_names=["default"],
-        )
-        grant_points(
-            user_profile=self.user,
-            points=30,
-            description="Third",
-            tag_names=["default"],
-        )
-
-        # Spend exactly two sources - this should hit the break statement
-        spend_points(user_profile=self.user, amount=60, description="Exact spend")
-
-        sources = PointSource.objects.filter(user_profile=self.user).order_by(
-            "created_at"
-        )
-
-        sources[0].refresh_from_db()
-        sources[1].refresh_from_db()
-        sources[2].refresh_from_db()
-
-        # First two sources should be fully depleted, third untouched
-        self.assertEqual(sources[0].remaining_points, 0)
-        self.assertEqual(sources[1].remaining_points, 0)
-        self.assertEqual(sources[2].remaining_points, 30)
-
-    def test_spend_points_fallback_to_any_remaining(self):
-        """Test that spend_points falls back to any remaining sources."""
-        # Create a default tag and a non-default tag
-        Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
-        )
-        Tag.objects.create(name="other")
-
-        # Grant points with non-default tag
-        grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Other points",
-            tag_names=["other"],
-        )
-
-        # Spend without specifying priority - should fall back to "any" sources
-        transaction = spend_points(
-            user_profile=self.user, amount=50, description="Fallback test"
-        )
-
-        self.assertEqual(transaction.points, -50)
-        self.assertEqual(self.user.total_points, 50)
-
-    def test_spend_points_with_priority_tag_fallback(self):
-        """Test spending with priority tag that doesn't have enough points."""
-        Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
-        )
-        Tag.objects.create(name="priority")
-
-        # Grant small amount with priority tag
-        grant_points(
-            user_profile=self.user,
-            points=30,
-            description="Priority",
-            tag_names=["priority"],
-        )
-
-        # Grant more with default tag
-        grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Default",
-            tag_names=["default"],
-        )
-
-        # Spend more than priority tag has - should use priority first, then default
-        transaction = spend_points(
-            user_profile=self.user,
-            amount=80,
-            description="Multi-source",
-            priority_tag_name="priority",
-        )
-
-        self.assertEqual(transaction.points, -80)
-        self.assertEqual(self.user.total_points, 50)  # 30 + 100 - 80 = 50
-
-    def test_spend_points_with_priority_then_default_then_any(self):
-        """Test complete fallback chain: priority -> default -> any remaining."""
-        Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
-        )
-        Tag.objects.create(name="priority")
-        Tag.objects.create(name="other")
-
-        # Grant points with priority tag (small amount)
-        grant_points(
-            user_profile=self.user,
-            points=20,
-            description="Priority",
-            tag_names=["priority"],
-        )
-
-        # Grant points with default tag (medium amount)
-        grant_points(
-            user_profile=self.user,
-            points=30,
-            description="Default",
-            tag_names=["default"],
-        )
-
-        # Grant points with other tag (large amount)
-        grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Other",
-            tag_names=["other"],
-        )
-
-        # Spend amount that requires all three sources
-        transaction = spend_points(
-            user_profile=self.user,
-            amount=80,  # 20 from priority + 30 from default + 30 from other
-            description="Full chain test",
-            priority_tag_name="priority",
-        )
-
-        self.assertEqual(transaction.points, -80)
-        self.assertEqual(self.user.total_points, 70)  # 150 - 80 = 70
-
-        # Verify consumption from each source
-        priority_source = PointSource.objects.filter(tags__name="priority").first()
-        default_source = PointSource.objects.filter(tags__slug="default").first()
-        other_source = PointSource.objects.filter(tags__name="other").first()
-
-        priority_source.refresh_from_db()
-        default_source.refresh_from_db()
-        other_source.refresh_from_db()
-
-        # Priority should be fully consumed
-        self.assertEqual(priority_source.remaining_points, 0)
-        # Default should be fully consumed
-        self.assertEqual(default_source.remaining_points, 0)
-        # Other should have 70 remaining (100 - 30)
-        self.assertEqual(other_source.remaining_points, 70)
-
-    def test_spend_points_fifo_order(self):
-        """Test that points are consumed in FIFO order (oldest first)."""
-        Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
-        )
-
-        # Grant points in three batches with time gaps
-        source1 = grant_points(
-            user_profile=self.user,
-            points=50,
-            description="First batch",
-            tag_names=["default"],
-        )
-
-        source2 = grant_points(
-            user_profile=self.user,
-            points=50,
-            description="Second batch",
-            tag_names=["default"],
-        )
-
-        source3 = grant_points(
-            user_profile=self.user,
-            points=50,
-            description="Third batch",
-            tag_names=["default"],
-        )
-
-        # Spend amount that consumes first source and part of second
-        spend_points(user_profile=self.user, amount=75, description="FIFO test")
-
-        source1.refresh_from_db()
-        source2.refresh_from_db()
-        source3.refresh_from_db()
-
-        # First source should be fully consumed (oldest)
-        self.assertEqual(source1.remaining_points, 0)
-        # Second source should have 25 remaining (50 - 25)
-        self.assertEqual(source2.remaining_points, 25)
-        # Third source should be untouched (newest)
-        self.assertEqual(source3.remaining_points, 50)
-
-    def test_spend_points_rejects_unknown_legacy_kwargs(self):
-        """Passing unexpected legacy kwargs raises TypeError before spending."""
-        with self.assertRaisesMessage(TypeError, "Unsupported legacy kwargs: legacy"):
-            spend_points(
-                user=self.user,
-                amount=10,
-                description="Invalid legacy",
-                legacy="value",
+    def test_spend_cash_with_tag_fails(self):
+        """Test that spending cash with tag filter fails."""
+        with self.assertRaises(services.InvalidPointOperationError):
+            services.spend_points(
+                self.user, 50, PointType.CASH, "Test", tag_slug="event"
             )
 
 
-class TransactionAtomicityTests(TransactionTestCase):
-    """Test transaction atomicity of service functions."""
+class WithdrawalRequestTests(TestCase):
+    """Tests for withdrawal request functions."""
 
     def setUp(self):
         """Set up test fixtures."""
-        self.user = get_user_model().objects.create_user(
-            username="atomicuser", email="atomic@example.com", password="password123"
+        self.user = User.objects.create_user(username="testuser", password="testpass")
+        self.admin = User.objects.create_superuser(
+            username="admin", password="adminpass", email="admin@test.com"
+        )
+        # Grant cash points
+        services.grant_points(self.user, 1000, PointType.CASH, "Initial cash")
+
+    def test_create_withdrawal_request(self):
+        """Test creating withdrawal request."""
+        withdrawal = services.create_withdrawal_request(
+            self.user, 500, "张三", "13800138000", "中国银行", "6222000000000000000"
         )
 
-    def test_grant_points_rollback_on_error(self):
-        """Test that grant_points rolls back on error."""
-        initial_transaction_count = PointTransaction.objects.count()
-        initial_source_count = PointSource.objects.count()
+        self.assertEqual(withdrawal.amount, 500)
+        self.assertEqual(withdrawal.status, WithdrawalStatus.PENDING)
+        self.assertEqual(withdrawal.real_name, "张三")
 
-        # This should fail because we'll force an error
-        # by creating a tag with invalid data after grant_points starts
-        # But since grant_points validates input first, we need different approach
+    def test_create_withdrawal_insufficient_balance_fails(self):
+        """Test that creating withdrawal with insufficient balance fails."""
+        with self.assertRaises(services.InsufficientPointsError):
+            services.create_withdrawal_request(
+                self.user, 2000, "张三", "13800138000", "中国银行", "6222"
+            )
 
-        # Instead, test that partial execution doesn't leave orphaned data
-        source = grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Test atomicity",
-            tag_names=["atomic-tag"],
+    def test_create_withdrawal_with_pending_fails(self):
+        """Test that creating withdrawal when pending exists fails."""
+        services.create_withdrawal_request(
+            self.user, 100, "张三", "13800138000", "中国银行", "6222"
         )
 
-        # Verify all operations completed together
-        self.assertEqual(
-            PointTransaction.objects.count(), initial_transaction_count + 1
-        )
-        self.assertEqual(PointSource.objects.count(), initial_source_count + 1)
-        self.assertEqual(source.tags.count(), 1)
+        with self.assertRaises(services.WithdrawalError):
+            services.create_withdrawal_request(
+                self.user, 200, "张三", "13800138000", "中国银行", "6222"
+            )
 
-    def test_spend_points_atomic_deduction(self):
-        """Test that spend_points deducts from multiple sources atomically."""
-        Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
+    def test_approve_withdrawal(self):
+        """Test approving withdrawal request."""
+        withdrawal = services.create_withdrawal_request(
+            self.user, 500, "张三", "13800138000", "中国银行", "6222"
         )
 
-        # Grant points across multiple sources
-        grant_points(
-            user_profile=self.user, points=30, description="S1", tag_names=["default"]
+        approved = services.approve_withdrawal(withdrawal.id, self.admin)
+
+        self.assertEqual(approved.status, WithdrawalStatus.APPROVED)
+        self.assertEqual(approved.processed_by, self.admin)
+        self.assertIsNotNone(approved.processed_at)
+        self.assertIsNotNone(approved.transaction)
+
+        # Check balance deducted
+        self.assertEqual(services.get_balance(self.user, PointType.CASH), 500)
+
+    def test_approve_non_pending_fails(self):
+        """Test that approving non-pending withdrawal fails."""
+        withdrawal = services.create_withdrawal_request(
+            self.user, 500, "张三", "13800138000", "中国银行", "6222"
         )
-        grant_points(
-            user_profile=self.user, points=30, description="S2", tag_names=["default"]
+        services.approve_withdrawal(withdrawal.id, self.admin)
+
+        with self.assertRaises(services.WithdrawalError):
+            services.approve_withdrawal(withdrawal.id, self.admin)
+
+    def test_complete_withdrawal(self):
+        """Test completing withdrawal."""
+        withdrawal = services.create_withdrawal_request(
+            self.user, 500, "张三", "13800138000", "中国银行", "6222"
         )
-        grant_points(
-            user_profile=self.user, points=30, description="S3", tag_names=["default"]
+        services.approve_withdrawal(withdrawal.id, self.admin)
+
+        completed = services.complete_withdrawal(withdrawal.id, self.admin)
+
+        self.assertEqual(completed.status, WithdrawalStatus.COMPLETED)
+
+    def test_complete_non_approved_fails(self):
+        """Test that completing non-approved withdrawal fails."""
+        withdrawal = services.create_withdrawal_request(
+            self.user, 500, "张三", "13800138000", "中国银行", "6222"
         )
 
-        initial_total = self.user.total_points
+        with self.assertRaises(services.WithdrawalError):
+            services.complete_withdrawal(withdrawal.id, self.admin)
 
-        # Spend across sources
-        spend_points(user_profile=self.user, amount=50, description="Atomic test")
+    def test_reject_withdrawal(self):
+        """Test rejecting withdrawal."""
+        withdrawal = services.create_withdrawal_request(
+            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+        )
 
-        # All deductions should happen atomically
-        final_total = self.user.total_points
-        self.assertEqual(final_total, initial_total - 50)
+        rejected = services.reject_withdrawal(withdrawal.id, self.admin, "信息不完整")
+
+        self.assertEqual(rejected.status, WithdrawalStatus.REJECTED)
+        self.assertEqual(rejected.admin_note, "信息不完整")
+
+        # Check balance NOT deducted
+        self.assertEqual(services.get_balance(self.user, PointType.CASH), 1000)
+
+    def test_cancel_withdrawal_by_user(self):
+        """Test canceling withdrawal by user."""
+        withdrawal = services.create_withdrawal_request(
+            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+        )
+
+        cancelled = services.cancel_withdrawal(withdrawal.id, self.user)
+
+        self.assertEqual(cancelled.status, WithdrawalStatus.CANCELLED)
+
+    def test_cancel_withdrawal_by_other_user_fails(self):
+        """Test that other user cannot cancel withdrawal."""
+        other_user = User.objects.create_user(username="other", password="pass")
+        withdrawal = services.create_withdrawal_request(
+            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+        )
+
+        with self.assertRaises(services.WithdrawalError):
+            services.cancel_withdrawal(withdrawal.id, other_user)
+
+    def test_cancel_non_pending_fails(self):
+        """Test that canceling non-pending withdrawal fails."""
+        withdrawal = services.create_withdrawal_request(
+            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+        )
+        services.approve_withdrawal(withdrawal.id, self.admin)
+
+        with self.assertRaises(services.WithdrawalError):
+            services.cancel_withdrawal(withdrawal.id, self.user)
+
+
+class OrganizationWithdrawalTests(TestCase):
+    """Tests for organization withdrawal permissions."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.org = Organization.objects.create(name="Test Org", slug="test-org")
+        self.owner = User.objects.create_user(username="owner", password="pass")
+        self.admin_user = User.objects.create_user(username="admin", password="pass")
+        self.member = User.objects.create_user(username="member", password="pass")
+
+        OrganizationMembership.objects.create(
+            user=self.owner,
+            organization=self.org,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        OrganizationMembership.objects.create(
+            user=self.admin_user,
+            organization=self.org,
+            role=OrganizationMembership.Role.ADMIN,
+        )
+        OrganizationMembership.objects.create(
+            user=self.member,
+            organization=self.org,
+            role=OrganizationMembership.Role.MEMBER,
+        )
+
+        services.grant_points(self.org, 1000, PointType.CASH, "Initial")
+
+    def test_owner_can_cancel_org_withdrawal(self):
+        """Test that owner can cancel org withdrawal."""
+        withdrawal = services.create_withdrawal_request(
+            self.org, 500, "张三", "13800138000", "中国银行", "6222"
+        )
+
+        cancelled = services.cancel_withdrawal(withdrawal.id, self.owner)
+        self.assertEqual(cancelled.status, WithdrawalStatus.CANCELLED)
+
+    def test_admin_can_cancel_org_withdrawal(self):
+        """Test that admin can cancel org withdrawal."""
+        withdrawal = services.create_withdrawal_request(
+            self.org, 500, "张三", "13800138000", "中国银行", "6222"
+        )
+
+        cancelled = services.cancel_withdrawal(withdrawal.id, self.admin_user)
+        self.assertEqual(cancelled.status, WithdrawalStatus.CANCELLED)
+
+    def test_member_cannot_cancel_org_withdrawal(self):
+        """Test that regular member cannot cancel org withdrawal."""
+        withdrawal = services.create_withdrawal_request(
+            self.org, 500, "张三", "13800138000", "中国银行", "6222"
+        )
+
+        with self.assertRaises(services.WithdrawalError):
+            services.cancel_withdrawal(withdrawal.id, self.member)
 
 
 class EdgeCaseTests(TestCase):
-    """Test edge cases and boundary conditions."""
+    """Tests for edge cases and error handling."""
 
     def setUp(self):
         """Set up test fixtures."""
-        self.user = get_user_model().objects.create_user(
-            username="edgeuser", email="edge@example.com", password="password123"
+        self.user = User.objects.create_user(username="testuser", password="testpass")
+        self.admin = User.objects.create_user(
+            username="admin", password="pass", is_staff=True
         )
 
-    def test_grant_points_empty_tag_list(self):
-        """Test granting points with empty tag list."""
-        source = grant_points(
-            user_profile=self.user,
-            points=100,
-            description="No tags",
-            tag_names=[],  # Empty list
-        )
+    def test_grant_points_invalid_type(self):
+        """Test that invalid point type fails."""
+        with self.assertRaises(services.InvalidPointOperationError) as cm:
+            services.grant_points(self.user, 100, "invalid", "Test")
+        self.assertIn("无效的积分类型", str(cm.exception))
 
-        self.assertEqual(source.initial_points, 100)
-        self.assertEqual(source.tags.count(), 0)
+    def test_spend_points_invalid_type(self):
+        """Test that invalid point type in spend fails."""
+        services.grant_points(self.user, 100, PointType.CASH, "Initial")
+        with self.assertRaises(services.InvalidPointOperationError) as cm:
+            services.spend_points(self.user, 50, "invalid", "Test")
+        self.assertIn("无效的积分类型", str(cm.exception))
 
-    def test_grant_points_single_tag(self):
-        """Test granting points with a single tag."""
-        source = grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Single tag",
-            tag_names=["single"],
-        )
-
-        self.assertEqual(source.tags.count(), 1)
-
-    def test_grant_points_many_tags(self):
-        """Test granting points with many tags."""
-        tag_names = [f"tag-{i}" for i in range(10)]
-
-        source = grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Many tags",
-            tag_names=tag_names,
-        )
-
-        self.assertEqual(source.tags.count(), 10)
-
-    def test_grant_points_duplicate_tags_in_list(self):
-        """Test granting points with duplicate tag names in the list."""
-        source = grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Duplicate tags",
-            tag_names=["dup", "dup", "dup"],  # Same tag multiple times
-        )
-
-        # Should only create one tag, but might add it multiple times
-        # This is based on current implementation
-        self.assertEqual(source.tags.count(), 1)
-
-    def test_spend_points_exact_balance(self):
-        """Test spending exact balance (all points)."""
-        Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
-        )
-
-        grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Initial",
-            tag_names=["default"],
-        )
-
-        # Spend exact balance
-        transaction = spend_points(
-            user_profile=self.user, amount=100, description="Exact"
-        )
-
-        self.assertEqual(transaction.points, -100)
-        self.assertEqual(self.user.total_points, 0)
-
-        # All sources should be depleted
-        sources = PointSource.objects.filter(user_profile=self.user)
-        for source in sources:
-            source.refresh_from_db()
-            self.assertEqual(source.remaining_points, 0)
-
-    def test_spend_points_one_point(self):
-        """Test spending minimum amount (1 point)."""
-        Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
-        )
-
-        grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Initial",
-            tag_names=["default"],
-        )
-
-        transaction = spend_points(
-            user_profile=self.user, amount=1, description="Minimum"
-        )
-
-        self.assertEqual(transaction.points, -1)
-        self.assertEqual(self.user.total_points, 99)
-
-    def test_spend_points_zero_balance(self):
-        """Test spending when user has zero balance."""
-        with self.assertRaises(InsufficientPointsError):
-            spend_points(user_profile=self.user, amount=1, description="No points")
-
-    def test_grant_points_max_integer(self):
-        """Test granting very large point amount."""
-        large_amount = 2147483647  # Max 32-bit int
-
-        source = grant_points(
-            user_profile=self.user,
-            points=large_amount,
-            description="Max int",
-            tag_names=["large"],
-        )
-
-        self.assertEqual(source.initial_points, large_amount)
-        self.assertEqual(source.remaining_points, large_amount)
-
-    def test_spend_points_consumed_sources_tracking(self):
-        """Test that consumed sources are properly tracked in transaction."""
-        Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
-        )
-
-        # Create multiple sources
-        source1 = grant_points(
-            user_profile=self.user, points=30, description="S1", tag_names=["default"]
-        )
-        source2 = grant_points(
-            user_profile=self.user, points=30, description="S2", tag_names=["default"]
-        )
-        source3 = grant_points(
-            user_profile=self.user, points=30, description="S3", tag_names=["default"]
-        )
-
-        # Spend from first two sources
-        transaction = spend_points(
-            user_profile=self.user, amount=50, description="Track sources"
-        )
-
-        # Check consumed sources are tracked
-        consumed_ids = set(transaction.consumed_sources.values_list("id", flat=True))
-        self.assertIn(source1.id, consumed_ids)
-        self.assertIn(source2.id, consumed_ids)
-        self.assertNotIn(source3.id, consumed_ids)  # Not consumed
-
-    def test_grant_points_special_characters_in_tags(self):
-        """Test granting points with special characters in tag names."""
-        source = grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Special chars",
-            tag_names=["tag-with_special.chars!", "tag@#$%"],
-        )
-
-        self.assertEqual(source.tags.count(), 2)
-
-    def test_spend_points_priority_tag_not_exist(self):
-        """Test spending with priority tag that doesn't exist."""
-        Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
-        )
-
-        grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Default points",
-            tag_names=["default"],
-        )
-
-        # Priority tag doesn't exist, should fall back to default
-        transaction = spend_points(
-            user_profile=self.user,
-            amount=50,
-            description="Non-existent priority",
-            priority_tag_name="non-existent",
-        )
-
-        self.assertEqual(transaction.points, -50)
-        self.assertEqual(self.user.total_points, 50)
-
-    def test_spend_points_no_default_tag_sources(self):
-        """Test spending when no sources have default tags."""
-        Tag.objects.create(name="special")  # Non-default tag
-
-        grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Special points",
-            tag_names=["special"],
-        )
-
-        # No default tag sources, should fall back to any remaining
-        transaction = spend_points(
-            user_profile=self.user, amount=50, description="No default"
-        )
-
-        self.assertEqual(transaction.points, -50)
-        self.assertEqual(self.user.total_points, 50)
-
-    def test_grant_points_transaction_record(self):
-        """Test that grant_points creates correct transaction record."""
-        grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Transaction test",
-            tag_names=["test"],
-        )
-
-        transaction = PointTransaction.objects.filter(
-            user_profile=self.user,
-            transaction_type=PointTransaction.TransactionType.EARN,
-        ).first()
-
-        self.assertIsNotNone(transaction)
-        self.assertEqual(transaction.points, 100)
-        self.assertEqual(transaction.description, "Transaction test")
-        self.assertEqual(
-            transaction.transaction_type, PointTransaction.TransactionType.EARN
-        )
-
-    def test_spend_points_transaction_record(self):
-        """Test that spend_points creates correct transaction record."""
-        Tag.objects.get_or_create(
-            slug="default",
-            defaults={"name": "默认", "is_default": True},
-        )
-
-        grant_points(
-            user_profile=self.user,
-            points=100,
-            description="Initial",
-            tag_names=["default"],
-        )
-
-        spend_points(
-            user_profile=self.user, amount=50, description="Spend transaction test"
-        )
-
-        spend_transaction = PointTransaction.objects.filter(
-            user_profile=self.user,
-            transaction_type=PointTransaction.TransactionType.SPEND,
-        ).first()
-
-        self.assertIsNotNone(spend_transaction)
-        self.assertEqual(spend_transaction.points, -50)
-        self.assertEqual(spend_transaction.description, "Spend transaction test")
-        self.assertTrue(
-            spend_transaction.transaction_type == PointTransaction.TransactionType.SPEND
-        )
-
-
-class BatchWithdrawalTests(TestCase):
-    """Test cases for batch withdrawal service functions."""
-
-    def setUp(self):
-        """Set up test fixtures."""
-        from points.models import WithdrawalRequest
-        from points.services import WithdrawalData
-
-        self.User = get_user_model()
-        self.user = self.User.objects.create_user(
-            username="testuser", email="test@example.com", password="password123"
-        )
-        self.WithdrawalData = WithdrawalData
-        self.WithdrawalRequest = WithdrawalRequest
-
-        # Create withdrawable tag
-        self.withdrawable_tag = Tag.objects.create(
-            name="withdrawable", withdrawable=True
-        )
-        self.non_withdrawable_tag = Tag.objects.create(
-            name="non-withdrawable", withdrawable=False
-        )
-
-    def test_create_batch_withdrawal_requests_success(self):
-        """Test creating multiple withdrawal requests at once."""
-        from points.services import create_batch_withdrawal_requests
-
-        # Create two withdrawable point sources
-        source1 = grant_points(
-            user=self.user,
-            points=100,
-            description="Source 1",
-            tag_names=["withdrawable"],
-        )
-        source2 = grant_points(
-            user=self.user,
-            points=200,
-            description="Source 2",
-            tag_names=["withdrawable"],
-        )
-
-        withdrawal_data = self.WithdrawalData(
-            real_name="张三",
-            id_number="110101199001011234",
-            phone_number="13800138000",
-            bank_name="中国银行",
-            bank_account="6222020200012345678",
-        )
-
-        withdrawal_amounts = {
-            source1.id: 50,
-            source2.id: 100,
-        }
-
-        withdrawal_requests = create_batch_withdrawal_requests(
-            user=self.user,
-            withdrawal_amounts=withdrawal_amounts,
-            withdrawal_data=withdrawal_data,
-        )
-
-        # Verify results
-        self.assertEqual(len(withdrawal_requests), 2)
-        self.assertEqual(
-            self.WithdrawalRequest.objects.filter(user=self.user).count(), 2
-        )
-
-        # Verify first request
-        wr1 = self.WithdrawalRequest.objects.get(point_source=source1)
-        self.assertEqual(wr1.points, 50)
-        self.assertEqual(wr1.real_name, "张三")
-        self.assertEqual(wr1.id_number, "110101199001011234")
-        self.assertEqual(wr1.phone_number, "13800138000")
-        self.assertEqual(wr1.bank_name, "中国银行")
-        self.assertEqual(wr1.bank_account, "6222020200012345678")
-        self.assertEqual(wr1.status, self.WithdrawalRequest.Status.PENDING)
-
-        # Verify second request
-        wr2 = self.WithdrawalRequest.objects.get(point_source=source2)
-        self.assertEqual(wr2.points, 100)
-
-    def test_create_batch_withdrawal_requests_empty_amounts(self):
-        """Test that empty withdrawal amounts dict raises error."""
-        from points.services import WithdrawalError, create_batch_withdrawal_requests
-
-        withdrawal_data = self.WithdrawalData(
-            real_name="张三",
-            id_number="110101199001011234",
-            phone_number="13800138000",
-            bank_name="中国银行",
-            bank_account="6222020200012345678",
-        )
-
-        with self.assertRaisesMessage(
-            WithdrawalError, "至少需要选择一个积分池进行提现。"
-        ):
-            create_batch_withdrawal_requests(
-                user=self.user,
-                withdrawal_amounts={},
-                withdrawal_data=withdrawal_data,
+    def test_create_withdrawal_zero_amount(self):
+        """Test that zero amount withdrawal fails."""
+        services.grant_points(self.user, 1000, PointType.CASH, "Initial")
+        with self.assertRaises(services.WithdrawalError) as cm:
+            services.create_withdrawal_request(
+                self.user, 0, "张三", "13800138000", "中国银行", "6222"
             )
+        self.assertIn("大于 0", str(cm.exception))
 
-    def test_create_batch_withdrawal_requests_skips_zero_amounts(self):
-        """Test that zero or negative amounts are skipped."""
-        from points.services import WithdrawalError, create_batch_withdrawal_requests
+    def test_approve_nonexistent_withdrawal(self):
+        """Test that approving nonexistent withdrawal fails."""
+        with self.assertRaises(services.WithdrawalError) as cm:
+            services.approve_withdrawal(99999, self.admin)
+        self.assertIn("不存在", str(cm.exception))
 
-        source1 = grant_points(
-            user=self.user,
-            points=100,
-            description="Source 1",
-            tag_names=["withdrawable"],
-        )
-        source2 = grant_points(
-            user=self.user,
-            points=200,
-            description="Source 2",
-            tag_names=["withdrawable"],
-        )
+    def test_reject_nonexistent_withdrawal(self):
+        """Test that rejecting nonexistent withdrawal fails."""
+        with self.assertRaises(services.WithdrawalError) as cm:
+            services.reject_withdrawal(99999, self.admin, "No reason")
+        self.assertIn("不存在", str(cm.exception))
 
-        withdrawal_data = self.WithdrawalData(
-            real_name="张三",
-            id_number="110101199001011234",
-            phone_number="13800138000",
-            bank_name="中国银行",
-            bank_account="6222020200012345678",
-        )
+    def test_complete_nonexistent_withdrawal(self):
+        """Test that completing nonexistent withdrawal fails."""
+        with self.assertRaises(services.WithdrawalError) as cm:
+            services.complete_withdrawal(99999, self.admin)
+        self.assertIn("不存在", str(cm.exception))
 
-        # All amounts are zero or negative
-        withdrawal_amounts = {
-            source1.id: 0,
-            source2.id: -10,
-        }
+    def test_cancel_nonexistent_withdrawal(self):
+        """Test that canceling nonexistent withdrawal fails."""
+        with self.assertRaises(services.WithdrawalError) as cm:
+            services.cancel_withdrawal(99999, self.user)
+        self.assertIn("不存在", str(cm.exception))
 
-        with self.assertRaisesMessage(
-            WithdrawalError, "至少需要为一个积分池设置提现数量。"
-        ):
-            create_batch_withdrawal_requests(
-                user=self.user,
-                withdrawal_amounts=withdrawal_amounts,
-                withdrawal_data=withdrawal_data,
-            )
-
-    def test_create_batch_withdrawal_requests_partial_amounts(self):
-        """Test that only positive amounts are processed."""
-        from points.services import create_batch_withdrawal_requests
-
-        source1 = grant_points(
-            user=self.user,
-            points=100,
-            description="Source 1",
-            tag_names=["withdrawable"],
-        )
-        source2 = grant_points(
-            user=self.user,
-            points=200,
-            description="Source 2",
-            tag_names=["withdrawable"],
-        )
-        source3 = grant_points(
-            user=self.user,
-            points=300,
-            description="Source 3",
-            tag_names=["withdrawable"],
+    def test_approve_withdrawal_insufficient_balance(self):
+        """Test that approving withdrawal with insufficient balance fails."""
+        # Grant 1000 points, create withdrawal for 500
+        services.grant_points(self.user, 1000, PointType.CASH, "Initial")
+        withdrawal = services.create_withdrawal_request(
+            self.user, 500, "张三", "13800138000", "中国银行", "6222"
         )
 
-        withdrawal_data = self.WithdrawalData(
-            real_name="张三",
-            id_number="110101199001011234",
-            phone_number="13800138000",
-            bank_name="中国银行",
-            bank_account="6222020200012345678",
+        # Spend points to reduce balance below withdrawal amount
+        services.spend_points(self.user, 600, PointType.CASH, "Spend")
+
+        # Now try to approve withdrawal - should fail due to insufficient balance
+        with self.assertRaises(services.InsufficientPointsError) as cm:
+            services.approve_withdrawal(withdrawal.id, self.admin)
+        self.assertIn("不足", str(cm.exception))
+
+    def test_complete_withdrawal_with_note(self):
+        """Test completing withdrawal with admin note."""
+        services.grant_points(self.user, 1000, PointType.CASH, "Initial")
+        withdrawal = services.create_withdrawal_request(
+            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+        )
+        services.approve_withdrawal(withdrawal.id, self.admin)
+
+        completed = services.complete_withdrawal(
+            withdrawal.id, self.admin, note="已打款"
         )
 
-        withdrawal_amounts = {
-            source1.id: 50,  # Valid
-            source2.id: 0,  # Should be skipped
-            source3.id: 100,  # Valid
-        }
+        self.assertEqual(completed.status, WithdrawalStatus.COMPLETED)
+        self.assertIn("已打款", completed.admin_note)
 
-        withdrawal_requests = create_batch_withdrawal_requests(
-            user=self.user,
-            withdrawal_amounts=withdrawal_amounts,
-            withdrawal_data=withdrawal_data,
+    def test_reject_non_pending_withdrawal(self):
+        """Test that rejecting non-pending withdrawal fails."""
+        services.grant_points(self.user, 1000, PointType.CASH, "Initial")
+        withdrawal = services.create_withdrawal_request(
+            self.user, 500, "张三", "13800138000", "中国银行", "6222"
         )
+        # Approve first
+        services.approve_withdrawal(withdrawal.id, self.admin)
 
-        # Only 2 requests should be created
-        self.assertEqual(len(withdrawal_requests), 2)
-        self.assertEqual(
-            self.WithdrawalRequest.objects.filter(user=self.user).count(), 2
-        )
-
-    def test_create_batch_withdrawal_requests_exceeds_balance(self):
-        """Test that withdrawal amount exceeding balance raises error."""
-        from points.services import (
-            WithdrawalAmountError,
-            create_batch_withdrawal_requests,
-        )
-
-        source = grant_points(
-            user=self.user,
-            points=100,
-            description="Source",
-            tag_names=["withdrawable"],
-        )
-
-        withdrawal_data = self.WithdrawalData(
-            real_name="张三",
-            id_number="110101199001011234",
-            phone_number="13800138000",
-            bank_name="中国银行",
-            bank_account="6222020200012345678",
-        )
-
-        withdrawal_amounts = {
-            source.id: 150,  # Exceeds remaining points
-        }
-
-        with self.assertRaisesMessage(
-            WithdrawalAmountError, "提现积分不能超过剩余积分"
-        ):
-            create_batch_withdrawal_requests(
-                user=self.user,
-                withdrawal_amounts=withdrawal_amounts,
-                withdrawal_data=withdrawal_data,
-            )
-
-    def test_create_batch_withdrawal_requests_non_withdrawable_source(self):
-        """Test that non-withdrawable source raises error."""
-        from points.services import (
-            PointSourceNotWithdrawableError,
-            create_batch_withdrawal_requests,
-        )
-
-        # Create a non-withdrawable source
-        source = grant_points(
-            user=self.user,
-            points=100,
-            description="Source",
-            tag_names=["non-withdrawable"],
-        )
-
-        withdrawal_data = self.WithdrawalData(
-            real_name="张三",
-            id_number="110101199001011234",
-            phone_number="13800138000",
-            bank_name="中国银行",
-            bank_account="6222020200012345678",
-        )
-
-        withdrawal_amounts = {
-            source.id: 50,
-        }
-
-        with self.assertRaisesMessage(
-            PointSourceNotWithdrawableError, "该积分来源不支持提现"
-        ):
-            create_batch_withdrawal_requests(
-                user=self.user,
-                withdrawal_amounts=withdrawal_amounts,
-                withdrawal_data=withdrawal_data,
-            )
-
-    def test_create_batch_withdrawal_requests_atomicity(self):
-        """Test that batch withdrawal is atomic - all or nothing."""
-        from points.services import (
-            PointSourceNotWithdrawableError,
-            create_batch_withdrawal_requests,
-        )
-
-        # Create one withdrawable and one non-withdrawable source
-        source1 = grant_points(
-            user=self.user,
-            points=100,
-            description="Source 1",
-            tag_names=["withdrawable"],
-        )
-        source2 = grant_points(
-            user=self.user,
-            points=200,
-            description="Source 2",
-            tag_names=["non-withdrawable"],  # This will fail
-        )
-
-        withdrawal_data = self.WithdrawalData(
-            real_name="张三",
-            id_number="110101199001011234",
-            phone_number="13800138000",
-            bank_name="中国银行",
-            bank_account="6222020200012345678",
-        )
-
-        withdrawal_amounts = {
-            source1.id: 50,
-            source2.id: 100,  # This will fail
-        }
-
-        # Should raise error
-        with self.assertRaises(PointSourceNotWithdrawableError):
-            create_batch_withdrawal_requests(
-                user=self.user,
-                withdrawal_amounts=withdrawal_amounts,
-                withdrawal_data=withdrawal_data,
-            )
-
-        # No requests should be created due to atomicity
-        self.assertEqual(
-            self.WithdrawalRequest.objects.filter(user=self.user).count(), 0
-        )
-
-
-class WithdrawalLifecycleTests(TestCase):
-    """Cover single withdrawal creation and lifecycle helpers."""
-
-    def setUp(self):
-        """Create users, tag and point source for withdrawal scenarios."""
-        self.user = get_user_model().objects.create_user(username="withdraw-user")
-        self.admin = get_user_model().objects.create_user(
-            username="withdraw-admin", is_staff=True
-        )
-        self.withdrawable_tag = Tag.objects.create(
-            name="withdrawable", slug="withdrawable", withdrawable=True
-        )
-        self.point_source = PointSource.objects.create(
-            user=self.user, initial_points=200, remaining_points=200
-        )
-        self.point_source.tags.add(self.withdrawable_tag)
-        self.withdrawal_data = WithdrawalData(
-            real_name="李四",
-            id_number="110101199001011234",
-            phone_number="13800138000",
-            bank_name="中国银行",
-            bank_account="6222020200012345678",
-        )
-
-    def test_create_withdrawal_request_success(self):
-        """Valid request persists applicant data and stays pending."""
-        request = create_withdrawal_request(
-            user=self.user,
-            point_source_id=self.point_source.id,
-            points=80,
-            withdrawal_data=self.withdrawal_data,
-        )
-
-        self.assertEqual(request.points, 80)
-        self.assertEqual(request.status, request.Status.PENDING)
-        self.assertEqual(request.real_name, "李四")
-        self.assertEqual(request.bank_name, "中国银行")
-
-    def test_create_withdrawal_request_missing_source(self):
-        """Raises when point source does not belong to user."""
-        with self.assertRaisesMessage(
-            PointSource.DoesNotExist, "积分来源不存在或不属于您。"
-        ):
-            create_withdrawal_request(
-                user=self.user,
-                point_source_id=9999,
-                points=10,
-                withdrawal_data=self.withdrawal_data,
-            )
-
-    def test_create_withdrawal_request_not_withdrawable(self):
-        """Non-withdrawable sources are rejected early."""
-        non_withdrawable = PointSource.objects.create(
-            user=self.user, initial_points=50, remaining_points=50
-        )
-        Tag.objects.create(name="locked", slug="locked", withdrawable=False)
-
-        with self.assertRaisesMessage(
-            PointSourceNotWithdrawableError, "该积分来源不支持提现。"
-        ):
-            create_withdrawal_request(
-                user=self.user,
-                point_source_id=non_withdrawable.id,
-                points=10,
-                withdrawal_data=self.withdrawal_data,
-            )
-
-    def test_create_withdrawal_request_invalid_amount(self):
-        """Amount must be a positive integer."""
-        with self.assertRaisesMessage(WithdrawalAmountError, "提现积分必须是正整数。"):
-            create_withdrawal_request(
-                user=self.user,
-                point_source_id=self.point_source.id,
-                points=0,
-                withdrawal_data=self.withdrawal_data,
-            )
-
-    def test_create_withdrawal_request_exceeds_balance(self):
-        """Reject when requested points exceed remaining balance."""
-        with self.assertRaisesMessage(
-            WithdrawalAmountError, "提现积分不能超过剩余积分"
-        ):
-            create_withdrawal_request(
-                user=self.user,
-                point_source_id=self.point_source.id,
-                points=500,
-                withdrawal_data=self.withdrawal_data,
-            )
-
-    def test_approve_withdrawal_happy_path(self):
-        """Approving deducts points and marks request completed."""
-        request = create_withdrawal_request(
-            user=self.user,
-            point_source_id=self.point_source.id,
-            points=60,
-            withdrawal_data=self.withdrawal_data,
-        )
-
-        transaction = approve_withdrawal(
-            withdrawal_request=request,
-            admin_user=self.admin,
-            admin_note="ok",
-        )
-
-        request.refresh_from_db()
-        self.point_source.refresh_from_db()
-
-        self.assertEqual(request.status, request.Status.COMPLETED)
-        self.assertEqual(request.processed_by, self.admin)
-        self.assertEqual(request.admin_note, "ok")
-        self.assertEqual(transaction.transaction_type, "WITHDRAW")
-        self.assertEqual(transaction.points, -60)
-        self.assertEqual(self.user.total_points, 140)
-
-    def test_approve_withdrawal_requires_pending(self):
-        """Only pending requests can be approved."""
-        request = create_withdrawal_request(
-            user=self.user,
-            point_source_id=self.point_source.id,
-            points=20,
-            withdrawal_data=self.withdrawal_data,
-        )
-        request.status = request.Status.REJECTED
-        request.save(update_fields=["status"])
-
-        with self.assertRaisesMessage(WithdrawalError, "只能批准待处理状态的申请"):
-            approve_withdrawal(request, admin_user=self.admin)
-
-    def test_reject_withdrawal_updates_status(self):
-        """Rejecting sets status, admin info and timestamp."""
-        request = create_withdrawal_request(
-            user=self.user,
-            point_source_id=self.point_source.id,
-            points=30,
-            withdrawal_data=self.withdrawal_data,
-        )
-
-        reject_withdrawal(
-            withdrawal_request=request, admin_user=self.admin, admin_note="reason"
-        )
-
-        request.refresh_from_db()
-        self.assertEqual(request.status, request.Status.REJECTED)
-        self.assertEqual(request.processed_by, self.admin)
-        self.assertEqual(request.admin_note, "reason")
-        self.assertIsNotNone(request.processed_at)
-
-    def test_reject_withdrawal_requires_pending(self):
-        """Rejecting non-pending requests raises error."""
-        request = create_withdrawal_request(
-            user=self.user,
-            point_source_id=self.point_source.id,
-            points=30,
-            withdrawal_data=self.withdrawal_data,
-        )
-        request.status = request.Status.COMPLETED
-        request.save(update_fields=["status"])
-
-        with self.assertRaisesMessage(WithdrawalError, "只能拒绝待处理状态的申请"):
-            reject_withdrawal(request, admin_user=self.admin)
-
-    def test_cancel_withdrawal_flow(self):
-        """Users can cancel pending requests; others raise errors."""
-        request = create_withdrawal_request(
-            user=self.user,
-            point_source_id=self.point_source.id,
-            points=20,
-            withdrawal_data=self.withdrawal_data,
-        )
-
-        cancel_withdrawal(request)
-
-        request.refresh_from_db()
-        self.assertEqual(request.status, request.Status.CANCELLED)
-        self.assertIsNotNone(request.processed_at)
-
-        with self.assertRaisesMessage(WithdrawalError, "只能取消待处理状态的申请"):
-            cancel_withdrawal(request)
+        # Try to reject - should fail
+        with self.assertRaises(services.WithdrawalError) as cm:
+            services.reject_withdrawal(withdrawal.id, self.admin, "Changed mind")
+        self.assertIn("状态无效", str(cm.exception))

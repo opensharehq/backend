@@ -1,0 +1,214 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    .grant-points-form {
+        max-width: 800px;
+        margin: 20px auto;
+    }
+    .selected-items {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+    .selected-items h3 {
+        margin-top: 0;
+        font-size: 16px;
+        color: #333;
+    }
+    .selected-items ul {
+        list-style: none;
+        padding: 0;
+        margin: 10px 0 0 0;
+    }
+    .selected-items li {
+        padding: 5px 0;
+        border-bottom: 1px solid #e9ecef;
+    }
+    .selected-items li:last-child {
+        border-bottom: none;
+    }
+    .form-row {
+        margin-bottom: 15px;
+    }
+    .form-row label {
+        display: block;
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+    .form-row .help {
+        font-size: 12px;
+        color: #666;
+        margin-top: 5px;
+    }
+    .errorlist {
+        list-style: none;
+        padding: 0;
+        margin: 10px 0;
+    }
+    .errorlist li {
+        color: #ba2121;
+        background-color: #ffefef;
+        border: 1px solid #ba2121;
+        border-radius: 4px;
+        padding: 10px;
+        margin-bottom: 10px;
+    }
+    .submit-row {
+        padding: 15px 0;
+        border-top: 1px solid #ddd;
+        margin-top: 20px;
+    }
+    .submit-row input[type="submit"],
+    .submit-row .button {
+        margin-right: 10px;
+    }
+    ul.radiolist {
+        list-style: none;
+        padding: 0;
+    }
+    ul.radiolist li {
+        margin: 5px 0;
+    }
+</style>
+{% endblock extrastyle %}
+
+{% block content %}
+<div class="grant-points-form">
+    <h1>{{ title }}</h1>
+
+    {% if messages %}
+    <ul class="messagelist">
+        {% for message in messages %}
+        <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    <div class="selected-items">
+        <h3>选中的对象：</h3>
+        <ul>
+            {% if users %}
+                {% for user in users %}
+                <li>{{ user.username }} ({{ user.email }})</li>
+                {% endfor %}
+            {% elif orgs %}
+                {% for org in orgs %}
+                <li>{{ org.name }} ({{ org.slug }})</li>
+                {% endfor %}
+            {% endif %}
+        </ul>
+    </div>
+
+    {% if form.non_field_errors %}
+    <ul class="errorlist">
+        {% for error in form.non_field_errors %}
+        <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    <form method="post" action="">
+        {% csrf_token %}
+
+        <div class="form-row">
+            {{ form.point_type.label_tag }}
+            {% if form.point_type.errors %}
+            <ul class="errorlist">
+                {% for error in form.point_type.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {{ form.point_type }}
+            {% if form.point_type.help_text %}
+            <p class="help">{{ form.point_type.help_text }}</p>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            {{ form.amount.label_tag }}
+            {% if form.amount.errors %}
+            <ul class="errorlist">
+                {% for error in form.amount.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {{ form.amount }}
+            {% if form.amount.help_text %}
+            <p class="help">{{ form.amount.help_text }}</p>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            {{ form.reason.label_tag }}
+            {% if form.reason.errors %}
+            <ul class="errorlist">
+                {% for error in form.reason.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {{ form.reason }}
+            {% if form.reason.help_text %}
+            <p class="help">{{ form.reason.help_text }}</p>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            {{ form.tag.label_tag }}
+            {% if form.tag.errors %}
+            <ul class="errorlist">
+                {% for error in form.tag.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {{ form.tag }}
+            {% if form.tag.help_text %}
+            <p class="help">{{ form.tag.help_text }}</p>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            {{ form.expires_at.label_tag }}
+            {% if form.expires_at.errors %}
+            <ul class="errorlist">
+                {% for error in form.expires_at.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {{ form.expires_at }}
+            {% if form.expires_at.help_text %}
+            <p class="help">{{ form.expires_at.help_text }}</p>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            {{ form.reference_id.label_tag }}
+            {% if form.reference_id.errors %}
+            <ul class="errorlist">
+                {% for error in form.reference_id.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {{ form.reference_id }}
+            {% if form.reference_id.help_text %}
+            <p class="help">{{ form.reference_id.help_text }}</p>
+            {% endif %}
+        </div>
+
+        <div class="submit-row">
+            <input type="submit" value="提交发放" class="default" />
+            <a href="{% if users %}{% url 'admin:accounts_user_changelist' %}{% else %}{% url 'admin:accounts_organization_changelist' %}{% endif %}" class="button cancel-link">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock content %}

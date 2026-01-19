@@ -1,0 +1,137 @@
+{% extends "horizontal_base.html" %}
+
+{% block title %}{{ org.name }} - 组织钱包{% endblock title %}
+
+{% block extra_css %}
+    <style>
+        .icon-lg {
+            width: 48px;
+            height: 48px;
+        }
+    </style>
+{% endblock extra_css %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">{{ org.name }} - 组织钱包</h4>
+        </div>
+        <div class="d-flex align-items-center flex-wrap text-nowrap gap-2">
+            <a href="{% url 'points:allocation_config' %}" class="btn btn-outline-primary btn-icon-text">
+                <i data-lucide="share-2" class="btn-icon-prepend"></i> 分配积分
+            </a>
+            <a href="{% url 'points:org_transactions' org.slug %}"
+               class="btn btn-outline-primary btn-icon-text">
+                <i data-lucide="list" class="btn-icon-prepend"></i> 完整记录
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <!-- 积分概览 -->
+        <div class="col-lg-4 grid-margin stretch-card">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">积分概览</h6>
+                    <div class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom">
+                        <span class="text-muted">总积分</span>
+                        <span class="fs-3 fw-bold text-primary">{{ balance.total }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <span class="text-muted">
+                            <i data-lucide="banknote" class="me-1"></i> 现金积分
+                        </span>
+                        <span class="fs-5 fw-semibold text-success">{{ balance.cash }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <span class="text-muted">
+                            <i data-lucide="gift" class="me-1"></i> 礼物积分
+                        </span>
+                        <span class="fs-5 fw-semibold text-info">{{ balance.gift }}</span>
+                    </div>
+                    {% if balance.by_tag %}
+                        <hr>
+                        <h6 class="text-muted mb-3">按标签分类</h6>
+                        {% for tag_slug, amount in balance.by_tag.items %}
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="badge bg-light text-dark">{{ tag_slug }}</span>
+                                <span class="fw-semibold">{{ amount }}</span>
+                            </div>
+                        {% endfor %}
+                        {% if balance.gift_no_tag > 0 %}
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="badge bg-secondary">无标签</span>
+                                <span class="fw-semibold">{{ balance.gift_no_tag }}</span>
+                            </div>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <!-- 最近交易 -->
+        <div class="col-lg-8 grid-margin stretch-card">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">最近交易</h6>
+                    {% if recent_transactions %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>类型</th>
+                                        <th>金额</th>
+                                        <th>描述</th>
+                                        <th>标签</th>
+                                        <th>时间</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for txn in recent_transactions %}
+                                        <tr>
+                                            <td>
+                                                {% if txn.transaction_type == "earn" %}
+                                                    <span class="badge bg-success">获取</span>
+                                                {% elif txn.transaction_type == "spend" %}
+                                                    <span class="badge bg-warning text-dark">消费</span>
+                                                {% elif txn.transaction_type == "withdraw" %}
+                                                    <span class="badge bg-info">提现</span>
+                                                {% else %}
+                                                    <span class="badge bg-secondary">过期</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if txn.amount > 0 %}
+                                                    <span class="text-success fw-semibold">+{{ txn.amount }}</span>
+                                                {% else %}
+                                                    <span class="text-danger fw-semibold">{{ txn.amount }}</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>{{ txn.description|truncatechars:30 }}</td>
+                                            <td>
+                                                {% if txn.tag %}
+                                                    <span class="badge bg-light text-dark">{{ txn.tag.name }}</span>
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                            <td class="text-muted small">{{ txn.created_at|date:"Y-m-d H:i" }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="text-center mt-3">
+                            <a href="{% url 'points:org_transactions' org.slug %}" class="btn btn-link">
+                                查看全部记录
+                            </a>
+                        </div>
+                    {% else %}
+                        <div class="text-center py-5">
+                            <i data-lucide="inbox" class="text-muted mb-3 icon-lg"></i>
+                            <p class="text-muted">暂无交易记录</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

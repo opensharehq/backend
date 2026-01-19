@@ -31,7 +31,6 @@ from accounts.services.account_merge import (
 )
 from common.test_utils import CacheClearTestCase
 from messages.models import Message
-from points.models import PointSource
 from shop.models import Redemption, ShopItem
 
 
@@ -267,15 +266,11 @@ class AccountMergeViewTests(CacheClearTestCase):
         merge_request = AccountMergeRequest.objects.get(source_user=self.source)
         assert merge_request.status == AccountMergeRequest.Status.PENDING
         assert merge_request.message is not None
-        assert merge_request.asset_snapshot.get("total_points") == 0
         mock_send.assert_called_once()
 
     def test_accept_request_moves_assets(self):
-        """Target accepting merges points, orgs, addresses, and deactivates source."""
+        """Target accepting merges orgs, addresses, and deactivates source."""
         # source assets
-        PointSource.objects.create(
-            user=self.source, initial_points=100, remaining_points=100
-        )
         UserSocialAuth.objects.create(
             user=self.source, provider="github", uid="uid-source"
         )
@@ -335,7 +330,7 @@ class AccountMergeViewTests(CacheClearTestCase):
             status=AccountMergeRequest.Status.PENDING,
             approve_token="token-b",
             expires_at=timezone.now() + timedelta(days=7),
-            asset_snapshot={"total_points": 100},
+            asset_snapshot={},
         )
 
         perform_merge(merge_request)
@@ -347,8 +342,6 @@ class AccountMergeViewTests(CacheClearTestCase):
         assert merge_request.status == AccountMergeRequest.Status.ACCEPTED
         assert not self.source.is_active
         assert self.source.merged_into == self.target
-        assert PointSource.objects.filter(user=self.target).count() == 1
-        assert PointSource.objects.filter(user=self.source).count() == 0
 
         # shipping address dedup keeps single entry
         assert ShippingAddress.objects.filter(user=self.target).count() == 1

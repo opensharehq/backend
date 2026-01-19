@@ -1,171 +1,126 @@
 {% extends "horizontal_base.html" %}
-{% load static %}
 
 {% block title %}提现记录{% endblock title %}
+
+{% block extra_css %}
+    <style>
+        .icon-lg {
+            width: 48px;
+            height: 48px;
+        }
+    </style>
+{% endblock extra_css %}
 
 {% block content %}
     <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
         <div>
             <h4 class="mb-3 mb-md-0">提现记录</h4>
         </div>
-        <div class="d-flex align-items-center flex-wrap text-nowrap">
-            <a href="{% url 'points:my_points' %}" class="btn btn-outline-secondary btn-icon-text mb-2 mb-md-0">
-                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回积分页面
+        <div class="d-flex gap-2">
+            <a href="{% url 'points:create_withdrawal' %}" class="btn btn-primary btn-icon-text">
+                <i data-lucide="plus" class="btn-icon-prepend"></i> 申请提现
+            </a>
+            <a href="{% url 'points:user_wallet' %}" class="btn btn-outline-secondary btn-icon-text">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回钱包
             </a>
         </div>
     </div>
-
-    <div class="row">
-        <div class="col-12 grid-margin stretch-card">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="card-title">
-                        <i data-lucide="list" class="icon-sm"></i> 我的提现申请
-                    </h6>
-
-                    {% if page_obj %}
-                        <div class="table-responsive">
-                            <table class="table table-hover">
-                                <thead>
-                                    <tr>
-                                        <th width="10%">申请编号</th>
-                                        <th width="15%">申请时间</th>
-                                        <th width="10%">提现积分</th>
-                                        <th width="15%">状态</th>
-                                        <th width="15%">处理时间</th>
-                                        <th width="15%">处理人</th>
-                                        <th width="20%">操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for withdrawal in page_obj %}
-                                        <tr>
-                                            <td class="fw-bold">#{{ withdrawal.id }}</td>
-                                            <td>{{ withdrawal.created_at|date:"Y-m-d H:i" }}</td>
-                                            <td class="fw-bold">{{ withdrawal.points }}</td>
-                                            <td>
-                                                {% if withdrawal.status == 'PENDING' %}
-                                                    <span class="badge bg-warning">{{ withdrawal.get_status_display }}</span>
-                                                {% elif withdrawal.status == 'APPROVED' %}
-                                                    <span class="badge bg-info">{{ withdrawal.get_status_display }}</span>
-                                                {% elif withdrawal.status == 'REJECTED' %}
-                                                    <span class="badge bg-danger">{{ withdrawal.get_status_display }}</span>
-                                                {% elif withdrawal.status == 'COMPLETED' %}
-                                                    <span class="badge bg-success">{{ withdrawal.get_status_display }}</span>
-                                                {% elif withdrawal.status == 'CANCELLED' %}
-                                                    <span class="badge bg-secondary">{{ withdrawal.get_status_display }}</span>
-                                                {% endif %}
-                                            </td>
-                                            <td>
-                                                {% if withdrawal.processed_at %}
-                                                    {{ withdrawal.processed_at|date:"Y-m-d H:i" }}
-                                                {% else %}
-                                                    <span class="text-muted">-</span>
-                                                {% endif %}
-                                            </td>
-                                            <td>
-                                                {% if withdrawal.processed_by %}
-                                                    {{ withdrawal.processed_by.username }}
-                                                {% else %}
-                                                    <span class="text-muted">-</span>
-                                                {% endif %}
-                                            </td>
-                                            <td>
-                                                <a href="{% url 'points:withdrawal_detail' withdrawal.id %}" class="btn btn-sm btn-outline-primary">
-                                                    <i data-lucide="eye" class="icon-xs"></i> 查看详情
-                                                </a>
-                                                {% if withdrawal.status == 'PENDING' %}
-                                                    <form method="post" action="{% url 'points:withdrawal_cancel' withdrawal.id %}" class="d-inline" onsubmit="return confirm('确定要取消这个提现申请吗？');">
-                                                        {% csrf_token %}
-                                                        <button type="submit" class="btn btn-sm btn-outline-danger">
-                                                            <i data-lucide="x-circle" class="icon-xs"></i> 取消
-                                                        </button>
-                                                    </form>
-                                                {% endif %}
-                                            </td>
-                                        </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <!-- Pagination -->
-                        {% if page_obj.has_other_pages %}
-                            <nav aria-label="Page navigation" class="mt-3">
-                                <ul class="pagination justify-content-center">
-                                    {% if page_obj.has_previous %}
-                                        <li class="page-item">
-                                            <a class="page-link" href="?page=1">
-                                                <i data-lucide="chevrons-left" class="icon-xs"></i>
-                                            </a>
-                                        </li>
-                                        <li class="page-item">
-                                            <a class="page-link" href="?page={{ page_obj.previous_page_number }}">
-                                                <i data-lucide="chevron-left" class="icon-xs"></i>
-                                            </a>
-                                        </li>
-                                    {% else %}
-                                        <li class="page-item disabled">
-                                            <span class="page-link">
-                                                <i data-lucide="chevrons-left" class="icon-xs"></i>
-                                            </span>
-                                        </li>
-                                        <li class="page-item disabled">
-                                            <span class="page-link">
-                                                <i data-lucide="chevron-left" class="icon-xs"></i>
-                                            </span>
-                                        </li>
-                                    {% endif %}
-
-                                    <li class="page-item disabled">
-                                        <span class="page-link">
-                                            第 {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} 页
-                                        </span>
-                                    </li>
-
-                                    {% if page_obj.has_next %}
-                                        <li class="page-item">
-                                            <a class="page-link" href="?page={{ page_obj.next_page_number }}">
-                                                <i data-lucide="chevron-right" class="icon-xs"></i>
-                                            </a>
-                                        </li>
-                                        <li class="page-item">
-                                            <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">
-                                                <i data-lucide="chevrons-right" class="icon-xs"></i>
-                                            </a>
-                                        </li>
-                                    {% else %}
-                                        <li class="page-item disabled">
-                                            <span class="page-link">
-                                                <i data-lucide="chevron-right" class="icon-xs"></i>
-                                            </span>
-                                        </li>
-                                        <li class="page-item disabled">
-                                            <span class="page-link">
-                                                <i data-lucide="chevrons-right" class="icon-xs"></i>
-                                            </span>
-                                        </li>
-                                    {% endif %}
-                                </ul>
-                            </nav>
-                        {% endif %}
-                    {% else %}
-                        <div class="alert alert-info" role="alert">
-                            <i data-lucide="info" class="icon-sm"></i>
-                            您还没有提交过提现申请。
-                        </div>
-                    {% endif %}
+    <div class="card">
+        <div class="card-body">
+            {% if page_obj %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>金额</th>
+                                <th>状态</th>
+                                <th>真实姓名</th>
+                                <th>银行</th>
+                                <th>申请时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for w in page_obj %}
+                                <tr>
+                                    <td class="text-muted">#{{ w.id }}</td>
+                                    <td class="fw-semibold">{{ w.amount }}</td>
+                                    <td>
+                                        {% if w.status == "pending" %}
+                                            <span class="badge bg-warning text-dark">待审核</span>
+                                        {% elif w.status == "approved" %}
+                                            <span class="badge bg-info">已批准</span>
+                                        {% elif w.status == "rejected" %}
+                                            <span class="badge bg-danger">已拒绝</span>
+                                        {% elif w.status == "completed" %}
+                                            <span class="badge bg-success">已完成</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">已取消</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ w.real_name }}</td>
+                                    <td>{{ w.bank_name }}</td>
+                                    <td class="text-muted small">{{ w.created_at|date:"Y-m-d H:i" }}</td>
+                                    <td>
+                                        {% if w.status == "pending" %}
+                                            <form method="post"
+                                                  action="{% url 'points:cancel_withdrawal' w.id %}"
+                                                  class="d-inline"
+                                                  onsubmit="return confirm('确定要取消此提现申请吗？');">
+                                                {% csrf_token %}
+                                                <button type="submit" class="btn btn-sm btn-outline-danger">取消</button>
+                                            </form>
+                                        {% elif w.status == "rejected" and w.admin_note %}
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-secondary"
+                                                    data-bs-toggle="tooltip"
+                                                    title="{{ w.admin_note }}">查看原因</button>
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
-            </div>
+                <!-- 分页 -->
+                {% if page_obj.has_other_pages %}
+                    <nav class="mt-4">
+                        <ul class="pagination justify-content-center">
+                            {% if page_obj.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}">上一页</a>
+                                </li>
+                            {% endif %}
+                            <li class="page-item disabled">
+                                <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+                            </li>
+                            {% if page_obj.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}">下一页</a>
+                                </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5">
+                    <i data-lucide="inbox" class="text-muted mb-3 icon-lg"></i>
+                    <p class="text-muted">暂无提现记录</p>
+                </div>
+            {% endif %}
         </div>
     </div>
 {% endblock content %}
 
-{% block plugin_js %}{% endblock plugin_js %}
-
-{% block custom_js %}
+{% block extra_js %}
     <script>
-        // Initialize Lucide icons after page load
-        lucide.createIcons();
+        // 初始化 tooltips
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl)
+        })
     </script>
-{% endblock custom_js %}
+{% endblock extra_js %}

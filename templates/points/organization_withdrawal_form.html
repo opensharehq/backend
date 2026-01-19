@@ -1,0 +1,106 @@
+{% extends "horizontal_base.html" %}
+
+{% block title %}{{ org.name }} - 申请提现{% endblock title %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
+        <div>
+            <h4 class="mb-3 mb-md-0">{{ org.name }} - 申请提现</h4>
+        </div>
+        <div>
+            <a href="{% url 'points:org_wallet' org.slug %}"
+               class="btn btn-outline-secondary btn-icon-text">
+                <i data-lucide="arrow-left" class="btn-icon-prepend"></i> 返回钱包
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-body">
+                    {% if has_pending %}
+                        <div class="alert alert-warning">
+                            <i data-lucide="alert-triangle" class="me-2"></i>
+                            组织有待处理的提现申请，请等待处理完成后再申请新的提现。
+                        </div>
+                    {% else %}
+                        <form method="post">
+                            {% csrf_token %}
+                            <div class="mb-3">
+                                <label for="id_amount" class="form-label">提现金额 <span class="text-danger">*</span></label>
+                                {{ form.amount }}
+                                {% if form.amount.errors %}
+                                    <div class="text-danger small mt-1">{{ form.amount.errors.0 }}</div>
+                                {% endif %}
+                                <div class="form-text">当前可用现金积分: {{ balance.cash }}</div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="id_real_name" class="form-label">
+                                    收款人姓名 <span class="text-danger">*</span>
+                                </label>
+                                {{ form.real_name }}
+                                {% if form.real_name.errors %}
+                                    <div class="text-danger small mt-1">{{ form.real_name.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="mb-3">
+                                <label for="id_phone" class="form-label">联系电话 <span class="text-danger">*</span></label>
+                                {{ form.phone }}
+                                {% if form.phone.errors %}
+                                    <div class="text-danger small mt-1">{{ form.phone.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="mb-3">
+                                <label for="id_bank_name" class="form-label">银行名称 <span class="text-danger">*</span></label>
+                                {{ form.bank_name }}
+                                {% if form.bank_name.errors %}
+                                    <div class="text-danger small mt-1">{{ form.bank_name.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="mb-3">
+                                <label for="id_bank_account" class="form-label">
+                                    银行账号 <span class="text-danger">*</span>
+                                </label>
+                                {{ form.bank_account }}
+                                {% if form.bank_account.errors %}
+                                    <div class="text-danger small mt-1">{{ form.bank_account.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="alert alert-info">
+                                <h6><i data-lucide="info" class="me-2"></i>提现说明</h6>
+                                <ul class="mb-0 small">
+                                    <li>提现申请提交后需要管理员审核</li>
+                                    <li>审核通过后，积分将从组织账户中扣除</li>
+                                    <li>款项将在审核通过后的 3-5 个工作日内打入指定银行账户</li>
+                                    <li>请确保银行账户信息正确，如因信息错误导致打款失败，责任自负</li>
+                                </ul>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i data-lucide="send" class="me-1"></i> 提交申请
+                            </button>
+                        </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">组织积分余额</h6>
+                    <div class="d-flex justify-content-between align-items-center mb-3 pb-3 border-bottom">
+                        <span class="text-muted">现金积分</span>
+                        <span class="fs-4 fw-bold text-success">{{ balance.cash }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-muted">礼物积分</span>
+                        <span class="text-muted">{{ balance.gift }}</span>
+                    </div>
+                    <div class="form-text mt-3">
+                        <i data-lucide="info" class="me-1"></i>
+                        只有现金积分可以提现
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

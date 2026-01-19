@@ -17,7 +17,6 @@ from accounts.models import (
     ShippingAddress,
     UserProfile,
 )
-from points.models import PointSource, PointTransaction, WithdrawalRequest
 from shop.models import Redemption
 
 logger = logging.getLogger(__name__)
@@ -97,26 +96,6 @@ def _migrate_social_accounts(merge_request, source, target):
         merge_request,
         "social_auth",
         counts={"migrated": migrated, "conflict": conflicts},
-    )
-
-
-def _migrate_points_and_transactions(merge_request, source, target):
-    """Move points, transactions, and withdrawals."""
-    sources_moved = PointSource.objects.filter(user=source).update(user=target)
-    transactions_moved = PointTransaction.objects.filter(user=source).update(
-        user=target
-    )
-    withdrawals_moved = WithdrawalRequest.objects.filter(user=source).update(
-        user=target
-    )
-    _log(
-        merge_request,
-        "points",
-        counts={"migrated": sources_moved + transactions_moved + withdrawals_moved},
-        notes=(
-            f"sources={sources_moved},"
-            f"transactions={transactions_moved},withdrawals={withdrawals_moved}"
-        ),
     )
 
 
@@ -279,7 +258,6 @@ def perform_merge(request_obj: AccountMergeRequest) -> AccountMergeRequest:
         raise AccountMergeError(msg)
 
     _migrate_social_accounts(merge_request, source, target)
-    _migrate_points_and_transactions(merge_request, source, target)
     _migrate_redemptions(merge_request, source, target)
     _migrate_shipping_addresses(merge_request, source, target)
     _migrate_organization_memberships(merge_request, source, target)
@@ -291,11 +269,6 @@ def perform_merge(request_obj: AccountMergeRequest) -> AccountMergeRequest:
     merge_request.processed_at = now
     merge_request.processed_by = target
     merge_request.save(update_fields=["status", "processed_at", "processed_by"])
-
-    # Clear points caches for both users
-    for user in (source, target):
-        if hasattr(user, "clear_points_cache"):
-            user.clear_points_cache()
 
     logger.info(
         "Account merge completed: %s -> %s, request=%s",

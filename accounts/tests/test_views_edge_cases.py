@@ -600,35 +600,6 @@ class ShopListViewEdgeCaseTests(TestCase):
         response = self.client.get(reverse("accounts:shop_list"))
         self.assertTemplateUsed(response, "shop_list.html")
 
-    def test_shop_list_view_items_prefetch_tags(self):
-        """Test that shop items are prefetched with tags."""
-        from points.models import Tag
-        from shop.models import ShopItem
-
-        User.objects.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="password123",
-        )
-
-        # Create tags and item
-        tag1 = Tag.objects.create(name="tag1")
-        tag2 = Tag.objects.create(name="tag2")
-        item = ShopItem.objects.create(
-            name="Item",
-            description="Description",
-            cost=50,
-            is_active=True,
-        )
-        item.allowed_tags.add(tag1, tag2)
-
-        self.client.login(username="testuser", password="password123")
-        response = self.client.get(reverse("accounts:shop_list"))
-
-        # Verify items are in context with prefetched tags
-        items = response.context["items"]
-        assert item in items
-
 
 class RedemptionListViewEdgeCaseTests(TestCase):
     """Edge case tests for redemption list view."""
@@ -644,91 +615,9 @@ class RedemptionListViewEdgeCaseTests(TestCase):
         response = self.client.get(reverse("accounts:redemption_list"))
         self.assertTemplateUsed(response, "redemption_list.html")
 
-    def test_redemption_list_view_select_related(self):
-        """Test that redemptions are select_related with item and transaction."""
-        from points.models import PointSource, PointTransaction, Tag
-        from shop.models import Redemption, ShopItem
-
-        user = User.objects.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="password123",
-        )
-
-        # Create test data
-        item = ShopItem.objects.create(
-            name="Test Item",
-            description="Description",
-            cost=50,
-            is_active=True,
-        )
-        tag = Tag.objects.create(name="test-tag")
-        source = PointSource.objects.create(
-            user_profile=user,
-            initial_points=100,
-            remaining_points=50,
-        )
-        source.tags.add(tag)
-
-        transaction = PointTransaction.objects.create(
-            user_profile=user,
-            points=-50,
-            transaction_type=PointTransaction.TransactionType.SPEND,
-            description="Test redemption",
-        )
-
-        Redemption.objects.create(
-            user_profile=user,
-            item=item,
-            points_cost_at_redemption=50,
-            transaction=transaction,
-            status=Redemption.StatusChoices.COMPLETED,
-        )
-
-        self.client.login(username="testuser", password="password123")
-        response = self.client.get(reverse("accounts:redemption_list"))
-
-        # Verify redemptions are in context
-        redemptions = response.context["redemptions"]
-        assert redemptions.count() == 1
-
 
 class RedeemConfirmViewEdgeCaseTests(TestCase):
     """Edge case tests for redeem confirm view."""
-
-    def test_redeem_confirm_get_exact_points_match(self):
-        """Test GET when user has exact points needed."""
-        from points.models import PointSource, Tag
-        from shop.models import ShopItem
-
-        user = User.objects.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="password123",
-        )
-
-        # User has exactly the cost amount
-        tag = Tag.objects.create(name="test-tag")
-        source = PointSource.objects.create(
-            user_profile=user,
-            initial_points=50,
-            remaining_points=50,
-        )
-        source.tags.add(tag)
-
-        item = ShopItem.objects.create(
-            name="Test Item",
-            description="Description",
-            cost=50,
-            is_active=True,
-        )
-
-        self.client.login(username="testuser", password="password123")
-        response = self.client.get(reverse("accounts:redeem_confirm", args=[item.id]))
-
-        assert response.context["can_afford"] is True
-        assert response.context["remaining_after_redeem"] == 0
-        assert response.context["points_needed"] == 0
 
     def test_redeem_confirm_post_redemption_error_message(self):
         """Test that RedemptionError displays appropriate error message."""
@@ -757,83 +646,9 @@ class RedeemConfirmViewEdgeCaseTests(TestCase):
         assert len(messages) == 1
         assert "兑换失败" in str(messages[0])
 
-    def test_redeem_confirm_post_insufficient_points_message(self):
-        """Test that InsufficientPointsError displays appropriate message."""
-        from shop.models import ShopItem
-
-        User.objects.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="password123",
-        )
-
-        # Create expensive item with no points
-        expensive_item = ShopItem.objects.create(
-            name="Expensive Item",
-            description="Description",
-            cost=1000,
-            is_active=True,
-        )
-
-        self.client.login(username="testuser", password="password123")
-        response = self.client.post(
-            reverse("accounts:redeem_confirm", args=[expensive_item.id]), follow=True
-        )
-
-        messages = list(response.context["messages"])
-        assert len(messages) == 1
-        assert "积分不足" in str(messages[0])
-
-    def test_redeem_confirm_post_success_message(self):
-        """Test that successful redemption displays success message."""
-        from points.models import PointSource, Tag
-        from shop.models import ShopItem
-
-        user = User.objects.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="password123",
-        )
-
-        tag = Tag.objects.create(name="test-tag")
-        source = PointSource.objects.create(
-            user_profile=user,
-            initial_points=100,
-            remaining_points=100,
-        )
-        source.tags.add(tag)
-
-        item = ShopItem.objects.create(
-            name="Test Item",
-            description="Description",
-            cost=50,
-            is_active=True,
-        )
-
-        self.client.login(username="testuser", password="password123")
-        response = self.client.post(
-            reverse("accounts:redeem_confirm", args=[item.id]), follow=True
-        )
-
-        messages = list(response.context["messages"])
-        assert len(messages) == 1
-        assert "成功兑换" in str(messages[0])
-        assert "Test Item" in str(messages[0])
-
 
 class PublicProfileViewEdgeCaseTests(CacheClearTestCase):
     """Edge case tests for public profile view."""
-
-    def test_public_profile_view_with_zero_points(self):
-        """Test public profile displays zero points correctly."""
-        User.objects.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="testpass123",
-        )
-
-        response = self.client.get(reverse("public_profile", args=["testuser"]))
-        assert response.context["total_points"] == 0
 
     def test_public_profile_view_empty_work_and_education(self):
         """Test public profile with no work experience or education."""

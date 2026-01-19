@@ -2,6 +2,7 @@
 
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.shortcuts import redirect
 
 from .models import (
     AccountMergeLog,
@@ -50,11 +51,21 @@ class UserAdmin(BaseUserAdmin):
     search_fields = ("username", "email", "first_name", "last_name")
     ordering = ("-date_joined",)
     date_hierarchy = "date_joined"
+    actions = ["grant_points_action"]
 
     @admin.display(description="总积分", ordering="username")
     def display_total_points(self, obj):
         """Display total points for the user."""
-        return obj.total_points
+        from points import services
+
+        return services.get_balance(obj)
+
+    @admin.action(description="发放积分")
+    def grant_points_action(self, request, queryset):
+        """给选中的用户发放积分."""
+        selected = queryset.values_list("id", flat=True)
+        ids_param = ",".join(map(str, selected))
+        return redirect(f"/admin/points/grant-to-users/?ids={ids_param}")
 
 
 @admin.register(UserProfile)
@@ -331,6 +342,7 @@ class OrganizationAdmin(admin.ModelAdmin):
     date_hierarchy = "created_at"
     inlines = [OrganizationMembershipInline]
     prepopulated_fields = {"slug": ("name",)}
+    actions = ["grant_points_action"]
 
     fieldsets = (
         (
@@ -357,6 +369,13 @@ class OrganizationAdmin(admin.ModelAdmin):
     def member_count(self, obj):
         """Display count of organization members."""
         return obj.memberships.count()
+
+    @admin.action(description="发放积分")
+    def grant_points_action(self, request, queryset):
+        """给选中的组织发放积分."""
+        selected = queryset.values_list("id", flat=True)
+        ids_param = ",".join(map(str, selected))
+        return redirect(f"/admin/points/grant-to-orgs/?ids={ids_param}")
 
 
 @admin.register(OrganizationMembership)

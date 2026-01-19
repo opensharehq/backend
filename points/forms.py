@@ -1,32 +1,24 @@
-"""Forms for the points app."""
-
-import re
+"""Forms for points application."""
 
 from django import forms
 
-from .models import WithdrawalRequest
+from . import services
+from .models import PointType, Tag, WithdrawalRequest
 
 
 class WithdrawalRequestForm(forms.ModelForm):
-    """提现申请表单."""
+    """Form for creating withdrawal requests."""
 
     class Meta:
-        """表单元数据配置."""
+        """Form metadata."""
 
         model = WithdrawalRequest
-        fields = [
-            "points",
-            "real_name",
-            "id_number",
-            "phone_number",
-            "bank_name",
-            "bank_account",
-        ]
+        fields = ["amount", "real_name", "phone", "bank_name", "bank_account"]
         widgets = {
-            "points": forms.NumberInput(
+            "amount": forms.NumberInput(
                 attrs={
                     "class": "form-control",
-                    "placeholder": "请输入提现积分数量",
+                    "placeholder": "请输入提现金额",
                     "min": "1",
                 }
             ),
@@ -34,291 +26,122 @@ class WithdrawalRequestForm(forms.ModelForm):
                 attrs={
                     "class": "form-control",
                     "placeholder": "请输入真实姓名",
-                    "maxlength": "100",
                 }
             ),
-            "id_number": forms.TextInput(
+            "phone": forms.TextInput(
                 attrs={
                     "class": "form-control",
-                    "placeholder": "请输入身份证号（18位）",
-                    "maxlength": "18",
-                }
-            ),
-            "phone_number": forms.TextInput(
-                attrs={
-                    "class": "form-control",
-                    "placeholder": "请输入手机号（11位）",
-                    "maxlength": "11",
+                    "placeholder": "请输入联系电话",
                 }
             ),
             "bank_name": forms.TextInput(
                 attrs={
                     "class": "form-control",
-                    "placeholder": "请输入开户银行名称",
-                    "maxlength": "100",
+                    "placeholder": "请输入银行名称，如：中国银行",
                 }
             ),
             "bank_account": forms.TextInput(
                 attrs={
                     "class": "form-control",
                     "placeholder": "请输入银行账号",
-                    "maxlength": "50",
                 }
             ),
         }
-        labels = {
-            "points": "提现积分数量",
-            "real_name": "真实姓名",
-            "id_number": "身份证号",
-            "phone_number": "手机号",
-            "bank_name": "开户银行",
-            "bank_account": "银行账号",
-        }
 
-    def __init__(self, *args, point_source=None, **kwargs):
-        """初始化表单, 保存积分来源引用."""
+    def __init__(self, owner, *args, **kwargs):
+        """Initialize form with owner."""
         super().__init__(*args, **kwargs)
-        self.point_source = point_source
+        self.owner = owner
 
-        # 如果有积分来源，设置提现积分的最大值
-        if point_source:
-            self.fields["points"].widget.attrs["max"] = point_source.remaining_points
-            self.fields[
-                "points"
-            ].help_text = f"可提现积分: {point_source.remaining_points}"
-
-    def clean_points(self):
-        """验证提现积分数量."""
-        points = self.cleaned_data.get("points")
-
-        if points is None:
-            msg = "请输入提现积分数量。"
+    def clean_amount(self):
+        """Validate amount against available balance."""
+        amount = self.cleaned_data["amount"]
+        if amount <= 0:
+            msg = "提现金额必须大于 0"
             raise forms.ValidationError(msg)
 
-        if points <= 0:
-            msg = "提现积分必须大于0。"
+        balance = services.get_balance(self.owner, PointType.CASH)
+        if amount > balance:
+            msg = f"现金积分不足，当前可用: {balance}"
             raise forms.ValidationError(msg)
 
-        # 如果有积分来源，验证是否超过剩余积分
-        if self.point_source and points > self.point_source.remaining_points:
-            msg = f"提现积分不能超过可用积分。可用积分: {self.point_source.remaining_points}"
+        return amount
+
+    def clean_phone(self):
+        """Validate phone number format."""
+        phone = self.cleaned_data["phone"]
+        # 简单的手机号验证（中国大陆手机号）
+        if not phone.isdigit() or len(phone) != 11:
+            msg = "请输入有效的手机号码（11位数字）"
             raise forms.ValidationError(msg)
-
-        return points
-
-    def clean_id_number(self):
-        """验证身份证号格式."""
-        id_number = self.cleaned_data.get("id_number")
-        if not id_number:
-            return id_number
-
-        # 验证长度
-        if len(id_number) != 18:
-            msg = "身份证号必须是18位。"
-            raise forms.ValidationError(msg)
-
-        # 验证格式：前17位是数字，最后一位是数字或X
-        pattern = r"^\d{17}[\dXx]$"
-        if not re.match(pattern, id_number):
-            msg = "身份证号格式不正确。"
-            raise forms.ValidationError(msg)
-
-        return id_number.upper()  # 统一转换为大写
-
-    def clean_phone_number(self):
-        """验证手机号格式."""
-        phone_number = self.cleaned_data.get("phone_number")
-        if not phone_number:
-            return phone_number
-
-        # 验证长度
-        if len(phone_number) != 11:
-            msg = "手机号必须是11位。"
-            raise forms.ValidationError(msg)
-
-        # 验证是否全是数字
-        if not phone_number.isdigit():
-            msg = "手机号只能包含数字。"
-            raise forms.ValidationError(msg)
-
-        # 验证是否以1开头
-        if not phone_number.startswith("1"):
-            msg = "手机号必须以1开头。"
-            raise forms.ValidationError(msg)
-
-        return phone_number
+        return phone
 
     def clean_bank_account(self):
-        """验证银行账号格式."""
-        bank_account = self.cleaned_data.get("bank_account")
-        if not bank_account:
-            return bank_account
-
-        # 移除空格和横杠
-        bank_account = bank_account.replace(" ", "").replace("-", "")
-
-        # 验证是否全是数字
-        if not bank_account.isdigit():
-            msg = "银行账号只能包含数字。"
+        """Validate bank account format."""
+        account = self.cleaned_data["bank_account"]
+        # 简单的银行卡号验证（16-19位数字）
+        cleaned = account.replace(" ", "").replace("-", "")
+        if not cleaned.isdigit() or not (16 <= len(cleaned) <= 19):
+            msg = "请输入有效的银行卡号（16-19位数字）"
             raise forms.ValidationError(msg)
-
-        # 验证长度（一般银行卡号是16-19位）
-        if len(bank_account) < 10 or len(bank_account) > 25:
-            msg = "银行账号长度不正确（应为10-25位）。"
-            raise forms.ValidationError(msg)
-
-        return bank_account
+        return cleaned
 
 
-class BatchWithdrawalInfoForm(forms.Form):
-    """批量提现基础信息表单."""
+class GrantPointsForm(forms.Form):
+    """Form for granting points to users or organizations."""
 
-    real_name = forms.CharField(
+    POINT_TYPE_CHOICES = [
+        (PointType.CASH.value, "现金积分"),
+        (PointType.GIFT.value, "礼物积分"),
+    ]
+
+    point_type = forms.ChoiceField(
+        choices=POINT_TYPE_CHOICES,
+        label="积分类型",
+        widget=forms.RadioSelect,
+    )
+    amount = forms.IntegerField(
+        min_value=1,
+        label="积分数量",
+        help_text="请输入正整数",
+        widget=forms.NumberInput(attrs={"class": "form-control"}),
+    )
+    reason = forms.CharField(
+        max_length=500,
+        label="发放描述",
+        widget=forms.Textarea(attrs={"rows": 3, "class": "form-control"}),
+    )
+    tag = forms.ModelChoiceField(
+        queryset=Tag.objects.all(),
+        required=False,
+        label="标签",
+        help_text="仅礼物积分需要选择标签",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+    expires_at = forms.DateField(
+        required=False,
+        label="过期时间",
+        widget=forms.DateInput(attrs={"type": "date", "class": "form-control"}),
+    )
+    reference_id = forms.CharField(
         max_length=100,
-        label="真实姓名",
-        widget=forms.TextInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请输入真实姓名",
-                "maxlength": "100",
-            }
-        ),
-    )
-    id_number = forms.CharField(
-        max_length=18,
-        label="身份证号",
-        widget=forms.TextInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请输入身份证号（18位）",
-                "maxlength": "18",
-            }
-        ),
-    )
-    phone_number = forms.CharField(
-        max_length=11,
-        label="手机号",
-        widget=forms.TextInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请输入手机号（11位）",
-                "maxlength": "11",
-            }
-        ),
-    )
-    bank_name = forms.CharField(
-        max_length=100,
-        label="开户银行",
-        widget=forms.TextInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请输入开户银行名称",
-                "maxlength": "100",
-            }
-        ),
-    )
-    bank_account = forms.CharField(
-        max_length=50,
-        label="银行账号",
-        widget=forms.TextInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请输入银行账号",
-                "maxlength": "50",
-            }
-        ),
+        required=False,
+        label="参考ID",
+        widget=forms.TextInput(attrs={"class": "form-control"}),
     )
 
-    def clean_id_number(self):
-        """验证身份证号格式."""
-        id_number = self.cleaned_data.get("id_number")
-        if not id_number:
-            return id_number
+    def clean(self):
+        """Validate form data."""
+        cleaned_data = super().clean()
+        point_type = cleaned_data.get("point_type")
+        tag = cleaned_data.get("tag")
 
-        # 验证长度
-        if len(id_number) != 18:
-            msg = "身份证号必须是18位。"
+        if point_type == PointType.GIFT.value and not tag:
+            msg = "礼物积分必须选择标签"
             raise forms.ValidationError(msg)
 
-        # 验证格式：前17位是数字，最后一位是数字或X
-        pattern = r"^\d{17}[\dXx]$"
-        if not re.match(pattern, id_number):
-            msg = "身份证号格式不正确。"
+        if point_type == PointType.CASH.value and tag:
+            msg = "现金积分不能选择标签"
             raise forms.ValidationError(msg)
 
-        return id_number.upper()  # 统一转换为大写
-
-    def clean_phone_number(self):
-        """验证手机号格式."""
-        phone_number = self.cleaned_data.get("phone_number")
-        if not phone_number:
-            return phone_number
-
-        # 验证长度
-        if len(phone_number) != 11:
-            msg = "手机号必须是11位。"
-            raise forms.ValidationError(msg)
-
-        # 验证是否全是数字
-        if not phone_number.isdigit():
-            msg = "手机号只能包含数字。"
-            raise forms.ValidationError(msg)
-
-        # 验证是否以1开头
-        if not phone_number.startswith("1"):
-            msg = "手机号必须以1开头。"
-            raise forms.ValidationError(msg)
-
-        return phone_number
-
-    def clean_bank_account(self):
-        """验证银行账号格式."""
-        bank_account = self.cleaned_data.get("bank_account")
-        if not bank_account:
-            return bank_account
-
-        # 移除空格和横杠
-        bank_account = bank_account.replace(" ", "").replace("-", "")
-
-        # 验证是否全是数字
-        if not bank_account.isdigit():
-            msg = "银行账号只能包含数字。"
-            raise forms.ValidationError(msg)
-
-        # 验证长度（一般银行卡号是16-19位）
-        if len(bank_account) < 10 or len(bank_account) > 25:
-            msg = "银行账号长度不正确（应为10-25位）。"
-            raise forms.ValidationError(msg)
-
-        return bank_account
-
-    def __init__(self, *args, point_source=None, **kwargs):
-        """初始化表单, 保存积分来源引用."""
-        super().__init__(*args, **kwargs)
-        self.point_source = point_source
-
-        # 如果有积分来源，设置提现积分的最大值
-        if point_source:
-            self.fields["points"].widget.attrs["max"] = point_source.remaining_points
-            self.fields[
-                "points"
-            ].help_text = f"可提现积分: {point_source.remaining_points}"
-
-    def clean_points(self):
-        """验证提现积分数量."""
-        points = self.cleaned_data.get("points")
-
-        if points is None:
-            msg = "请输入提现积分数量。"
-            raise forms.ValidationError(msg)
-
-        if points <= 0:
-            msg = "提现积分必须大于0。"
-            raise forms.ValidationError(msg)
-
-        # 如果有积分来源，验证是否超过剩余积分
-        if self.point_source and points > self.point_source.remaining_points:
-            msg = f"提现积分不能超过可用积分。可用积分: {self.point_source.remaining_points}"
-            raise forms.ValidationError(msg)
-
-        return points
+        return cleaned_data

@@ -17,6 +17,9 @@
             <h4 class="mb-3 mb-md-0">{{ org.name }} - 组织钱包</h4>
         </div>
         <div class="d-flex align-items-center flex-wrap text-nowrap gap-2">
+            <a href="{% url 'points:allocation_config' %}" class="btn btn-outline-primary btn-icon-text">
+                <i data-lucide="share-2" class="btn-icon-prepend"></i> 分配积分
+            </a>
             <a href="{% url 'points:org_transactions' org.slug %}"
                class="btn btn-outline-primary btn-icon-text">
                 <i data-lucide="list" class="btn-icon-prepend"></i> 完整记录

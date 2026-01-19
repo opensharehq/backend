@@ -17,6 +17,9 @@
             <h4 class="mb-3 mb-md-0">我的钱包</h4>
         </div>
         <div class="d-flex align-items-center flex-wrap text-nowrap gap-2">
+            <a href="{% url 'points:allocation_config' %}" class="btn btn-outline-primary btn-icon-text">
+                <i data-lucide="share-2" class="btn-icon-prepend"></i> 分配积分
+            </a>
             <a href="{% url 'points:create_withdrawal' %}" class="btn btn-primary btn-icon-text">
                 <i data-lucide="banknote" class="btn-icon-prepend"></i> 申请提现
             </a>

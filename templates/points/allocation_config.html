@@ -211,9 +211,9 @@
                 <div class="mb-3" x-show="config.projectScope.tags.length > 0">
                     <label class="form-label">已选标签</label>
                     <div>
-                        <template x-for="(tag, index) in config.projectScope.tags" :key="tag">
+                        <template x-for="(tag, index) in config.projectScope.tags" :key="tag.id">
                             <span class="tag-badge">
-                                <span x-text="tag"></span>
+                                <span x-text="tag.name || tag.id"></span>
                                 <span class="remove-btn" @click="removeProjectTag(index)">×</span>
                             </span>
                         </template>
@@ -513,8 +513,14 @@
 
                 addProjectTag(tag) {
                     tag = tag.trim();
-                    if (tag && !this.config.projectScope.tags.includes(tag)) {
-                        this.config.projectScope.tags.push(tag);
+                    if (!tag) {
+                        return;
+                    }
+                    const existing = this.config.projectScope.tags.find(
+                        item => item.id === tag
+                    );
+                    if (!existing) {
+                        this.config.projectScope.tags.push({ id: tag, name: tag });
                     }
                 },
 
@@ -545,9 +551,15 @@
                 },
 
                 selectProjectTag(tag) {
-                    // 添加标签的 id (slug) 到已选列表
-                    if (!this.config.projectScope.tags.includes(tag.id)) {
-                        this.config.projectScope.tags.push(tag.id);
+                    // 添加标签的 id (slug) + name 到已选列表
+                    const existing = this.config.projectScope.tags.find(
+                        item => item.id === tag.id
+                    );
+                    if (!existing) {
+                        this.config.projectScope.tags.push({
+                            id: tag.id,
+                            name: tag.name || tag.id
+                        });
                     }
                     // 清空搜索
                     this.projectTagSearch = '';
@@ -577,6 +589,13 @@
                            this.config.endMonth;
                 },
 
+                buildProjectScopePayload() {
+                    return {
+                        tags: this.config.projectScope.tags.map(tag => tag.id),
+                        operation: this.config.projectScope.operation
+                    };
+                },
+
                 async previewContributions() {
                     this.loading = true;
 
@@ -596,7 +615,7 @@
                                 'X-CSRFToken': this.getCsrfToken()
                             },
                             body: JSON.stringify({
-                                project_scope: this.config.projectScope,
+                                project_scope: this.buildProjectScopePayload(),
                                 user_scope: userScope,
                                 start_month: this.config.startMonth + '-01',
                                 end_month: this.config.endMonth + '-01',
@@ -700,7 +719,7 @@
                             body: JSON.stringify({
                                 pool_id: this.config.poolId,
                                 total_amount: this.config.totalAmount,
-                                project_scope: this.config.projectScope,
+                                project_scope: this.buildProjectScopePayload(),
                                 user_scope: userScope,
                                 start_month: this.config.startMonth + '-01',
                                 end_month: this.config.endMonth + '-01',

@@ -44,6 +44,7 @@ LABEL_ENTITIES_SQL = """
         name_zh,
         children,
         `platforms.name`,
+        `platforms.orgs`,
         `platforms.repos`,
         `platforms.users`
     FROM opensource.labels
@@ -52,33 +53,29 @@ LABEL_ENTITIES_SQL = """
 
 CONTRIBUTIONS_SQL = """
     SELECT
-        platform,
         actor_id,
-        actor_login,
-        sum(openrank) as total_openrank
-    FROM opensource.normalized_community_openrank
-    WHERE repo_id IN {repo_ids:Array(UInt64)}
-      AND yyyymm >= {start_month:UInt32}
-      AND yyyymm <= {end_month:UInt32}
-    GROUP BY platform, actor_id, actor_login
-    HAVING total_openrank > 0
-    ORDER BY total_openrank DESC
-"""
-
-CONTRIBUTIONS_WITH_USERS_SQL = """
-    SELECT
-        platform,
-        actor_id,
-        actor_login,
-        sum(openrank) as total_openrank
-    FROM opensource.normalized_community_openrank
-    WHERE repo_id IN {repo_ids:Array(UInt64)}
-      AND actor_id IN {user_ids:Array(UInt64)}
-      AND yyyymm >= {start_month:UInt32}
-      AND yyyymm <= {end_month:UInt32}
-    GROUP BY platform, actor_id, actor_login
-    HAVING total_openrank > 0
-    ORDER BY total_openrank DESC
+        argMax(actor_login, created_at) AS login,
+        SUM(openrank) AS or,
+        groupArray((repo_name, openrank, yyyymm)) AS details
+    FROM normalized_community_openrank
+    WHERE (
+        (platform, repo_id) IN (
+            SELECT platform, entity_id
+            FROM flatten_labels
+            WHERE entity_type = 'Repo'
+              AND id IN {label_ids:Array(String)}
+        )
+        OR (platform, org_id) IN (
+            SELECT platform, entity_id
+            FROM flatten_labels
+            WHERE entity_type = 'Org'
+              AND id IN {label_ids:Array(String)}
+        )
+    )
+      AND toYear(created_at) = {year:UInt16}
+    GROUP BY actor_id
+    ORDER BY or DESC
+    LIMIT 30
 """
 
 
@@ -273,14 +270,34 @@ def _parse_contribution_rows(rows: list[Any]) -> list[dict[str, Any]]:
     """解析贡献度查询结果."""
     contributions = []
     for row in rows:
-        contributions.append(
-            {
-                "platform": row[0],
-                "actor_id": str(row[1]),
-                "actor_login": row[2],
-                "contribution_score": float(row[3]),
-            }
-        )
+        platform = "GitHub"
+        details = None
+
+        if len(row) >= 4 and isinstance(row[0], str) and isinstance(row[2], str):
+            platform = row[0]
+            actor_id = row[1]
+            actor_login = row[2]
+            contribution_score = row[3]
+            if len(row) > 4:
+                details = row[4]
+        else:
+            actor_id = row[0]
+            actor_login = row[1]
+            contribution_score = row[2]
+            if len(row) > 3:
+                details = row[3]
+
+        payload = {
+            "platform": platform,
+            "actor_id": str(actor_id),
+            "actor_login": actor_login,
+            "contribution_score": float(contribution_score),
+        }
+        if details is not None:
+            payload["details"] = details
+
+        contributions.append(payload)
+
     return contributions
 
 
@@ -435,9 +452,9 @@ def query_contributions(
     查询标签关联项目的贡献度数据.
 
     Args:
-        label_ids: 标签 ID 列表 (来自 opensource.labels.id)
-        start_month: 起始月份 (格式: 202401)
-        end_month: 结束月份 (格式: 202412)
+    label_ids: 标签 ID 列表 (来自 opensource.labels.id)
+    start_month: 起始月份 (格式: 202401)
+    end_month: 结束月份 (格式: 202412)
 
     Returns:
         贡献者列表, 每个贡献者包含:
@@ -445,51 +462,33 @@ def query_contributions(
         - actor_id: 贡献者平台 ID
         - actor_login: 贡献者登录名
         - contribution_score: 贡献度分数 (sum of openrank)
+        - details: 贡献度明细 (repo_name, openrank, yyyymm)
 
     """
     normalized_ids = _prepare_label_ids(label_ids)
     if not normalized_ids:
         return []
 
-    # 获取标签关联的仓库信息
-    label_entities = get_label_entities(label_ids)
-    if not label_entities:
-        logger.warning("未找到标签实体信息")
-        return []
-
-    repo_ids = _collect_repo_ids(label_entities)
-    user_ids = _collect_user_ids(label_entities)
-
-    if not repo_ids:
-        logger.warning("未找到关联的仓库")
-        return []
+    start_year = start_month // 100
+    end_year = end_month // 100
+    year = end_year
+    if start_year != end_year:
+        logger.warning(
+            "起止月份跨年: %s - %s, 使用结束年份 %s 查询",
+            start_month,
+            end_month,
+            end_year,
+        )
 
     try:
-        if user_ids:
-            result = ClickHouseDB.query(
-                CONTRIBUTIONS_WITH_USERS_SQL,
-                parameters={
-                    "repo_ids": repo_ids,
-                    "user_ids": user_ids,
-                    "start_month": start_month,
-                    "end_month": end_month,
-                },
-            )
-            logger.info(
-                "查询贡献度数据（带用户过滤）: %s 个仓库, %s 个用户",
-                len(repo_ids),
-                len(user_ids),
-            )
-        else:
-            result = ClickHouseDB.query(
-                CONTRIBUTIONS_SQL,
-                parameters={
-                    "repo_ids": repo_ids,
-                    "start_month": start_month,
-                    "end_month": end_month,
-                },
-            )
-            logger.info("查询贡献度数据: %s 个仓库", len(repo_ids))
+        result = ClickHouseDB.query(
+            CONTRIBUTIONS_SQL,
+            parameters={
+                "label_ids": normalized_ids,
+                "year": year,
+            },
+        )
+        logger.info("查询贡献度数据: %s 个标签, 年份 %s", len(normalized_ids), year)
 
         contributions = _parse_contribution_rows(_get_result_rows(result))
         logger.info("查询到 %s 个贡献者", len(contributions))

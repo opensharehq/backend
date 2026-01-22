@@ -122,10 +122,16 @@ class AllocationService:
 
     @staticmethod
     def _get_project_identifiers(allocation: PointAllocation) -> list[str]:
-        projects = TagOperation.evaluate_project_tags(
-            allocation.project_scope["tags"], allocation.project_scope["operation"]
-        )
-        return list(projects)
+        project_scope = allocation.project_scope or {}
+        tags = project_scope.get("tags", [])
+        normalized = []
+        for tag in tags:
+            if tag is None:
+                continue
+            tag_str = str(tag).strip()
+            if tag_str:
+                normalized.append(tag_str)
+        return normalized
 
     @staticmethod
     def _get_contributions(

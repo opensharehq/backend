@@ -207,22 +207,25 @@ class ContributionService:
             actor_id = contrib["actor_id"]
             actor_login = contrib["actor_login"]
             contribution_score = contrib["contribution_score"]
+            details = contrib.get("details")
 
             # 检查是否已注册
             key = (platform, actor_id)
             user_id = registered_users.get(key)
             is_registered = user_id is not None
 
-            results.append(
-                {
-                    "platform": contrib["platform"],
-                    f"{platform}_id": actor_id,
-                    f"{platform}_login": actor_login,
-                    "email": "",  # ClickHouse 中没有 email
-                    "contribution_score": Decimal(str(contribution_score)),
-                    "is_registered": is_registered,
-                    "user_id": user_id,
-                }
-            )
+            payload = {
+                "platform": contrib["platform"],
+                f"{platform}_id": actor_id,
+                f"{platform}_login": actor_login,
+                "email": "",  # ClickHouse 中没有 email
+                "contribution_score": Decimal(str(contribution_score)),
+                "is_registered": is_registered,
+                "user_id": user_id,
+            }
+            if details is not None:
+                payload["details"] = details
+
+            results.append(payload)
 
         return results

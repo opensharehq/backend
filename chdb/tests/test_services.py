@@ -72,7 +72,9 @@ class QueryContributionsTests(TestCase):
 
         call_args = mock_query.call_args
         self.assertEqual(call_args[0][0], services.CONTRIBUTIONS_SQL)
-        self.assertEqual(call_args[1]["parameters"]["label_ids"], [":companies/test/project"])
+        self.assertEqual(
+            call_args[1]["parameters"]["label_ids"], [":companies/test/project"]
+        )
         self.assertEqual(call_args[1]["parameters"]["year"], 2025)
 
     @patch("chdb.services.ClickHouseDB.query")

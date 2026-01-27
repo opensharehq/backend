@@ -75,11 +75,12 @@ class QueryContributionsTests(TestCase):
         self.assertEqual(
             call_args[1]["parameters"]["label_ids"], [":companies/test/project"]
         )
-        self.assertEqual(call_args[1]["parameters"]["year"], 2025)
+        self.assertEqual(call_args[1]["parameters"]["start_month"], 202501)
+        self.assertEqual(call_args[1]["parameters"]["end_month"], 202512)
 
     @patch("chdb.services.ClickHouseDB.query")
-    def test_query_contributions_cross_year_uses_end_year(self, mock_query):
-        """Test contribution query uses end year when range crosses years."""
+    def test_query_contributions_cross_year_uses_month_range(self, mock_query):
+        """Test contribution query uses month range when range crosses years."""
         mock_result = MagicMock()
         mock_result.result_rows = []
         mock_query.return_value = mock_result
@@ -92,7 +93,8 @@ class QueryContributionsTests(TestCase):
 
         call_args = mock_query.call_args
         self.assertEqual(call_args[0][0], services.CONTRIBUTIONS_SQL)
-        self.assertEqual(call_args[1]["parameters"]["year"], 2025)
+        self.assertEqual(call_args[1]["parameters"]["start_month"], 202412)
+        self.assertEqual(call_args[1]["parameters"]["end_month"], 202501)
 
     def test_query_contributions_empty_labels(self):
         """Test query with empty label list."""

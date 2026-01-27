@@ -72,7 +72,8 @@ CONTRIBUTIONS_SQL = """
               AND id IN {label_ids:Array(String)}
         )
     )
-      AND toYear(created_at) = {year:UInt16}
+      AND toYYYYMM(created_at) >= {start_month:UInt32}
+      AND toYYYYMM(created_at) <= {end_month:UInt32}
     GROUP BY actor_id
     ORDER BY or DESC
     LIMIT 30
@@ -469,26 +470,21 @@ def query_contributions(
     if not normalized_ids:
         return []
 
-    start_year = start_month // 100
-    end_year = end_month // 100
-    year = end_year
-    if start_year != end_year:
-        logger.warning(
-            "起止月份跨年: %s - %s, 使用结束年份 %s 查询",
-            start_month,
-            end_month,
-            end_year,
-        )
-
     try:
         result = ClickHouseDB.query(
             CONTRIBUTIONS_SQL,
             parameters={
                 "label_ids": normalized_ids,
-                "year": year,
+                "start_month": start_month,
+                "end_month": end_month,
             },
         )
-        logger.info("查询贡献度数据: %s 个标签, 年份 %s", len(normalized_ids), year)
+        logger.info(
+            "查询贡献度数据: %s 个标签, 月份范围 %s - %s",
+            len(normalized_ids),
+            start_month,
+            end_month,
+        )
 
         contributions = _parse_contribution_rows(_get_result_rows(result))
         logger.info("查询到 %s 个贡献者", len(contributions))

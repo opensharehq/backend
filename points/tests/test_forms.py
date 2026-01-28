@@ -1,5 +1,6 @@
 """Tests for points forms."""
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from accounts.models import User
@@ -141,3 +142,40 @@ class WithdrawalRequestFormTests(TestCase):
         )
         self.assertFalse(form.is_valid())
         self.assertIn("id_card", form.errors)
+
+    def test_invoice_required_for_large_withdrawal(self):
+        """Test invoice is required when amount exceeds limit."""
+        services.grant_points(self.user, 6000, PointType.CASH, "Extra")
+        form = WithdrawalRequestForm(
+            self.user,
+            data={
+                "amount": 6000,
+                "real_name": "张三",
+                "phone": "13800138000",
+                "id_card": "11010519491231002X",
+                "bank_name": "中国银行",
+                "bank_account": "6222000000000000000",
+            },
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("invoice_file", form.errors)
+
+    def test_invoice_optional_with_file(self):
+        """Test invoice file can be uploaded for large withdrawal."""
+        services.grant_points(self.user, 6000, PointType.CASH, "Extra")
+        invoice = SimpleUploadedFile(
+            "invoice.pdf", b"fake-pdf-content", content_type="application/pdf"
+        )
+        form = WithdrawalRequestForm(
+            self.user,
+            data={
+                "amount": 6000,
+                "real_name": "张三",
+                "phone": "13800138000",
+                "id_card": "11010519491231002X",
+                "bank_name": "中国银行",
+                "bank_account": "6222000000000000000",
+            },
+            files={"invoice_file": invoice},
+        )
+        self.assertTrue(form.is_valid())

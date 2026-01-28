@@ -336,6 +336,12 @@ class WithdrawalRequest(models.Model):
     # 银行账户信息
     bank_name = models.CharField(max_length=100, verbose_name="银行名称")
     bank_account = models.CharField(max_length=50, verbose_name="银行账号")
+    invoice_file = models.FileField(
+        upload_to="withdrawals/invoices/%Y/%m/",
+        null=True,
+        blank=True,
+        verbose_name="发票",
+    )
 
     # 审核信息
     admin_note = models.TextField(blank=True, verbose_name="管理员备注")

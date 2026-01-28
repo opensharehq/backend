@@ -129,6 +129,23 @@ class CreateWithdrawalViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "积分不足")
 
+    def test_withdrawal_requires_invoice_over_limit(self):
+        """Test invoice required when amount exceeds limit."""
+        services.grant_points(self.user, 6000, PointType.CASH, "Extra")
+        response = self.client.post(
+            reverse("points:create_withdrawal"),
+            {
+                "amount": "6000",
+                "real_name": "张三",
+                "phone": "13800138000",
+                "id_card": "11010519491231002X",
+                "bank_name": "中国银行",
+                "bank_account": "6222000000000000000",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "必须上传发票")
+
 
 class WithdrawalListViewTests(TestCase):
     """Tests for withdrawal_list_view."""

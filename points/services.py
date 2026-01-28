@@ -395,6 +395,7 @@ def create_withdrawal_request(  # noqa: PLR0913
     id_card: str,
     bank_name: str,
     bank_account: str,
+    invoice_file=None,
 ) -> WithdrawalRequest:
     """
     创建提现申请.
@@ -407,6 +408,7 @@ def create_withdrawal_request(  # noqa: PLR0913
         id_card: 身份证号
         bank_name: 银行名称
         bank_account: 银行账号
+        invoice_file: 发票文件
 
     Returns:
         WithdrawalRequest: 提现申请记录
@@ -446,6 +448,7 @@ def create_withdrawal_request(  # noqa: PLR0913
         id_card=id_card,
         bank_name=bank_name,
         bank_account=bank_account,
+        invoice_file=invoice_file,
     )
 
     logger.info(

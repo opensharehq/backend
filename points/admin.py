@@ -125,6 +125,7 @@ class WithdrawalInline(admin.TabularInline):
         "id_card",
         "bank_name",
         "bank_account",
+        "invoice_file",
         "processed_by",
         "processed_at",
         "created_at",
@@ -386,6 +387,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         "id_card",
         "bank_name",
         "bank_account",
+        "invoice_file",
         "transaction",
         "created_at",
         "updated_at",
@@ -422,6 +424,10 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
                     "bank_account",
                 )
             },
+        ),
+        (
+            "附件",
+            {"fields": ("invoice_file",)},
         ),
         (
             "审核信息",

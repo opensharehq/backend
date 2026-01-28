@@ -92,7 +92,7 @@ def create_withdrawal_view(request):
     has_pending = wallet.withdrawals.filter(status=WithdrawalStatus.PENDING).exists()
 
     if request.method == "POST":
-        form = WithdrawalRequestForm(user, request.POST)
+        form = WithdrawalRequestForm(user, request.POST, request.FILES)
         if form.is_valid():
             try:
                 withdrawal = services.create_withdrawal_request(
@@ -103,6 +103,7 @@ def create_withdrawal_view(request):
                     id_card=form.cleaned_data["id_card"],
                     bank_name=form.cleaned_data["bank_name"],
                     bank_account=form.cleaned_data["bank_account"],
+                    invoice_file=form.cleaned_data["invoice_file"],
                 )
                 messages.success(
                     request,
@@ -265,7 +266,7 @@ def org_create_withdrawal_view(request, slug):
     has_pending = wallet.withdrawals.filter(status=WithdrawalStatus.PENDING).exists()
 
     if request.method == "POST":
-        form = WithdrawalRequestForm(org, request.POST)
+        form = WithdrawalRequestForm(org, request.POST, request.FILES)
         if form.is_valid():
             try:
                 withdrawal = services.create_withdrawal_request(
@@ -276,6 +277,7 @@ def org_create_withdrawal_view(request, slug):
                     id_card=form.cleaned_data["id_card"],
                     bank_name=form.cleaned_data["bank_name"],
                     bank_account=form.cleaned_data["bank_account"],
+                    invoice_file=form.cleaned_data["invoice_file"],
                 )
                 messages.success(
                     request,

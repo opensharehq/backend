@@ -23,7 +23,7 @@
                             您有待处理的提现申请，请等待处理完成后再申请新的提现。
                         </div>
                     {% else %}
-                        <form method="post">
+                        <form method="post" enctype="multipart/form-data">
                             {% csrf_token %}
                             <div class="mb-3">
                                 <label for="id_amount" class="form-label">提现金额 <span class="text-danger">*</span></label>
@@ -73,6 +73,16 @@
                                 {% if form.bank_account.errors %}
                                     <div class="text-danger small mt-1">{{ form.bank_account.errors.0 }}</div>
                                 {% endif %}
+                            </div>
+                            <div class="mb-3">
+                                <label for="id_invoice_file" class="form-label">
+                                    发票 {% if form.invoice_file.field.required %}<span class="text-danger">*</span>{% endif %}
+                                </label>
+                                {{ form.invoice_file }}
+                                {% if form.invoice_file.errors %}
+                                    <div class="text-danger small mt-1">{{ form.invoice_file.errors.0 }}</div>
+                                {% endif %}
+                                <div class="form-text">提现金额超过 5000 积分时必须上传发票</div>
                             </div>
                             <div class="alert alert-info">
                                 <h6><i data-lucide="info" class="me-2"></i>提现说明</h6>

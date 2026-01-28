@@ -22,6 +22,7 @@ class WithdrawalRequestForm(forms.ModelForm):
             "id_card",
             "bank_name",
             "bank_account",
+            "invoice_file",
         ]
         widgets = {
             "amount": forms.NumberInput(
@@ -59,6 +60,11 @@ class WithdrawalRequestForm(forms.ModelForm):
                 attrs={
                     "class": "form-control",
                     "placeholder": "请输入银行账号",
+                }
+            ),
+            "invoice_file": forms.ClearableFileInput(
+                attrs={
+                    "class": "form-control",
                 }
             ),
         }
@@ -109,6 +115,18 @@ class WithdrawalRequestForm(forms.ModelForm):
             msg = "请输入有效的银行卡号（16-19位数字）"
             raise forms.ValidationError(msg)
         return cleaned
+
+    def clean(self):
+        """Validate conditional invoice requirement."""
+        cleaned_data = super().clean()
+        amount = cleaned_data.get("amount")
+        invoice_file = cleaned_data.get("invoice_file")
+
+        if amount is not None and amount > 5000 and not invoice_file:
+            msg = "提现金额超过 5000 积分时必须上传发票"
+            self.add_error("invoice_file", msg)
+
+        return cleaned_data
 
 
 class GrantPointsForm(forms.Form):

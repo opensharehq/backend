@@ -296,7 +296,13 @@ class WithdrawalRequestTests(TestCase):
     def test_create_withdrawal_request(self):
         """Test creating withdrawal request."""
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222000000000000000"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222000000000000000",
         )
 
         self.assertEqual(withdrawal.amount, 500)
@@ -307,24 +313,48 @@ class WithdrawalRequestTests(TestCase):
         """Test that creating withdrawal with insufficient balance fails."""
         with self.assertRaises(services.InsufficientPointsError):
             services.create_withdrawal_request(
-                self.user, 2000, "张三", "13800138000", "中国银行", "6222"
+                self.user,
+                2000,
+                "张三",
+                "13800138000",
+                "11010519491231002X",
+                "中国银行",
+                "6222",
             )
 
     def test_create_withdrawal_with_pending_fails(self):
         """Test that creating withdrawal when pending exists fails."""
         services.create_withdrawal_request(
-            self.user, 100, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            100,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
 
         with self.assertRaises(services.WithdrawalError):
             services.create_withdrawal_request(
-                self.user, 200, "张三", "13800138000", "中国银行", "6222"
+                self.user,
+                200,
+                "张三",
+                "13800138000",
+                "11010519491231002X",
+                "中国银行",
+                "6222",
             )
 
     def test_approve_withdrawal(self):
         """Test approving withdrawal request."""
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
 
         approved = services.approve_withdrawal(withdrawal.id, self.admin)
@@ -340,7 +370,13 @@ class WithdrawalRequestTests(TestCase):
     def test_approve_non_pending_fails(self):
         """Test that approving non-pending withdrawal fails."""
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
         services.approve_withdrawal(withdrawal.id, self.admin)
 
@@ -350,7 +386,13 @@ class WithdrawalRequestTests(TestCase):
     def test_complete_withdrawal(self):
         """Test completing withdrawal."""
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
         services.approve_withdrawal(withdrawal.id, self.admin)
 
@@ -361,7 +403,13 @@ class WithdrawalRequestTests(TestCase):
     def test_complete_non_approved_fails(self):
         """Test that completing non-approved withdrawal fails."""
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
 
         with self.assertRaises(services.WithdrawalError):
@@ -370,7 +418,13 @@ class WithdrawalRequestTests(TestCase):
     def test_reject_withdrawal(self):
         """Test rejecting withdrawal."""
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
 
         rejected = services.reject_withdrawal(withdrawal.id, self.admin, "信息不完整")
@@ -384,7 +438,13 @@ class WithdrawalRequestTests(TestCase):
     def test_cancel_withdrawal_by_user(self):
         """Test canceling withdrawal by user."""
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
 
         cancelled = services.cancel_withdrawal(withdrawal.id, self.user)
@@ -395,7 +455,13 @@ class WithdrawalRequestTests(TestCase):
         """Test that other user cannot cancel withdrawal."""
         other_user = User.objects.create_user(username="other", password="pass")
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
 
         with self.assertRaises(services.WithdrawalError):
@@ -404,7 +470,13 @@ class WithdrawalRequestTests(TestCase):
     def test_cancel_non_pending_fails(self):
         """Test that canceling non-pending withdrawal fails."""
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
         services.approve_withdrawal(withdrawal.id, self.admin)
 
@@ -443,7 +515,13 @@ class OrganizationWithdrawalTests(TestCase):
     def test_owner_can_cancel_org_withdrawal(self):
         """Test that owner can cancel org withdrawal."""
         withdrawal = services.create_withdrawal_request(
-            self.org, 500, "张三", "13800138000", "中国银行", "6222"
+            self.org,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
 
         cancelled = services.cancel_withdrawal(withdrawal.id, self.owner)
@@ -452,7 +530,13 @@ class OrganizationWithdrawalTests(TestCase):
     def test_admin_can_cancel_org_withdrawal(self):
         """Test that admin can cancel org withdrawal."""
         withdrawal = services.create_withdrawal_request(
-            self.org, 500, "张三", "13800138000", "中国银行", "6222"
+            self.org,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
 
         cancelled = services.cancel_withdrawal(withdrawal.id, self.admin_user)
@@ -461,7 +545,13 @@ class OrganizationWithdrawalTests(TestCase):
     def test_member_cannot_cancel_org_withdrawal(self):
         """Test that regular member cannot cancel org withdrawal."""
         withdrawal = services.create_withdrawal_request(
-            self.org, 500, "张三", "13800138000", "中国银行", "6222"
+            self.org,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
 
         with self.assertRaises(services.WithdrawalError):
@@ -496,7 +586,13 @@ class EdgeCaseTests(TestCase):
         services.grant_points(self.user, 1000, PointType.CASH, "Initial")
         with self.assertRaises(services.WithdrawalError) as cm:
             services.create_withdrawal_request(
-                self.user, 0, "张三", "13800138000", "中国银行", "6222"
+                self.user,
+                0,
+                "张三",
+                "13800138000",
+                "11010519491231002X",
+                "中国银行",
+                "6222",
             )
         self.assertIn("大于 0", str(cm.exception))
 
@@ -529,7 +625,13 @@ class EdgeCaseTests(TestCase):
         # Grant 1000 points, create withdrawal for 500
         services.grant_points(self.user, 1000, PointType.CASH, "Initial")
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
 
         # Spend points to reduce balance below withdrawal amount
@@ -544,7 +646,13 @@ class EdgeCaseTests(TestCase):
         """Test completing withdrawal with admin note."""
         services.grant_points(self.user, 1000, PointType.CASH, "Initial")
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
         services.approve_withdrawal(withdrawal.id, self.admin)
 
@@ -559,7 +667,13 @@ class EdgeCaseTests(TestCase):
         """Test that rejecting non-pending withdrawal fails."""
         services.grant_points(self.user, 1000, PointType.CASH, "Initial")
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
         # Approve first
         services.approve_withdrawal(withdrawal.id, self.admin)

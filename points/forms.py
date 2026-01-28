@@ -1,5 +1,7 @@
 """Forms for points application."""
 
+import re
+
 from django import forms
 
 from . import services
@@ -13,7 +15,14 @@ class WithdrawalRequestForm(forms.ModelForm):
         """Form metadata."""
 
         model = WithdrawalRequest
-        fields = ["amount", "real_name", "phone", "bank_name", "bank_account"]
+        fields = [
+            "amount",
+            "real_name",
+            "phone",
+            "id_card",
+            "bank_name",
+            "bank_account",
+        ]
         widgets = {
             "amount": forms.NumberInput(
                 attrs={
@@ -32,6 +41,12 @@ class WithdrawalRequestForm(forms.ModelForm):
                 attrs={
                     "class": "form-control",
                     "placeholder": "请输入联系电话",
+                }
+            ),
+            "id_card": forms.TextInput(
+                attrs={
+                    "class": "form-control",
+                    "placeholder": "请输入身份证号",
                 }
             ),
             "bank_name": forms.TextInput(
@@ -75,6 +90,15 @@ class WithdrawalRequestForm(forms.ModelForm):
             msg = "请输入有效的手机号码（11位数字）"
             raise forms.ValidationError(msg)
         return phone
+
+    def clean_id_card(self):
+        """Validate ID card format."""
+        id_card = self.cleaned_data["id_card"]
+        cleaned = id_card.replace(" ", "").replace("-", "").upper()
+        if not re.match(r"^(\d{15}|\d{17}[\dX])$", cleaned):
+            msg = "请输入有效的身份证号（15或18位）"
+            raise forms.ValidationError(msg)
+        return cleaned
 
     def clean_bank_account(self):
         """Validate bank account format."""

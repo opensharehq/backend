@@ -256,6 +256,7 @@ class WithdrawalRequestModelTests(TestCase):
             amount=100,
             real_name="张三",
             phone="13800138000",
+            id_card="11010519491231002X",
             bank_name="中国银行",
             bank_account="6222000000000000000",
         )
@@ -272,6 +273,7 @@ class WithdrawalRequestModelTests(TestCase):
             amount=100,
             real_name="张三",
             phone="13800138000",
+            id_card="11010519491231002X",
             bank_name="中国银行",
             bank_account="6222000000000000000",
         )

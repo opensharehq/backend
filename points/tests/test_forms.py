@@ -24,6 +24,7 @@ class WithdrawalRequestFormTests(TestCase):
                 "amount": 500,
                 "real_name": "张三",
                 "phone": "13800138000",
+                "id_card": "11010519491231002X",
                 "bank_name": "中国银行",
                 "bank_account": "6222000000000000000",
             },
@@ -38,6 +39,7 @@ class WithdrawalRequestFormTests(TestCase):
                 "amount": 2000,
                 "real_name": "张三",
                 "phone": "13800138000",
+                "id_card": "11010519491231002X",
                 "bank_name": "中国银行",
                 "bank_account": "6222000000000000000",
             },
@@ -53,6 +55,7 @@ class WithdrawalRequestFormTests(TestCase):
                 "amount": 0,
                 "real_name": "张三",
                 "phone": "13800138000",
+                "id_card": "11010519491231002X",
                 "bank_name": "中国银行",
                 "bank_account": "6222000000000000000",
             },
@@ -67,6 +70,7 @@ class WithdrawalRequestFormTests(TestCase):
                 "amount": 500,
                 "real_name": "张三",
                 "phone": "123",  # Too short
+                "id_card": "11010519491231002X",
                 "bank_name": "中国银行",
                 "bank_account": "6222000000000000000",
             },
@@ -82,6 +86,7 @@ class WithdrawalRequestFormTests(TestCase):
                 "amount": 500,
                 "real_name": "张三",
                 "phone": "13800138000",
+                "id_card": "11010519491231002X",
                 "bank_name": "中国银行",
                 "bank_account": "123",  # Too short
             },
@@ -97,6 +102,7 @@ class WithdrawalRequestFormTests(TestCase):
                 "amount": 500,
                 "real_name": "张三",
                 "phone": "13800138000",
+                "id_card": "11010519491231002X",
                 "bank_name": "中国银行",
                 "bank_account": "6222 0000 0000 0000 000",
             },
@@ -113,8 +119,25 @@ class WithdrawalRequestFormTests(TestCase):
                 "amount": 500,
                 "real_name": "张三",
                 "phone": "13800138000",
+                "id_card": "11010519491231002X",
                 "bank_name": "中国银行",
                 "bank_account": "6222-0000-0000-0000-000",
             },
         )
         self.assertTrue(form.is_valid())
+
+    def test_invalid_id_card(self):
+        """Test invalid ID card."""
+        form = WithdrawalRequestForm(
+            self.user,
+            data={
+                "amount": 500,
+                "real_name": "张三",
+                "phone": "13800138000",
+                "id_card": "12345",
+                "bank_name": "中国银行",
+                "bank_account": "6222000000000000000",
+            },
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("id_card", form.errors)

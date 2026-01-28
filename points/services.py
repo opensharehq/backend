@@ -392,6 +392,7 @@ def create_withdrawal_request(  # noqa: PLR0913
     amount: int,
     real_name: str,
     phone: str,
+    id_card: str,
     bank_name: str,
     bank_account: str,
 ) -> WithdrawalRequest:
@@ -403,6 +404,7 @@ def create_withdrawal_request(  # noqa: PLR0913
         amount: 提现金额
         real_name: 真实姓名
         phone: 联系电话
+        id_card: 身份证号
         bank_name: 银行名称
         bank_account: 银行账号
 
@@ -441,6 +443,7 @@ def create_withdrawal_request(  # noqa: PLR0913
         status=WithdrawalStatus.PENDING,
         real_name=real_name,
         phone=phone,
+        id_card=id_card,
         bank_name=bank_name,
         bank_account=bank_account,
     )

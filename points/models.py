@@ -331,6 +331,7 @@ class WithdrawalRequest(models.Model):
     # 提现人信息
     real_name = models.CharField(max_length=50, verbose_name="真实姓名")
     phone = models.CharField(max_length=20, verbose_name="联系电话")
+    id_card = models.CharField(max_length=18, verbose_name="身份证号", default="")
 
     # 银行账户信息
     bank_name = models.CharField(max_length=100, verbose_name="银行名称")

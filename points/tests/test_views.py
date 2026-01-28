@@ -102,6 +102,7 @@ class CreateWithdrawalViewTests(TestCase):
                 "amount": "500",
                 "real_name": "张三",
                 "phone": "13800138000",
+                "id_card": "11010519491231002X",
                 "bank_name": "中国银行",
                 "bank_account": "6222000000000000000",
             },
@@ -120,6 +121,7 @@ class CreateWithdrawalViewTests(TestCase):
                 "amount": "2000",  # More than available
                 "real_name": "张三",
                 "phone": "13800138000",
+                "id_card": "11010519491231002X",
                 "bank_name": "中国银行",
                 "bank_account": "6222000000000000000",
             },
@@ -147,7 +149,13 @@ class WithdrawalListViewTests(TestCase):
     def test_withdrawal_list_shows_withdrawals(self):
         """Test withdrawal list shows withdrawals."""
         services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222000000000000000"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222000000000000000",
         )
 
         response = self.client.get(reverse("points:withdrawal_list"))
@@ -168,7 +176,13 @@ class CancelWithdrawalViewTests(TestCase):
     def test_cancel_withdrawal_success(self):
         """Test canceling withdrawal."""
         withdrawal = services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222000000000000000"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222000000000000000",
         )
 
         response = self.client.post(
@@ -293,6 +307,7 @@ class OrgCreateWithdrawalViewTests(TestCase):
                 "amount": "500",
                 "real_name": "张三",
                 "phone": "13800138000",
+                "id_card": "11010519491231002X",
                 "bank_name": "中国银行",
                 "bank_account": "6222000000000000000",
             },
@@ -323,7 +338,13 @@ class ViewEdgeCaseTests(TestCase):
         """Test error handling when creating withdrawal fails."""
         # Create a pending withdrawal first
         services.create_withdrawal_request(
-            self.user, 500, "张三", "13800138000", "中国银行", "6222"
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
 
         # Try to create another one - should show error
@@ -333,6 +354,7 @@ class ViewEdgeCaseTests(TestCase):
                 "amount": "200",
                 "real_name": "李四",
                 "phone": "13900139000",
+                "id_card": "11010519491231002X",
                 "bank_name": "建设银行",
                 "bank_account": "6222111111111111111",
             },
@@ -397,7 +419,13 @@ class OrgViewEdgeCaseTests(TestCase):
         self.client.login(username="owner", password="pass")
         # Create a pending withdrawal first
         services.create_withdrawal_request(
-            self.org, 500, "张三", "13800138000", "中国银行", "6222"
+            self.org,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222",
         )
 
         # Try to create another one - should show error
@@ -407,6 +435,7 @@ class OrgViewEdgeCaseTests(TestCase):
                 "amount": "200",
                 "real_name": "李四",
                 "phone": "13900139000",
+                "id_card": "11010519491231002X",
                 "bank_name": "建设银行",
                 "bank_account": "6222111111111111111",
             },

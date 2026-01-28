@@ -100,6 +100,7 @@ def create_withdrawal_view(request):
                     amount=form.cleaned_data["amount"],
                     real_name=form.cleaned_data["real_name"],
                     phone=form.cleaned_data["phone"],
+                    id_card=form.cleaned_data["id_card"],
                     bank_name=form.cleaned_data["bank_name"],
                     bank_account=form.cleaned_data["bank_account"],
                 )
@@ -272,6 +273,7 @@ def org_create_withdrawal_view(request, slug):
                     amount=form.cleaned_data["amount"],
                     real_name=form.cleaned_data["real_name"],
                     phone=form.cleaned_data["phone"],
+                    id_card=form.cleaned_data["id_card"],
                     bank_name=form.cleaned_data["bank_name"],
                     bank_account=form.cleaned_data["bank_account"],
                 )

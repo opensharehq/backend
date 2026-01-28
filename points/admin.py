@@ -122,6 +122,7 @@ class WithdrawalInline(admin.TabularInline):
         "status",
         "real_name",
         "phone",
+        "id_card",
         "bank_name",
         "bank_account",
         "processed_by",
@@ -362,6 +363,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         "status_display",
         "real_name",
         "phone",
+        "id_card",
         "bank_name",
         "bank_account",
         "processed_by",
@@ -371,6 +373,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
     search_fields = (
         "real_name",
         "phone",
+        "id_card",
         "bank_name",
         "bank_account",
         "wallet__id",
@@ -380,6 +383,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         "amount",
         "real_name",
         "phone",
+        "id_card",
         "bank_name",
         "bank_account",
         "transaction",
@@ -406,6 +410,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
                 "fields": (
                     "real_name",
                     "phone",
+                    "id_card",
                 )
             },
         ),

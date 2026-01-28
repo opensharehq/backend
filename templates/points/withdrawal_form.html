@@ -50,6 +50,15 @@
                                 {% endif %}
                             </div>
                             <div class="mb-3">
+                                <label for="id_id_card" class="form-label">
+                                    身份证号 <span class="text-danger">*</span>
+                                </label>
+                                {{ form.id_card }}
+                                {% if form.id_card.errors %}
+                                    <div class="text-danger small mt-1">{{ form.id_card.errors.0 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="mb-3">
                                 <label for="id_bank_name" class="form-label">银行名称 <span class="text-danger">*</span></label>
                                 {{ form.bank_name }}
                                 {% if form.bank_name.errors %}

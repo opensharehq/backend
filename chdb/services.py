@@ -76,7 +76,7 @@ CONTRIBUTIONS_SQL = """
       AND toYYYYMM(created_at) <= {end_month:UInt32}
     GROUP BY actor_id
     ORDER BY or DESC
-    LIMIT 30
+    LIMIT 300
 """
 
 

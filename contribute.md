@@ -1,41 +1,60 @@
-# Contributing Guide
+# 贡献指南
 
-Thank you for considering a contribution to OpenShare! This document explains how to report issues, propose changes, and keep quality high.
+感谢你愿意参与 OpenShare！本指南说明如何搭建环境、提交变更并保持代码质量。
 
-## Ways to Contribute
-- Report issues: describe the behavior, expected result, and reproduction steps; include OS, Python version, and DB type.
-- Feature ideas: open an issue to discuss before building to avoid duplication or misalignment.
-- Code changes: work from a fork or branch and submit a focused Pull Request.
+## 贡献方式
+- **问题反馈**：描述问题现象、期望结果、复现步骤，并附上系统/数据库/Python 版本。
+- **功能建议**：请先开 Issue 讨论，以避免重复或方向偏差。
+- **代码贡献**：从 fork 或分支提交 PR，保持改动聚焦。
 
-## Workflow
-1) Set up your environment per `development.md` and ensure the app runs locally.
-2) Create a branch, e.g., `feature/<topic>`, `fix/<topic>`, or `chore/<topic>`.
-3) Follow the repo conventions (below) and add/update tests and docs as needed.
-4) Before committing, run `just fmt` and `just test` to keep linting and tests green.
-5) Use Conventional Commits, e.g., `feat: add point tag validation`, `fix: handle empty search query`.
-6) PR checklist:
-   - Purpose/background of the change
-   - Key modifications
-   - Testing notes (commands or manual steps)
-   - Database/migration impact
-   - Screenshots for UI changes (if applicable)
+## 本地开发环境
+建议先通读 `README.md` 和 `development.md`，这里给出最短路径：
 
-## Coding & Style
-- Python 3.12+, Ruff enforced; max line length 88; prefer double quotes; imports autosorted.
-- Templates: Django templates with minimal logic; prefer custom tags/filters for reuse.
-- Naming: snake_case for functions/variables, PascalCase for classes, lowercase_with_underscores for files.
-- Security: never commit real secrets or `.env`; keep `DEBUG=False` in production.
-- DB changes: generate migrations for model edits and include them in PRs; be cautious with existing fields.
+```bash
+# 1) 安装依赖
+pip install uv
+brew install just   # 或使用你的系统包管理器
+uv sync
 
-## Testing Expectations
-- New features and bug fixes should include tests covering core paths; place them in the app’s `tests/` package with `test_*.py`.
-- Use `TestCase`/`APITestCase`; avoid global state; mock external services (email, S3, ClickHouse) when needed.
-- Run `just test` before opening a PR; for smaller scopes, note any targeted test commands you ran.
+# 2) 环境变量
+cp .env.example .env
 
-## Code Review Tips
-- Keep PRs small and focused; avoid bundling unrelated changes.
-- Respond to reviewer comments and clarify intent when needed.
-- If risks or missing tests remain, state them explicitly in the PR description.
+# 3) 初始化数据库
+uv run manage.py migrate
+uv run manage.py createsuperuser
 
-## Code of Conduct
-We expect respectful, constructive communication in issues and PRs. Let’s keep OpenShare welcoming and safe for all contributors.
+# 4) 启动开发
+just run
+just worker
+```
+
+## 开发流程建议
+1) 新建分支：`feature/<topic>`、`fix/<topic>`、`chore/<topic>`。
+2) 按模块修改代码（避免跨域耦合），补充对应测试与文档。
+3) 提交前执行：`just fmt` 与 `just test`。
+4) 使用 Conventional Commits，例如：`feat: add point tag validation`。
+5) 提交 PR 时附上：
+   - 变更目的/背景
+   - 关键改动
+   - 测试说明（命令或手工步骤）
+   - 数据库/迁移影响
+   - UI 变更截图（如适用）
+
+## 代码规范
+- Python 3.12+，Ruff 统一格式与导入；行宽 88；双引号优先。
+- Django 模板尽量少逻辑，复用模板标签/过滤器。
+- 命名：函数/变量 `snake_case`，类/模型 `PascalCase`，文件 `lowercase_with_underscores`。
+- 禁止提交真实密钥与 `.env`。
+
+## 测试规范
+- 使用 Django `TestCase`/`APITestCase`；测试放在各 app 的 `tests/` 目录。
+- 避免修改全局状态；外部服务（邮件、S3、Mailgun、ClickHouse）应做 mock。
+- 新功能/修复需覆盖关键路径，确保 `just test` 通过。
+
+## 评审与协作
+- PR 保持小而聚焦，避免混入无关改动。
+- 主动说明风险与未覆盖测试。
+- 及时响应 review，并根据反馈修正。
+
+## 行为准则
+保持尊重与建设性的沟通，欢迎新贡献者。

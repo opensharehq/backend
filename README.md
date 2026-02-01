@@ -1,67 +1,73 @@
 # OpenShare
 
-OpenShare is a platform that rewards open‑source contributors. It provides point issuance, tagging, redemption, user profiles and search, messaging, and optional analytics so communities can compensate contributors transparently.
+OpenShare 是一个面向开源社区的贡献激励平台，提供积分发放与回收、标签化积分池、兑换商城、用户资料与搜索、站内消息以及可选的分析能力，帮助社区透明地奖励贡献者。
 
-## Features
-- Multi‑provider OAuth: GitHub, GitLab, Google, Bitbucket, and more via `social-auth-app-django`.
-- Profiles & search: searchable public pages by username, company, location, and minimum points with caching.
-- Points system: tagged point pools (withdrawable/rechargeable), issuance/consumption, expiry, withdrawals, and transaction history (`points` app).
-- Shop & redemption: items can restrict allowed tags, support stock, shipping addresses, and status tracking (`shop` app).
-- Messaging & feedback: site messages/flash notices to guide users.
-- Optional infrastructure: Redis caching and ClickHouse analytics; Whitenoise serves static files.
+## 技术架构概览
+- **后端框架**：Django 5（入口 `manage.py`），配置位于 `config/`。
+- **核心域模型**：`accounts`、`homepage`、`messages`、`points`、`shop`，可选分析模块 `chdb`，共享工具在 `common`。
+- **数据层**：默认 SQLite，生产使用 PostgreSQL。
+- **缓存与分析**：可选 Redis 缓存与 ClickHouse 分析（`chdb`）。
+- **存储与邮件**：可选 S3/兼容对象存储；邮件默认控制台输出，可配置 Mailgun。
+- **静态资源**：开发期直接使用 `static/`，生产期可用 Whitenoise 或 CDN。
 
-## Quickstart
-Requirements: Python 3.12+, `uv`, `just`; optional Redis and ClickHouse. SQLite is the default DB; PostgreSQL recommended for production.
+
+## 快速开始
+**依赖**：Python 3.12+、`uv`、`just`。可选 Redis、ClickHouse、PostgreSQL。
 
 ```bash
-# 1) Tooling
+# 1) 安装工具
 pip install uv
-brew install just   # or install via your distro
+brew install just   # 主要是为了方便快速执行某些特定的命令
 
-# 2) Install deps
+# 2) 安装依赖
 uv sync
 
-# 3) Environment variables
+# 3) 环境变量
 cp .env.example .env
-# fill SECRET_KEY, social auth keys, Mailgun, S3/Redis/ClickHouse, etc.
-
-# 4) Migrate DB & create admin
+# 4) 初始化数据库
 uv run manage.py migrate
 uv run manage.py createsuperuser
 
-# 5) Run (dev)
-just run           # runserver_plus at http://127.0.0.1:8000/
-just worker        # run background DB worker in another terminal
+# 5) 启动开发环境
+just run            # http://127.0.0.1:8000/
+just worker         # 另开终端运行后台 DB worker
 ```
 
-Handy commands:
-- `just fmt`: Ruff lint + format + djlint (run before committing).
-- `just test`: parallel Django tests with coverage.
-- `uv run manage.py grant_points <username> <amount> --tags=tag1,tag2`: issue points.
-- `uv run manage.py shell_plus` or `just sh`: interactive shell.
+## 常用命令
+- `just run`：启动开发服务器（`runserver_plus`）。
+- `just worker`：启动后台 DB worker。
+- `just sh`：进入 `shell_plus`。
+- `just fmt`：Ruff lint + format + djlint（提交前必跑）。
+- `just test`：并行运行测试并生成覆盖率报告。
+- `just manage <command>`：执行任意 Django 管理命令。
 
-## Configuration Notes
-- Copy `.env.example` → `.env`; in production set `DEBUG=False`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`.
-- Email: set `MAILGUN_API_KEY` and `MAILGUN_SENDER_DOMAIN`; when empty, emails print to console for local dev.
-- Object storage: configure all `AWS_*` values for S3/compatible storage; otherwise local filesystem is used.
-- Social auth: create provider apps and supply key/secret; scopes are comma-separated.
-- Caching/analytics: `REDIS_URL` enables cache middleware; ClickHouse settings enable `chdb` analytics features.
+## 配置说明（.env）
+复制 `.env.example` 到 `.env` 后，至少配置：
+- `SECRET_KEY`、`DEBUG`、`ALLOWED_HOSTS`、`CSRF_TRUSTED_ORIGINS`
+- 邮件：`MAILGUN_API_KEY`、`MAILGUN_SENDER_DOMAIN`（为空时本地仅控制台输出）
+- 对象存储：`AWS_*`（未配置则使用本地文件系统）
+- 缓存：`REDIS_URL`（未配置则回落到本地缓存）
+- 社交登录：`SOCIAL_AUTH_*`（逗号分隔 scope）
+- 分析：`CLICKHOUSE_*`（可选）
 
-## Directory Map
-- `config/`: Django settings, URLs, ASGI/WSGI entrypoints.
-- `accounts/`: custom user, profiles, shipping addresses, social connections.
-- `homepage/`: landing page and user search.
-- `points/`: point pools, transactions, services, and management commands.
-- `shop/`: shop items, redemptions, shipping flow.
-- `messages/`: site messages/notifications.
-- `chdb/`: ClickHouse integrations (optional).
-- `templates/`, `static/`: frontend templates and static assets.
-- `justfile`: common dev/CI commands.
+## 目录结构
+- `config/`：Django settings、URL、ASGI/WSGI 入口
+- `accounts/`：用户、资料、地址、社交登录
+- `homepage/`：首页与搜索
+- `points/`：积分池、流水、服务与管理命令
+- `shop/`：商品、兑换与物流信息
+- `messages/`：站内消息与提示
+- `chdb/`：ClickHouse 集成（可选）
+- `templates/`、`static/`：模板与静态资源
 
-## Deployment Tips
-- Ensure `just fmt` and `just test` pass before deploying; container flows use `just docker-build` / `just docker-test` with `.env.example`.
-- Production requires a persistent DB and object storage; run `collectstatic` and serve via Whitenoise or a CDN.
-- Behind proxies/load balancers, keep forwarded headers (`USE_X_FORWARDED_HOST/PORT`) — already enabled in settings.
+## 测试与质量
+- 全量测试：`just test`
+- 目标测试：`uv run manage.py test points.tests.test_services`
+- 代码风格：`just fmt`
 
-## Support & Contributions
-Issues and PRs are welcome. See [contribute.md](contribute.md) for contribution flow and [development.md](development.md) for local environment details.
+## Docker（可选）
+- 构建镜像：`just docker-build IMAGE=fullsite`
+- 容器测试：`just docker-test IMAGE=fullsite`
+
+## 贡献
+欢迎提交 Issue 和 PR。详见 `contribute.md`，更多开发细节参考 `development.md`。

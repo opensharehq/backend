@@ -99,10 +99,9 @@ class MergeViewsEdgeCaseTests(TestCase):
         self._login_target()
         with mock.patch(
             "accounts.views.perform_merge",
-            side_effect=lambda mr: mr.__setattr__(
-                "status", AccountMergeRequest.Status.ACCEPTED
-            )
-            or mr,
+            side_effect=lambda mr: (
+                mr.__setattr__("status", AccountMergeRequest.Status.ACCEPTED) or mr
+            ),
         ) as perform_mock:
             response = self.client.post(
                 reverse("accounts:merge_agree", args=[self.merge_request.approve_token])

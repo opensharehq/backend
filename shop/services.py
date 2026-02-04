@@ -132,7 +132,7 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # 
 
     # 扣除积分
     try:
-        transactions = points_services.spend_points(
+        points_services.spend_points(
             owner=user,
             amount=item.cost,
             point_type=PointType.GIFT,
@@ -152,7 +152,6 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # 
         points_cost_at_redemption=item.cost,
         status=Redemption.StatusChoices.COMPLETED,
         shipping_address=shipping_address,
-        point_transaction=transactions[0] if transactions else None,
     )
 
     # 4. 更新库存 (使用 F() 表达式防止并发问题)

@@ -98,15 +98,6 @@ class Redemption(models.Model):
         verbose_name="收货地址",
         help_text="兑换时用户选择的收货地址（仅需要线下发货的商品）",
     )
-    # 关联积分交易记录
-    point_transaction = models.OneToOneField(
-        "points.PointTransaction",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="redemption",
-        verbose_name="积分交易记录",
-    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

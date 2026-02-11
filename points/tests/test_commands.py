@@ -7,6 +7,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
+from django.utils import timezone
 from social_django.models import UserSocialAuth
 
 from accounts.models import Organization, User
@@ -15,7 +16,13 @@ from points.allocation_services import AllocationService
 from points.management.commands.retrigger_pending_point_claims import (
     Command as RetriggerPendingPointClaimsCommand,
 )
-from points.models import PendingPointGrant, PointAllocation, PointType, Tag
+from points.models import (
+    PendingPointGrant,
+    PointAllocation,
+    PointType,
+    PointWallet,
+    Tag,
+)
 
 
 class GrantPointsCommandTests(TestCase):
@@ -376,6 +383,49 @@ class RollbackPendingClaimsCommandTests(TestCase):
         self.assertEqual(pending_grant.claimed_by, self.target_user)
         self.assertEqual(services.get_balance(self.target_user, PointType.GIFT), 5000)
         self.assertIn("预览模式", out.getvalue())
+
+    def test_rollback_claimed_grants_dry_run_does_not_create_wallet(self):
+        """Test dry-run does not create wallet records for users without wallet."""
+        wallet_content_type = ContentType.objects.get_for_model(User)
+        self.assertFalse(
+            PointWallet.objects.filter(
+                content_type=wallet_content_type,
+                object_id=self.target_user.id,
+            ).exists()
+        )
+
+        pending_grant = PendingPointGrant.objects.create(
+            github_id="",
+            github_login=self.target_user.username,
+            email=self.target_user.email,
+            amount=5000,
+            point_type=PointType.GIFT,
+            reason="测试待领取",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.granter.id,
+            allocation=self.allocation,
+            is_claimed=True,
+            claimed_by=self.target_user,
+            claimed_at=timezone.now(),
+        )
+
+        out = StringIO()
+        call_command(
+            "rollback_pending_claims",
+            user=self.target_user.username,
+            dry_run=True,
+            stdout=out,
+        )
+
+        pending_grant.refresh_from_db()
+        self.assertTrue(pending_grant.is_claimed)
+        self.assertFalse(
+            PointWallet.objects.filter(
+                content_type=wallet_content_type,
+                object_id=self.target_user.id,
+            ).exists()
+        )
+        self.assertIn("余额检查: 未通过", out.getvalue())
 
 
 class RetriggerPendingPointClaimsCommandTests(TestCase):

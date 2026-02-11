@@ -12,7 +12,7 @@ from contributions.services import ContributionService
 from .models import PendingPointGrant, PointAllocation, PointSource, PointType
 from .services import (
     InsufficientPointsError,
-    get_or_create_wallet,
+    get_wallet_or_none,
     grant_points,
     spend_points,
 )
@@ -132,9 +132,12 @@ class AllocationService:
         pending_grants = PendingPointGrant.objects.filter(
             AllocationService._build_pending_claim_query(user)
         )
-        summary = pending_grants.aggregate(total_amount=Sum("amount"))
+        summary = pending_grants.aggregate(
+            claimable_count=models.Count("id"),
+            total_amount=Sum("amount"),
+        )
         return {
-            "claimable_count": pending_grants.count(),
+            "claimable_count": summary["claimable_count"] or 0,
             "total_amount": summary["total_amount"] or 0,
         }
 
@@ -537,15 +540,19 @@ class AllocationService:
 
             required_by_bucket[bucket] = required_by_bucket.get(bucket, 0) + grant.amount
 
-        wallet = get_or_create_wallet(user)
+        wallet = get_wallet_or_none(user)
 
         for (point_type, tag_slug, _tag_is_null), required_amount in (
             required_by_bucket.items()
         ):
             if point_type == PointType.CASH:
-                available_amount = wallet.get_cash_balance()
+                available_amount = wallet.get_cash_balance() if wallet else 0
             elif tag_slug:
-                available_amount = wallet.get_gift_balance(tag_slug=tag_slug)
+                available_amount = (
+                    wallet.get_gift_balance(tag_slug=tag_slug) if wallet else 0
+                )
+            elif wallet is None:
+                available_amount = 0
             else:
                 available_amount = (
                     wallet.sources.filter(

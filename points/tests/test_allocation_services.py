@@ -284,6 +284,57 @@ class AllocationServiceTests(TestCase):
         self.assertEqual(result["claimed_count"], 0)
         self.assertEqual(result["total_amount"], 0)
 
+    def test_get_claimable_pending_points_summary(self):
+        """Test claimable pending points summary returns count and total."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        PendingPointGrant.objects.create(
+            github_id="",
+            github_login=self.user.username,
+            email="",
+            amount=3000,
+            point_type=PointType.GIFT,
+            reason="按用户名匹配",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+        )
+        PendingPointGrant.objects.create(
+            github_id="",
+            github_login="",
+            email=self.user.email,
+            amount=2000,
+            point_type=PointType.GIFT,
+            reason="按邮箱匹配",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+        )
+        PendingPointGrant.objects.create(
+            github_id="",
+            github_login="other-user",
+            email="other@example.com",
+            amount=9999,
+            point_type=PointType.GIFT,
+            reason="不匹配",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+        )
+
+        summary = AllocationService.get_claimable_pending_points_summary(self.user)
+
+        self.assertEqual(summary["claimable_count"], 2)
+        self.assertEqual(summary["total_amount"], 5000)
+
     def test_claim_pending_points_ignores_empty_identifiers(self):
         """Test empty user identifiers will not match all blank pending grants."""
         allocation = PointAllocation.objects.create(

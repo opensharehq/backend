@@ -62,6 +62,15 @@ def get_or_create_wallet(owner: User | Organization) -> PointWallet:
     return wallet
 
 
+def get_wallet_or_none(owner: User | Organization) -> PointWallet | None:
+    """只读获取积分钱包, 不存在时返回 None."""
+    content_type = ContentType.objects.get_for_model(owner)
+    return PointWallet.objects.filter(
+        content_type=content_type,
+        object_id=owner.pk,
+    ).first()
+
+
 def get_balance(
     owner: User | Organization,
     point_type: str | None = None,

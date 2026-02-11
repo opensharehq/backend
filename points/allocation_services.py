@@ -25,6 +25,7 @@ class AllocationService:
     """积分分配服务."""
 
     CONTRIBUTION_TO_POINTS_RATIO = 300  # 1 贡献度 = 300 积分
+    GITHUB_SOCIAL_AUTH_PREFETCH_ATTR = "prefetched_github_social_auth"
 
     @staticmethod
     def preview_allocation(allocation: PointAllocation) -> list[dict]:
@@ -380,8 +381,20 @@ class AllocationService:
         return item_copy
 
     @staticmethod
+    def _get_github_social_auth(user):
+        prefetched_social_auth = getattr(
+            user,
+            AllocationService.GITHUB_SOCIAL_AUTH_PREFETCH_ATTR,
+            None,
+        )
+        if prefetched_social_auth is not None:
+            return prefetched_social_auth[0] if prefetched_social_auth else None
+
+        return user.social_auth.filter(provider="github").only("uid").first()
+
+    @staticmethod
     def _build_pending_claim_query(user) -> models.Q:
-        github_social = user.social_auth.filter(provider="github").first()
+        github_social = AllocationService._get_github_social_auth(user)
         github_id = (
             str(github_social.uid).strip()
             if github_social and github_social.uid
@@ -435,7 +448,9 @@ class AllocationService:
 
     @staticmethod
     @transaction.atomic
-    def rollback_claimed_points_for_user(user, grant_ids: list[int] | None = None) -> dict:
+    def rollback_claimed_points_for_user(
+        user, grant_ids: list[int] | None = None
+    ) -> dict:
         """
         回退用户已领取的待领取积分记录, 并扣除对应积分.
 
@@ -528,7 +543,9 @@ class AllocationService:
         return list(grants_queryset)
 
     @staticmethod
-    def _ensure_rollback_balance_sufficient(user, grants: list[PendingPointGrant]) -> None:
+    def _ensure_rollback_balance_sufficient(
+        user, grants: list[PendingPointGrant]
+    ) -> None:
         required_by_bucket: dict[tuple[str, str | None, bool], int] = {}
         for grant in grants:
             if grant.point_type == PointType.CASH:
@@ -538,13 +555,17 @@ class AllocationService:
             else:
                 bucket = (PointType.GIFT, None, True)
 
-            required_by_bucket[bucket] = required_by_bucket.get(bucket, 0) + grant.amount
+            required_by_bucket[bucket] = (
+                required_by_bucket.get(bucket, 0) + grant.amount
+            )
 
         wallet = get_wallet_or_none(user)
 
-        for (point_type, tag_slug, _tag_is_null), required_amount in (
-            required_by_bucket.items()
-        ):
+        for (
+            point_type,
+            tag_slug,
+            _tag_is_null,
+        ), required_amount in required_by_bucket.items():
             if point_type == PointType.CASH:
                 available_amount = wallet.get_cash_balance() if wallet else 0
             elif tag_slug:

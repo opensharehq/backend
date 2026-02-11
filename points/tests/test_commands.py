@@ -466,6 +466,15 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             allocation=self.allocation,
         )
 
+    def _assert_has_github_social_auth_prefetch(self, queryset):
+        has_github_prefetch = any(
+            getattr(lookup, "prefetch_through", None) == "social_auth"
+            and getattr(lookup, "to_attr", None)
+            == AllocationService.GITHUB_SOCIAL_AUTH_PREFETCH_ATTR
+            for lookup in queryset._prefetch_related_lookups
+        )
+        self.assertTrue(has_github_prefetch)
+
     def test_retrigger_single_user(self):
         """Test retriggering pending claim for a specific user."""
         user = User.objects.create_user(
@@ -563,7 +572,9 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
                 user=user.username,
                 include_without_github=True,
             )
-        self.assertIn("--include-without-github 只能与 --all 一起使用", str(cm.exception))
+        self.assertIn(
+            "--include-without-github 只能与 --all 一起使用", str(cm.exception)
+        )
 
     def test_retrigger_single_user_dry_run(self):
         """Test retrigger dry-run does not claim pending grants."""
@@ -596,7 +607,7 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             include_without_github=False,
         )
 
-        self.assertIn("social_auth", queryset._prefetch_related_lookups)
+        self._assert_has_github_social_auth_prefetch(queryset)
 
     def test_get_target_users_all_with_include_without_github_prefetches_social_auth(
         self,
@@ -609,4 +620,41 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             include_without_github=True,
         )
 
-        self.assertIn("social_auth", queryset._prefetch_related_lookups)
+        self._assert_has_github_social_auth_prefetch(queryset)
+
+    def test_iter_target_users_batches_by_id(self):
+        """Test --all iteration paginates by ID batch size."""
+        for idx in range(3):
+            User.objects.create_user(
+                username=f"batched-user-{idx}",
+                email=f"batched-{idx}@example.com",
+                password="pass",
+            )
+
+        command = RetriggerPendingPointClaimsCommand()
+        queryset = command._with_github_social_auth_prefetch(
+            User.objects.all().order_by("id")
+        )
+
+        iterated_ids = [
+            user.id
+            for user in command._iter_target_users(
+                queryset,
+                process_all=True,
+                batch_size=2,
+            )
+        ]
+        expected_ids = list(User.objects.order_by("id").values_list("id", flat=True))
+
+        self.assertEqual(iterated_ids, expected_ids)
+
+    def test_batch_size_must_be_positive(self):
+        """Test --batch-size must be positive."""
+        with self.assertRaises(CommandError) as cm:
+            call_command(
+                "retrigger_pending_point_claims",
+                all=True,
+                batch_size=0,
+            )
+
+        self.assertIn("--batch-size 必须大于 0", str(cm.exception))

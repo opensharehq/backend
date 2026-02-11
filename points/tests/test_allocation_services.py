@@ -2,6 +2,7 @@
 
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.contenttypes.models import ContentType
@@ -370,6 +371,45 @@ class AllocationServiceTests(TestCase):
 
         pending_grant.refresh_from_db()
         self.assertFalse(pending_grant.is_claimed)
+
+    def test_build_pending_claim_query_uses_prefetched_github_social_auth(self):
+        """Test pending claim query uses prefetched GitHub social auth without DB query."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        prefetched_user = User.objects.create_user(
+            username="prefetched-user",
+            email="prefetched-user@example.com",
+        )
+        setattr(
+            prefetched_user,
+            AllocationService.GITHUB_SOCIAL_AUTH_PREFETCH_ATTR,
+            [SimpleNamespace(uid="556677")],
+        )
+
+        PendingPointGrant.objects.create(
+            github_id="556677",
+            github_login="someone-else",
+            email="someone-else@example.com",
+            amount=2600,
+            point_type=PointType.GIFT,
+            reason="按 github_id 匹配",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+        )
+
+        with self.assertNumQueries(0):
+            query = AllocationService._build_pending_claim_query(prefetched_user)
+
+        self.assertEqual(PendingPointGrant.objects.filter(query).count(), 1)
 
     def test_preview_allocation_empty_projects(self):
         """Test allocation preview with empty project tags."""

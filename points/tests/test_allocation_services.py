@@ -284,6 +284,42 @@ class AllocationServiceTests(TestCase):
         self.assertEqual(result["claimed_count"], 0)
         self.assertEqual(result["total_amount"], 0)
 
+    def test_claim_pending_points_ignores_empty_identifiers(self):
+        """Test empty user identifiers will not match all blank pending grants."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        pending_grant = PendingPointGrant.objects.create(
+            github_id="",
+            github_login="",
+            email="",
+            amount=3000,
+            point_type=PointType.GIFT,
+            reason="空标识测试",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+        )
+
+        user_with_empty_email = User.objects.create_user(
+            username="freshuser",
+            email="",
+        )
+        result = AllocationService.claim_pending_points(user_with_empty_email)
+
+        self.assertEqual(result["claimed_count"], 0)
+        self.assertEqual(result["total_amount"], 0)
+
+        pending_grant.refresh_from_db()
+        self.assertFalse(pending_grant.is_claimed)
+
     def test_preview_allocation_empty_projects(self):
         """Test allocation preview with empty project tags."""
         allocation = PointAllocation.objects.create(

@@ -2,6 +2,12 @@
 
 OpenShare 是一个面向开源社区的贡献激励平台，提供积分发放与回收、标签化积分池、兑换商城、用户资料与搜索、站内消息以及可选的分析能力，帮助社区透明地奖励贡献者。
 
+## 文档导航
+- `development.md`：开发环境与开发流程说明。
+- `Commands.md`：项目命令手册（`just`、自定义管理命令、`manage.py` 命令快照）。
+- `contribute.md`：贡献指南与 PR 协作约定。
+- `.env.example`：环境变量模板（本地配置请复制为 `.env`）。
+
 ## 技术架构概览
 - **后端框架**：Django 5（入口 `manage.py`），配置位于 `config/`。
 - **核心域模型**：`accounts`、`homepage`、`messages`、`points`、`shop`，可选分析模块 `chdb`，共享工具在 `common`。
@@ -40,6 +46,7 @@ just worker         # 另开终端运行后台 DB worker
 - `just fmt`：Ruff lint + format + djlint（提交前必跑）。
 - `just test`：并行运行测试并生成覆盖率报告。
 - `just manage <command>`：执行任意 Django 管理命令。
+- 完整命令手册：`Commands.md`（含 `just`、自定义管理命令与 `manage.py` 命令快照）。
 
 ## 配置说明（.env）
 复制 `.env.example` 到 `.env` 后，至少配置：

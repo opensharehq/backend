@@ -12,6 +12,9 @@ from social_django.models import UserSocialAuth
 from accounts.models import Organization, User
 from points import services
 from points.allocation_services import AllocationService
+from points.management.commands.retrigger_pending_point_claims import (
+    Command as RetriggerPendingPointClaimsCommand,
+)
 from points.models import PendingPointGrant, PointAllocation, PointType, Tag
 
 
@@ -533,3 +536,27 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
         self.assertFalse(pending_grant.is_claimed)
         self.assertEqual(services.get_balance(user, PointType.GIFT), 0)
         self.assertIn("预览完成", out.getvalue())
+
+    def test_get_target_users_all_prefetches_social_auth(self):
+        """Test --all target queryset prefetches social_auth."""
+        command = RetriggerPendingPointClaimsCommand()
+
+        queryset = command._get_target_users(
+            {"all": True, "user": None, "user_id": None},
+            include_without_github=False,
+        )
+
+        self.assertIn("social_auth", queryset._prefetch_related_lookups)
+
+    def test_get_target_users_all_with_include_without_github_prefetches_social_auth(
+        self,
+    ):
+        """Test --all with include_without_github prefetches social_auth."""
+        command = RetriggerPendingPointClaimsCommand()
+
+        queryset = command._get_target_users(
+            {"all": True, "user": None, "user_id": None},
+            include_without_github=True,
+        )
+
+        self.assertIn("social_auth", queryset._prefetch_related_lookups)

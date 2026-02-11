@@ -55,7 +55,7 @@ class Command(BaseCommand):
         total_amount = 0
         failed_users = []
 
-        for user in users.iterator():
+        for user in users:
             processed_users += 1
             try:
                 if dry_run:
@@ -108,9 +108,12 @@ class Command(BaseCommand):
         """Return target users queryset."""
         if options.get("all"):
             if include_without_github:
-                return User.objects.all().order_by("id")
-            return User.objects.filter(social_auth__provider="github").distinct().order_by(
-                "id"
+                return User.objects.all().order_by("id").prefetch_related("social_auth")
+            return (
+                User.objects.filter(social_auth__provider="github")
+                .distinct()
+                .order_by("id")
+                .prefetch_related("social_auth")
             )
 
         if options.get("user"):
@@ -120,7 +123,7 @@ class Command(BaseCommand):
             except User.DoesNotExist as err:
                 msg = f"用户不存在: {username}"
                 raise CommandError(msg) from err
-            return User.objects.filter(id=user.id)
+            return User.objects.filter(id=user.id).prefetch_related("social_auth")
 
         if options.get("user_id"):
             user_id = options["user_id"]
@@ -129,7 +132,7 @@ class Command(BaseCommand):
             except User.DoesNotExist as err:
                 msg = f"用户不存在: ID={user_id}"
                 raise CommandError(msg) from err
-            return User.objects.filter(id=user.id)
+            return User.objects.filter(id=user.id).prefetch_related("social_auth")
 
         msg = "必须指定 --all, --user 或 --user-id"
         raise CommandError(msg)  # pragma: no cover

@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
+from django.utils import timezone
 
 from accounts.models import User
 from points.allocation_services import AllocationService
@@ -496,6 +497,90 @@ class AllocationServiceTests(TestCase):
             query = AllocationService._build_pending_claim_query(prefetched_user)
 
         self.assertEqual(PendingPointGrant.objects.filter(query).count(), 1)
+
+    def test_build_pending_claim_query_matches_prefetched_uid_zero(self):
+        """Test prefetched github uid=0 is treated as a valid identifier."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        prefetched_user = User.objects.create_user(
+            username="uid-zero-user",
+            email="uid-zero-user@example.com",
+        )
+        setattr(
+            prefetched_user,
+            AllocationService.GITHUB_SOCIAL_AUTH_PREFETCH_ATTR,
+            [SimpleNamespace(uid=0)],
+        )
+
+        PendingPointGrant.objects.create(
+            github_id="0",
+            github_login="someone-else",
+            email="someone-else@example.com",
+            amount=1600,
+            point_type=PointType.GIFT,
+            reason="按 github_id=0 匹配",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+        )
+
+        with self.assertNumQueries(0):
+            query = AllocationService._build_pending_claim_query(prefetched_user)
+
+        self.assertEqual(PendingPointGrant.objects.filter(query).count(), 1)
+
+    def test_rollback_claimed_points_uses_locked_balance_check(self):
+        """Test rollback execution enables source locking during balance check."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        pending_grant = PendingPointGrant.objects.create(
+            github_id="",
+            github_login=self.user.username,
+            email=self.user.email,
+            amount=1200,
+            point_type=PointType.GIFT,
+            reason="回退锁测试",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+            is_claimed=True,
+            claimed_by=self.user,
+            claimed_at=timezone.now(),
+        )
+        grant_points(
+            owner=self.user,
+            amount=1200,
+            point_type=PointType.GIFT,
+            reason="回退可用余额",
+        )
+
+        with patch.object(
+            AllocationService,
+            "_ensure_rollback_balance_sufficient",
+            wraps=AllocationService._ensure_rollback_balance_sufficient,
+        ) as ensure_mock:
+            AllocationService.rollback_claimed_points_for_user(self.user)
+
+        pending_grant.refresh_from_db()
+        self.assertFalse(pending_grant.is_claimed)
+        self.assertEqual(ensure_mock.call_count, 1)
+        self.assertTrue(ensure_mock.call_args.kwargs["lock_sources"])
 
     def test_preview_allocation_empty_projects(self):
         """Test allocation preview with empty project tags."""

@@ -404,11 +404,8 @@ class AllocationService:
     @staticmethod
     def _build_pending_claim_query(user) -> models.Q:
         github_social = AllocationService._get_github_social_auth(user)
-        github_id = (
-            str(github_social.uid).strip()
-            if github_social and github_social.uid
-            else ""
-        )
+        github_uid = github_social.uid if github_social else None
+        github_id = str(github_uid).strip() if github_uid is not None else ""
         github_login = (user.username or "").strip()
         email = (user.email or "").strip()
 
@@ -483,7 +480,11 @@ class AllocationService:
         if not grants:
             return {"rolled_back_count": 0, "total_amount": 0}
 
-        AllocationService._ensure_rollback_balance_sufficient(user, grants)
+        AllocationService._ensure_rollback_balance_sufficient(
+            user,
+            grants,
+            lock_sources=True,
+        )
 
         rolled_back_count = 0
         total_amount = 0
@@ -554,7 +555,10 @@ class AllocationService:
 
     @staticmethod
     def _ensure_rollback_balance_sufficient(
-        user, grants: list[PendingPointGrant]
+        user,
+        grants: list[PendingPointGrant],
+        *,
+        lock_sources: bool = False,
     ) -> None:
         required_by_bucket: dict[tuple[str, str | None, bool], int] = {}
         for grant in grants:
@@ -574,25 +578,15 @@ class AllocationService:
         for (
             point_type,
             tag_slug,
-            _tag_is_null,
+            tag_is_null,
         ), required_amount in required_by_bucket.items():
-            if point_type == PointType.CASH:
-                available_amount = wallet.get_cash_balance() if wallet else 0
-            elif tag_slug:
-                available_amount = (
-                    wallet.get_gift_balance(tag_slug=tag_slug) if wallet else 0
-                )
-            elif wallet is None:
-                available_amount = 0
-            else:
-                available_amount = (
-                    wallet.sources.filter(
-                        point_type=PointType.GIFT,
-                        tag__isnull=True,
-                        remaining_amount__gt=0,
-                    ).aggregate(total=Sum("remaining_amount"))["total"]
-                    or 0
-                )
+            available_amount = AllocationService._get_rollback_bucket_available_amount(
+                wallet,
+                point_type=point_type,
+                tag_slug=tag_slug,
+                tag_is_null=tag_is_null,
+                lock_sources=lock_sources,
+            )
 
             if available_amount < required_amount:
                 bucket_name = (
@@ -605,6 +599,35 @@ class AllocationService:
                     f"需要 {required_amount}，可用 {available_amount}"
                 )
                 raise InsufficientPointsError(msg)
+
+    @staticmethod
+    def _get_rollback_bucket_available_amount(
+        wallet,
+        *,
+        point_type: str,
+        tag_slug: str | None,
+        tag_is_null: bool,
+        lock_sources: bool = False,
+    ) -> int:
+        if wallet is None:
+            return 0
+
+        sources_queryset = PointSource.objects.filter(
+            wallet=wallet,
+            point_type=point_type,
+            remaining_amount__gt=0,
+        ).order_by("created_at", "id")
+
+        if point_type == PointType.GIFT:
+            if tag_slug:
+                sources_queryset = sources_queryset.filter(tag__slug=tag_slug)
+            elif tag_is_null:
+                sources_queryset = sources_queryset.filter(tag__isnull=True)
+
+        if lock_sources:
+            sources_queryset = sources_queryset.select_for_update()
+
+        return sum(source.remaining_amount for source in sources_queryset)
 
     @staticmethod
     def _rollback_single_grant(user, grant: PendingPointGrant) -> None:

@@ -306,8 +306,12 @@ class AllocationServiceTests(TestCase):
         stale_grant_2 = PendingPointGrant.objects.get(id=pending_grant.id)
 
         with patch("points.allocation_services.grant_points") as grant_points_mock:
-            first_amount = AllocationService._claim_pending_grant(claimant, stale_grant_1)
-            second_amount = AllocationService._claim_pending_grant(claimant, stale_grant_2)
+            first_amount = AllocationService._claim_pending_grant(
+                claimant, stale_grant_1
+            )
+            second_amount = AllocationService._claim_pending_grant(
+                claimant, stale_grant_2
+            )
 
         self.assertEqual(first_amount, 4200)
         self.assertEqual(second_amount, 0)

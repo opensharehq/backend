@@ -4,12 +4,18 @@ import logging
 from decimal import Decimal
 
 from django.db import models, transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from contributions.services import ContributionService
 
 from .models import PendingPointGrant, PointAllocation, PointSource, PointType
-from .services import grant_points, spend_points
+from .services import (
+    InsufficientPointsError,
+    get_wallet_or_none,
+    grant_points,
+    spend_points,
+)
 from .tag_operations import TagOperation
 
 logger = logging.getLogger(__name__)
@@ -19,6 +25,7 @@ class AllocationService:
     """积分分配服务."""
 
     CONTRIBUTION_TO_POINTS_RATIO = 300  # 1 贡献度 = 300 积分
+    GITHUB_SOCIAL_AUTH_PREFETCH_ATTR = "prefetched_github_social_auth"
 
     @staticmethod
     def preview_allocation(allocation: PointAllocation) -> list[dict]:
@@ -107,18 +114,42 @@ class AllocationService:
         """
         pending_grants = PendingPointGrant.objects.filter(
             AllocationService._build_pending_claim_query(user)
-        )
+        ).select_related("tag")
 
         claimed_count = 0
         total_amount = 0
 
         for grant in pending_grants:
-            claimed_amount = AllocationService._claim_pending_grant(user, grant)
+            try:
+                claimed_amount = AllocationService._claim_pending_grant(user, grant)
+            except Exception:
+                logger.exception(
+                    "Failed to claim pending grant %s for user %s",
+                    grant.id,
+                    user.id,
+                )
+                continue
+
             if claimed_amount:
                 claimed_count += 1
                 total_amount += claimed_amount
 
         return {"claimed_count": claimed_count, "total_amount": total_amount}
+
+    @staticmethod
+    def get_claimable_pending_points_summary(user) -> dict:
+        """获取用户当前可领取的待领取积分汇总."""
+        pending_grants = PendingPointGrant.objects.filter(
+            AllocationService._build_pending_claim_query(user)
+        )
+        summary = pending_grants.aggregate(
+            claimable_count=models.Count("id"),
+            total_amount=Sum("amount"),
+        )
+        return {
+            "claimable_count": summary["claimable_count"] or 0,
+            "total_amount": summary["total_amount"] or 0,
+        }
 
     @staticmethod
     def _get_project_identifiers(allocation: PointAllocation) -> list[str]:
@@ -359,44 +390,259 @@ class AllocationService:
         return item_copy
 
     @staticmethod
-    def _build_pending_claim_query(user) -> models.Q:
-        github_social = user.social_auth.filter(provider="github").first()
-        github_id = github_social.uid if github_social else None
-
-        query = models.Q(is_claimed=False)
-        if github_id:
-            return query & (
-                models.Q(github_id=github_id)
-                | models.Q(github_login=user.username)
-                | models.Q(email=user.email)
-            )
-
-        return query & (
-            models.Q(github_login=user.username) | models.Q(email=user.email)
+    def _get_github_social_auth(user):
+        prefetched_social_auth = getattr(
+            user,
+            AllocationService.GITHUB_SOCIAL_AUTH_PREFETCH_ATTR,
+            None,
         )
+        if prefetched_social_auth is not None:
+            return prefetched_social_auth[0] if prefetched_social_auth else None
+
+        return user.social_auth.filter(provider="github").only("uid").first()
 
     @staticmethod
+    def _build_pending_claim_query(user) -> models.Q:
+        github_social = AllocationService._get_github_social_auth(user)
+        github_uid = github_social.uid if github_social else None
+        github_id = str(github_uid).strip() if github_uid is not None else ""
+        github_login = (user.username or "").strip()
+        email = (user.email or "").strip()
+
+        identifier_conditions: list[models.Q] = []
+        if github_id:
+            identifier_conditions.append(models.Q(github_id=github_id))
+        if github_login:
+            identifier_conditions.append(models.Q(github_login=github_login))
+        if email:
+            identifier_conditions.append(models.Q(email=email))
+
+        if not identifier_conditions:
+            return models.Q(pk__isnull=True)
+
+        identifier_query = identifier_conditions[0]
+        for condition in identifier_conditions[1:]:
+            identifier_query |= condition
+
+        return models.Q(is_claimed=False) & identifier_query
+
+    @staticmethod
+    @transaction.atomic
     def _claim_pending_grant(user, grant: PendingPointGrant) -> int:
+        claimed_rows = PendingPointGrant.objects.filter(
+            id=grant.id,
+            is_claimed=False,
+        ).update(
+            is_claimed=True,
+            claimed_by=user,
+            claimed_at=timezone.now(),
+        )
+
+        if claimed_rows == 0:
+            return 0
+
+        grant_points(
+            owner=user,
+            amount=grant.amount,
+            point_type=grant.point_type,
+            reason=grant.reason,
+            tag_slug=grant.tag.slug if grant.tag else None,
+            reference_id=grant.reference_id,
+            created_by=None,
+        )
+
+        return grant.amount
+
+    @staticmethod
+    @transaction.atomic
+    def rollback_claimed_points_for_user(
+        user, grant_ids: list[int] | None = None
+    ) -> dict:
+        """
+        回退用户已领取的待领取积分记录, 并扣除对应积分.
+
+        Args:
+            user: 用户对象
+            grant_ids: 可选, 仅回退指定的待领取记录 ID 列表
+
+        Returns:
+            {
+                "rolled_back_count": 3,
+                "total_amount": 9000
+            }
+
+        """
+        grants = AllocationService._get_rollback_target_grants(
+            user=user,
+            grant_ids=grant_ids,
+            for_update=True,
+        )
+        if not grants:
+            return {"rolled_back_count": 0, "total_amount": 0}
+
+        AllocationService._ensure_rollback_balance_sufficient(
+            user,
+            grants,
+            lock_sources=True,
+        )
+
+        rolled_back_count = 0
+        total_amount = 0
+
+        for grant in grants:
+            AllocationService._rollback_single_grant(user, grant)
+            rolled_back_count += 1
+            total_amount += grant.amount
+
+        return {"rolled_back_count": rolled_back_count, "total_amount": total_amount}
+
+    @staticmethod
+    def get_rollback_claimed_points_summary(
+        user,
+        grant_ids: list[int] | None = None,
+    ) -> dict:
+        """获取用户可回退领取记录的汇总信息."""
+        grants = AllocationService._get_rollback_target_grants(
+            user=user,
+            grant_ids=grant_ids,
+            for_update=False,
+        )
+        if not grants:
+            return {
+                "rollbackable_count": 0,
+                "total_amount": 0,
+                "can_execute": True,
+                "blocking_error": "",
+            }
+
+        can_execute = True
+        blocking_error = ""
         try:
-            grant_points(
-                owner=user,
-                amount=grant.amount,
-                point_type=grant.point_type,
-                reason=grant.reason,
-                tag_slug=grant.tag.slug if grant.tag else None,
-                reference_id=grant.reference_id,
-                created_by=None,
+            AllocationService._ensure_rollback_balance_sufficient(user, grants)
+        except InsufficientPointsError as err:
+            can_execute = False
+            blocking_error = str(err)
+
+        return {
+            "rollbackable_count": len(grants),
+            "total_amount": sum(grant.amount for grant in grants),
+            "can_execute": can_execute,
+            "blocking_error": blocking_error,
+        }
+
+    @staticmethod
+    def _get_rollback_target_grants(
+        user,
+        grant_ids: list[int] | None = None,
+        *,
+        for_update: bool = False,
+    ) -> list[PendingPointGrant]:
+        grants_queryset = PendingPointGrant.objects.filter(
+            is_claimed=True,
+            claimed_by=user,
+        )
+        if grant_ids:
+            grants_queryset = grants_queryset.filter(id__in=grant_ids)
+
+        grants_queryset = grants_queryset.select_related("tag").order_by(
+            "claimed_at",
+            "id",
+        )
+        if for_update:
+            grants_queryset = grants_queryset.select_for_update()
+
+        return list(grants_queryset)
+
+    @staticmethod
+    def _ensure_rollback_balance_sufficient(
+        user,
+        grants: list[PendingPointGrant],
+        *,
+        lock_sources: bool = False,
+    ) -> None:
+        required_by_bucket: dict[tuple[str, str | None, bool], int] = {}
+        for grant in grants:
+            if grant.point_type == PointType.CASH:
+                bucket = (PointType.CASH, None, False)
+            elif grant.tag:
+                bucket = (PointType.GIFT, grant.tag.slug, False)
+            else:
+                bucket = (PointType.GIFT, None, True)
+
+            required_by_bucket[bucket] = (
+                required_by_bucket.get(bucket, 0) + grant.amount
             )
 
-            grant.is_claimed = True
-            grant.claimed_by = user
-            grant.claimed_at = timezone.now()
-            grant.save()
-        except Exception:
-            logger.exception(
-                "Failed to claim pending grant %s for user %s",
-                grant.id,
-                user.id,
+        wallet = get_wallet_or_none(user)
+
+        for (
+            point_type,
+            tag_slug,
+            tag_is_null,
+        ), required_amount in required_by_bucket.items():
+            available_amount = AllocationService._get_rollback_bucket_available_amount(
+                wallet,
+                point_type=point_type,
+                tag_slug=tag_slug,
+                tag_is_null=tag_is_null,
+                lock_sources=lock_sources,
             )
+
+            if available_amount < required_amount:
+                bucket_name = (
+                    "现金积分"
+                    if point_type == PointType.CASH
+                    else f"礼物积分(tag={tag_slug or '无标签'})"
+                )
+                msg = (
+                    f"用户 {user.username} 余额不足，无法回退 {bucket_name}："
+                    f"需要 {required_amount}，可用 {available_amount}"
+                )
+                raise InsufficientPointsError(msg)
+
+    @staticmethod
+    def _get_rollback_bucket_available_amount(
+        wallet,
+        *,
+        point_type: str,
+        tag_slug: str | None,
+        tag_is_null: bool,
+        lock_sources: bool = False,
+    ) -> int:
+        if wallet is None:
             return 0
-        return grant.amount
+
+        sources_queryset = PointSource.objects.filter(
+            wallet=wallet,
+            point_type=point_type,
+            remaining_amount__gt=0,
+        ).order_by("created_at", "id")
+
+        if point_type == PointType.GIFT:
+            if tag_slug:
+                sources_queryset = sources_queryset.filter(tag__slug=tag_slug)
+            elif tag_is_null:
+                sources_queryset = sources_queryset.filter(tag__isnull=True)
+
+        if lock_sources:
+            sources_queryset = sources_queryset.select_for_update()
+
+        return sum(source.remaining_amount for source in sources_queryset)
+
+    @staticmethod
+    def _rollback_single_grant(user, grant: PendingPointGrant) -> None:
+        spend_points(
+            owner=user,
+            amount=grant.amount,
+            point_type=grant.point_type,
+            description=f"回退待领取积分 #{grant.id}",
+            tag_slug=grant.tag.slug if grant.tag else None,
+            tag_is_null=(grant.point_type == PointType.GIFT and grant.tag is None),
+            reference_id=f"pending_grant_rollback:{grant.id}",
+            created_by=None,
+        )
+
+        grant.is_claimed = False
+        grant.claimed_by = None
+        grant.claimed_at = None
+        grant.save(update_fields=["is_claimed", "claimed_by", "claimed_at"])

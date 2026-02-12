@@ -69,7 +69,9 @@ class Command(BaseCommand):
             )
         )
         if grant_ids:
-            self.stdout.write(f"  指定记录 ID: {', '.join(str(gid) for gid in grant_ids)}")
+            self.stdout.write(
+                f"  指定记录 ID: {', '.join(str(gid) for gid in grant_ids)}"
+            )
 
         balance = services.get_detailed_balance(user)
         self.stdout.write(f"  当前总余额: {balance['total']}")
@@ -97,7 +99,9 @@ class Command(BaseCommand):
             )
         )
         if grant_ids:
-            self.stdout.write(f"  指定记录 ID: {', '.join(str(gid) for gid in grant_ids)}")
+            self.stdout.write(
+                f"  指定记录 ID: {', '.join(str(gid) for gid in grant_ids)}"
+            )
 
         if summary["can_execute"]:
             self.stdout.write("  余额检查: 通过（正式执行预计成功）")

@@ -111,7 +111,9 @@ class Command(BaseCommand):
             )
 
         if failed_users:
-            summary_title = "预览结束（存在失败）：" if dry_run else "处理结束（存在失败）："
+            summary_title = (
+                "预览结束（存在失败）：" if dry_run else "处理结束（存在失败）："
+            )
             self.stderr.write(
                 self.style.WARNING(
                     summary_title + f"用户数 {processed_users}，"

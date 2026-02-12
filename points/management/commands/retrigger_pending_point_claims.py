@@ -110,17 +110,16 @@ class Command(BaseCommand):
                 dry_run=dry_run,
             )
 
-        self._write_summary(
-            processed_users=processed_users,
-            users_with_claims=users_with_claims,
-            total_claimed_count=total_claimed_count,
-            total_amount=total_amount,
-            dry_run=dry_run,
-        )
-
         if failed_users:
+            summary_title = "预览结束（存在失败）：" if dry_run else "处理结束（存在失败）："
             self.stderr.write(
-                self.style.WARNING(f"有 {len(failed_users)} 个用户处理失败")
+                self.style.WARNING(
+                    summary_title + f"用户数 {processed_users}，"
+                    f"有领取用户 {users_with_claims}，"
+                    f"领取记录 {total_claimed_count}，"
+                    f"总积分 {total_amount}，"
+                    f"失败用户 {len(failed_users)}"
+                )
             )
             for user_id, username, error_type, error_message in failed_users:
                 self.stderr.write(
@@ -129,6 +128,14 @@ class Command(BaseCommand):
                 )
             msg = "存在处理失败的用户，请先修复后重试"
             raise CommandError(msg)
+
+        self._write_summary(
+            processed_users=processed_users,
+            users_with_claims=users_with_claims,
+            total_claimed_count=total_claimed_count,
+            total_amount=total_amount,
+            dry_run=dry_run,
+        )
 
     def _get_target_users(self, options, include_without_github):
         """Return target users queryset."""

@@ -606,6 +606,7 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             email="failed-user@example.com",
             password="pass",
         )
+        out = StringIO()
         err = StringIO()
 
         with (
@@ -623,11 +624,14 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             call_command(
                 "retrigger_pending_point_claims",
                 user=user.username,
+                stdout=out,
                 stderr=err,
             )
 
         self.assertIn("存在处理失败的用户", str(cm.exception))
+        self.assertNotIn("处理完成", out.getvalue())
         err_output = err.getvalue()
+        self.assertIn("处理结束（存在失败）", err_output)
         self.assertIn(f"id={user.id}", err_output)
         self.assertIn(f"username={user.username}", err_output)
         self.assertIn("ValueError: boom", err_output)

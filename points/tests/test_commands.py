@@ -2,6 +2,7 @@
 
 from datetime import date
 from io import StringIO
+from unittest import mock
 
 from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
@@ -597,6 +598,42 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
         self.assertFalse(pending_grant.is_claimed)
         self.assertEqual(services.get_balance(user, PointType.GIFT), 0)
         self.assertIn("预览完成", out.getvalue())
+
+    def test_retrigger_failed_user_outputs_error_type_and_identity(self):
+        """Test failed user summary includes id/username and exception type."""
+        user = User.objects.create_user(
+            username="failed-user",
+            email="failed-user@example.com",
+            password="pass",
+        )
+        err = StringIO()
+
+        with (
+            self.assertLogs(
+                "points.management.commands.retrigger_pending_point_claims",
+                level="ERROR",
+            ) as log_cm,
+            self.assertRaises(CommandError) as cm,
+            mock.patch.object(
+                RetriggerPendingPointClaimsCommand,
+                "_process_user",
+                side_effect=ValueError("boom"),
+            ),
+        ):
+            call_command(
+                "retrigger_pending_point_claims",
+                user=user.username,
+                stderr=err,
+            )
+
+        self.assertIn("存在处理失败的用户", str(cm.exception))
+        err_output = err.getvalue()
+        self.assertIn(f"id={user.id}", err_output)
+        self.assertIn(f"username={user.username}", err_output)
+        self.assertIn("ValueError: boom", err_output)
+        log_output = "\n".join(log_cm.output)
+        self.assertIn(f"user_id={user.id}", log_output)
+        self.assertIn(f"username={user.username}", log_output)
 
     def test_get_target_users_all_prefetches_social_auth(self):
         """Test --all target queryset prefetches social_auth."""

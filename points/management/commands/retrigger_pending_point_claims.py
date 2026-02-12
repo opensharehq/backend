@@ -1,11 +1,15 @@
 """Manually retrigger pending point claim for existing users."""
 
+import logging
+
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Prefetch
 from social_django.models import UserSocialAuth
 
 from accounts.models import User
 from points.allocation_services import AllocationService
+
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -80,7 +84,17 @@ class Command(BaseCommand):
                     dry_run=dry_run,
                 )
             except Exception as err:
-                failed_users.append((user.username, str(err)))
+                error_type = type(err).__name__
+                error_message = str(err) or repr(err)
+                logger.exception(
+                    "处理待领取积分失败: user_id=%s username=%s error_type=%s",
+                    user.id,
+                    user.username,
+                    error_type,
+                )
+                failed_users.append(
+                    (user.id, user.username, error_type, error_message),
+                )
                 continue
 
             if claimed_count <= 0:
@@ -108,8 +122,11 @@ class Command(BaseCommand):
             self.stderr.write(
                 self.style.WARNING(f"有 {len(failed_users)} 个用户处理失败")
             )
-            for username, error in failed_users:
-                self.stderr.write(f"  - {username}: {error}")
+            for user_id, username, error_type, error_message in failed_users:
+                self.stderr.write(
+                    f"  - id={user_id}, username={username}: "
+                    f"{error_type}: {error_message}"
+                )
             msg = "存在处理失败的用户，请先修复后重试"
             raise CommandError(msg)
 

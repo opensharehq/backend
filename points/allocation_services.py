@@ -114,13 +114,22 @@ class AllocationService:
         """
         pending_grants = PendingPointGrant.objects.filter(
             AllocationService._build_pending_claim_query(user)
-        )
+        ).select_related("tag")
 
         claimed_count = 0
         total_amount = 0
 
         for grant in pending_grants:
-            claimed_amount = AllocationService._claim_pending_grant(user, grant)
+            try:
+                claimed_amount = AllocationService._claim_pending_grant(user, grant)
+            except Exception:
+                logger.exception(
+                    "Failed to claim pending grant %s for user %s",
+                    grant.id,
+                    user.id,
+                )
+                continue
+
             if claimed_amount:
                 claimed_count += 1
                 total_amount += claimed_amount
@@ -421,29 +430,30 @@ class AllocationService:
         return models.Q(is_claimed=False) & identifier_query
 
     @staticmethod
+    @transaction.atomic
     def _claim_pending_grant(user, grant: PendingPointGrant) -> int:
-        try:
-            grant_points(
-                owner=user,
-                amount=grant.amount,
-                point_type=grant.point_type,
-                reason=grant.reason,
-                tag_slug=grant.tag.slug if grant.tag else None,
-                reference_id=grant.reference_id,
-                created_by=None,
-            )
+        claimed_rows = PendingPointGrant.objects.filter(
+            id=grant.id,
+            is_claimed=False,
+        ).update(
+            is_claimed=True,
+            claimed_by=user,
+            claimed_at=timezone.now(),
+        )
 
-            grant.is_claimed = True
-            grant.claimed_by = user
-            grant.claimed_at = timezone.now()
-            grant.save()
-        except Exception:
-            logger.exception(
-                "Failed to claim pending grant %s for user %s",
-                grant.id,
-                user.id,
-            )
+        if claimed_rows == 0:
             return 0
+
+        grant_points(
+            owner=user,
+            amount=grant.amount,
+            point_type=grant.point_type,
+            reason=grant.reason,
+            tag_slug=grant.tag.slug if grant.tag else None,
+            reference_id=grant.reference_id,
+            created_by=None,
+        )
+
         return grant.amount
 
     @staticmethod

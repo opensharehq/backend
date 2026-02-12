@@ -273,6 +273,92 @@ class AllocationServiceTests(TestCase):
         self.assertEqual(pending_grant.claimed_by, new_user)
         self.assertIsNotNone(pending_grant.claimed_at)
 
+    def test_claim_pending_grant_uses_atomic_claim_guard(self):
+        """Test only one stale grant snapshot can claim the same pending record."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        pending_grant = PendingPointGrant.objects.create(
+            github_id="123456",
+            github_login="race-user",
+            email="race-user@example.com",
+            amount=4200,
+            point_type=PointType.GIFT,
+            reason="并发领取测试",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+        )
+        claimant = User.objects.create_user(
+            username="race-user",
+            email="race-user@example.com",
+        )
+
+        stale_grant_1 = PendingPointGrant.objects.get(id=pending_grant.id)
+        stale_grant_2 = PendingPointGrant.objects.get(id=pending_grant.id)
+
+        with patch("points.allocation_services.grant_points") as grant_points_mock:
+            first_amount = AllocationService._claim_pending_grant(claimant, stale_grant_1)
+            second_amount = AllocationService._claim_pending_grant(claimant, stale_grant_2)
+
+        self.assertEqual(first_amount, 4200)
+        self.assertEqual(second_amount, 0)
+        grant_points_mock.assert_called_once()
+
+        pending_grant.refresh_from_db()
+        self.assertTrue(pending_grant.is_claimed)
+        self.assertEqual(pending_grant.claimed_by, claimant)
+        self.assertIsNotNone(pending_grant.claimed_at)
+
+    def test_claim_pending_points_rolls_back_claim_flag_on_grant_failure(self):
+        """Test claim flag is rolled back if grant_points fails inside transaction."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        pending_grant = PendingPointGrant.objects.create(
+            github_id="123456",
+            github_login="rollback-user",
+            email="rollback-user@example.com",
+            amount=2600,
+            point_type=PointType.GIFT,
+            reason="失败回滚测试",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+        )
+        claimant = User.objects.create_user(
+            username="rollback-user",
+            email="rollback-user@example.com",
+        )
+
+        with patch(
+            "points.allocation_services.grant_points",
+            side_effect=RuntimeError("grant failed"),
+        ):
+            result = AllocationService.claim_pending_points(claimant)
+
+        self.assertEqual(result["claimed_count"], 0)
+        self.assertEqual(result["total_amount"], 0)
+
+        pending_grant.refresh_from_db()
+        self.assertFalse(pending_grant.is_claimed)
+        self.assertIsNone(pending_grant.claimed_by)
+        self.assertIsNone(pending_grant.claimed_at)
+
     def test_claim_pending_points_no_match(self):
         """Test claiming pending points with no matches."""
         new_user = User.objects.create_user(

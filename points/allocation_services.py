@@ -3,7 +3,7 @@
 import logging
 from decimal import Decimal
 
-from django.db import models, transaction
+from django.db import connection, models, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -549,7 +549,10 @@ class AllocationService:
             "id",
         )
         if for_update:
-            grants_queryset = grants_queryset.select_for_update()
+            if connection.features.has_select_for_update_of:
+                grants_queryset = grants_queryset.select_for_update(of=("self",))
+            else:
+                grants_queryset = grants_queryset.select_for_update()
 
         return list(grants_queryset)
 

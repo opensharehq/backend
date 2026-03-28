@@ -6,9 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.contenttypes.models import ContentType
-from django.db import connection
+from django.db import connection, models
 from django.test import TestCase
 from django.utils import timezone
+from social_django.models import UserSocialAuth
 
 from accounts.models import User
 from points.allocation_services import AllocationService
@@ -21,7 +22,7 @@ from points.models import (
     Tag,
     TagType,
 )
-from points.services import grant_points
+from points.services import get_balance, grant_points
 
 
 class AllocationServiceTests(TestCase):
@@ -958,3 +959,408 @@ class AllocationServiceTests(TestCase):
         ]
 
         AllocationService._ensure_rollback_balance_sufficient(self.user, grants)
+
+
+class AllocationServiceThinIntegrationTests(TestCase):
+    """Integration-oriented allocation tests without global service patches."""
+
+    def setUp(self):
+        self.initiator = User.objects.create_user(
+            username="thin-initiator",
+            email="thin-initiator@example.com",
+        )
+        self.user_ct = ContentType.objects.get_for_model(User)
+        self.repo_tag = Tag.objects.create(
+            name="thin-repo-tag",
+            slug="thin-repo-tag",
+            tag_type=TagType.REPO,
+            entity_identifier="acme/repo",
+            is_official=True,
+        )
+        self.cash_source_pool = grant_points(
+            owner=self.initiator,
+            amount=5000,
+            point_type=PointType.CASH,
+            reason="thin cash pool",
+        )
+        self.gift_tagged_source_pool = grant_points(
+            owner=self.initiator,
+            amount=5000,
+            point_type=PointType.GIFT,
+            reason="thin tagged gift pool",
+            tag_slug=self.repo_tag.slug,
+        )
+        self.gift_untagged_source_pool = grant_points(
+            owner=self.initiator,
+            amount=5000,
+            point_type=PointType.GIFT,
+            reason="thin untagged gift pool",
+        )
+
+    def _create_allocation(self, *, source_pool, total_amount=1200):
+        return PointAllocation.objects.create(
+            initiator_type=self.user_ct,
+            initiator_id=self.initiator.id,
+            source_pool=source_pool,
+            total_amount=total_amount,
+            project_scope={"tags": ["repo:github:acme/repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 1, 1),
+        )
+
+    def _create_registered_contributor(self, *, uid="9001", username="registered-thin"):
+        user = User.objects.create_user(
+            username=username,
+            email=f"{username}@example.com",
+        )
+        UserSocialAuth.objects.create(user=user, provider="github", uid=str(uid))
+        return user
+
+    def test_preview_allocation_uses_contribution_service_success_path(self):
+        """Preview should flow through ContributionService enrichment logic."""
+        registered = self._create_registered_contributor(uid="9001")
+        allocation = self._create_allocation(source_pool=self.cash_source_pool)
+
+        with patch(
+            "chdb.services.query_contributions",
+            return_value=[
+                {
+                    "platform": "GitHub",
+                    "actor_id": "9001",
+                    "actor_login": registered.username,
+                    "contribution_score": 2.0,
+                },
+                {
+                    "platform": "GitHub",
+                    "actor_id": 7002,
+                    "actor_login": "pending-thin",
+                    "contribution_score": 1.0,
+                },
+            ],
+        ) as query_mock:
+            preview = AllocationService.preview_allocation(allocation)
+
+        query_mock.assert_called_once_with(
+            label_ids=["repo:github:acme/repo"],
+            start_month=202401,
+            end_month=202401,
+        )
+        self.assertEqual(len(preview), 2)
+        by_login = {item["github_login"]: item for item in preview}
+        self.assertTrue(by_login[registered.username]["is_registered"])
+        self.assertEqual(by_login[registered.username]["user_id"], registered.id)
+        self.assertFalse(by_login["pending-thin"]["is_registered"])
+        self.assertIsNone(by_login["pending-thin"]["user_id"])
+        self.assertEqual(by_login[registered.username]["adjusted_points"], 600)
+        self.assertEqual(by_login["pending-thin"]["adjusted_points"], 300)
+
+    def test_execute_allocation_handles_registered_and_pending_recipients(self):
+        """Execute should grant registered users and create pending grants together."""
+        registered = self._create_registered_contributor(uid="9002")
+        allocation = self._create_allocation(
+            source_pool=self.cash_source_pool,
+            total_amount=900,
+        )
+        initial_source_remaining = self.cash_source_pool.remaining_amount
+
+        with patch(
+            "chdb.services.query_contributions",
+            return_value=[
+                {
+                    "platform": "GitHub",
+                    "actor_id": "9002",
+                    "actor_login": registered.username,
+                    "contribution_score": 2.0,
+                },
+                {
+                    "platform": "GitHub",
+                    "actor_id": "9003",
+                    "actor_login": "pending-recipient-thin",
+                    "contribution_score": 1.0,
+                },
+            ],
+        ):
+            result = AllocationService.execute_allocation(allocation)
+
+        self.assertEqual(
+            result,
+            {"success": 1, "pending": 1, "failed": 0, "total_points": 900},
+        )
+        allocation.refresh_from_db()
+        self.assertEqual(allocation.status, "completed")
+        self.assertEqual(allocation.registered_recipients, 1)
+        self.assertEqual(allocation.unregistered_recipients, 1)
+        self.assertEqual(get_balance(registered, PointType.CASH), 600)
+
+        pending_grants = PendingPointGrant.objects.filter(
+            allocation=allocation,
+            is_claimed=False,
+            github_login="pending-recipient-thin",
+        )
+        self.assertEqual(pending_grants.count(), 1)
+        self.assertEqual(pending_grants.first().amount, 300)
+
+        self.cash_source_pool.refresh_from_db()
+        self.assertEqual(
+            self.cash_source_pool.remaining_amount,
+            initial_source_remaining - 900,
+        )
+
+    def test_claim_pending_points_with_multiple_identifiers_no_double_claim(self):
+        """A pending grant matching multiple identifiers should still be claimed once."""
+        allocation = self._create_allocation(source_pool=self.gift_untagged_source_pool)
+        claimant = User.objects.create_user(
+            username="multi-identity-claimer",
+            email="multi-identity-claimer@example.com",
+        )
+        UserSocialAuth.objects.create(
+            user=claimant,
+            provider="github",
+            uid="claim-uid-1",
+        )
+
+        matching_grants = [
+            PendingPointGrant.objects.create(
+                github_id="claim-uid-1",
+                github_login="someone-else",
+                email="x@example.com",
+                amount=100,
+                point_type=PointType.GIFT,
+                reason="match by github_id",
+                granter_type=self.user_ct,
+                granter_id=self.initiator.id,
+                allocation=allocation,
+            ),
+            PendingPointGrant.objects.create(
+                github_id="",
+                github_login=claimant.username,
+                email="",
+                amount=200,
+                point_type=PointType.GIFT,
+                reason="match by github_login",
+                granter_type=self.user_ct,
+                granter_id=self.initiator.id,
+                allocation=allocation,
+            ),
+            PendingPointGrant.objects.create(
+                github_id="",
+                github_login="",
+                email=claimant.email,
+                amount=300,
+                point_type=PointType.GIFT,
+                reason="match by email",
+                granter_type=self.user_ct,
+                granter_id=self.initiator.id,
+                allocation=allocation,
+            ),
+            PendingPointGrant.objects.create(
+                github_id="claim-uid-1",
+                github_login=claimant.username,
+                email=claimant.email,
+                amount=400,
+                point_type=PointType.GIFT,
+                reason="match by all identifiers once",
+                granter_type=self.user_ct,
+                granter_id=self.initiator.id,
+                allocation=allocation,
+            ),
+        ]
+        non_matching = PendingPointGrant.objects.create(
+            github_id="other-uid",
+            github_login="other-login",
+            email="other@example.com",
+            amount=999,
+            point_type=PointType.GIFT,
+            reason="no match",
+            granter_type=self.user_ct,
+            granter_id=self.initiator.id,
+            allocation=allocation,
+        )
+
+        result = AllocationService.claim_pending_points(claimant)
+
+        self.assertEqual(result["claimed_count"], 4)
+        self.assertEqual(result["total_amount"], 1000)
+        self.assertEqual(get_balance(claimant, PointType.GIFT), 1000)
+        for grant in matching_grants:
+            grant.refresh_from_db()
+            self.assertTrue(grant.is_claimed)
+            self.assertEqual(grant.claimed_by, claimant)
+        non_matching.refresh_from_db()
+        self.assertFalse(non_matching.is_claimed)
+
+    def test_rollback_claimed_points_for_user_supports_multiple_balance_buckets(self):
+        """Rollback should deduct from cash, tagged gift, and untagged gift buckets."""
+        claimant = User.objects.create_user(
+            username="rollback-buckets",
+            email="rollback-buckets@example.com",
+        )
+        allocation = self._create_allocation(source_pool=self.cash_source_pool)
+
+        grant_points(
+            owner=claimant,
+            amount=500,
+            point_type=PointType.CASH,
+            reason="rollback cash balance",
+        )
+        grant_points(
+            owner=claimant,
+            amount=700,
+            point_type=PointType.GIFT,
+            reason="rollback tagged gift balance",
+            tag_slug=self.repo_tag.slug,
+        )
+        grant_points(
+            owner=claimant,
+            amount=900,
+            point_type=PointType.GIFT,
+            reason="rollback untagged gift balance",
+        )
+
+        grants = [
+            PendingPointGrant.objects.create(
+                github_id="",
+                github_login=claimant.username,
+                email=claimant.email,
+                amount=200,
+                point_type=PointType.CASH,
+                reason="rollback cash",
+                granter_type=self.user_ct,
+                granter_id=self.initiator.id,
+                allocation=allocation,
+                is_claimed=True,
+                claimed_by=claimant,
+                claimed_at=timezone.now(),
+            ),
+            PendingPointGrant.objects.create(
+                github_id="",
+                github_login=claimant.username,
+                email=claimant.email,
+                amount=300,
+                point_type=PointType.GIFT,
+                reason="rollback tagged gift",
+                tag=self.repo_tag,
+                granter_type=self.user_ct,
+                granter_id=self.initiator.id,
+                allocation=allocation,
+                is_claimed=True,
+                claimed_by=claimant,
+                claimed_at=timezone.now(),
+            ),
+            PendingPointGrant.objects.create(
+                github_id="",
+                github_login=claimant.username,
+                email=claimant.email,
+                amount=400,
+                point_type=PointType.GIFT,
+                reason="rollback untagged gift",
+                granter_type=self.user_ct,
+                granter_id=self.initiator.id,
+                allocation=allocation,
+                is_claimed=True,
+                claimed_by=claimant,
+                claimed_at=timezone.now(),
+            ),
+        ]
+
+        result = AllocationService.rollback_claimed_points_for_user(claimant)
+
+        self.assertEqual(result, {"rolled_back_count": 3, "total_amount": 900})
+        self.assertEqual(get_balance(claimant, PointType.CASH), 300)
+        self.assertEqual(
+            get_balance(claimant, PointType.GIFT, tag_slug=self.repo_tag.slug),
+            400,
+        )
+        wallet = PointWallet.objects.get(
+            content_type=self.user_ct,
+            object_id=claimant.id,
+        )
+        untagged_gift_balance = (
+            PointSource.objects.filter(
+                wallet=wallet,
+                point_type=PointType.GIFT,
+                tag__isnull=True,
+                remaining_amount__gt=0,
+            ).aggregate(total=models.Sum("remaining_amount"))["total"]
+            or 0
+        )
+        self.assertEqual(untagged_gift_balance, 500)
+        for grant in grants:
+            grant.refresh_from_db()
+            self.assertFalse(grant.is_claimed)
+            self.assertIsNone(grant.claimed_by)
+            self.assertIsNone(grant.claimed_at)
+
+    def test_deduct_source_pool_passes_bucket_specific_parameters(self):
+        """Deduction should pass tag parameters according to source bucket type."""
+        cases = [
+            (
+                "cash",
+                self.cash_source_pool,
+                {
+                    "point_type": PointType.CASH,
+                    "tag_slug": None,
+                    "tag_is_null": False,
+                },
+            ),
+            (
+                "gift-tagged",
+                self.gift_tagged_source_pool,
+                {
+                    "point_type": PointType.GIFT,
+                    "tag_slug": self.repo_tag.slug,
+                    "tag_is_null": False,
+                },
+            ),
+            (
+                "gift-untagged",
+                self.gift_untagged_source_pool,
+                {"point_type": PointType.GIFT, "tag_slug": None, "tag_is_null": True},
+            ),
+        ]
+
+        for _, source_pool, expected in cases:
+            allocation = self._create_allocation(source_pool=source_pool)
+            with patch("points.allocation_services.spend_points") as spend_points_mock:
+                AllocationService._deduct_source_pool(allocation, 123)
+            kwargs = spend_points_mock.call_args.kwargs
+            self.assertEqual(kwargs["owner"], self.initiator)
+            self.assertEqual(kwargs["amount"], 123)
+            self.assertEqual(kwargs["point_type"], expected["point_type"])
+            self.assertEqual(kwargs["tag_slug"], expected["tag_slug"])
+            self.assertEqual(kwargs["tag_is_null"], expected["tag_is_null"])
+            self.assertEqual(kwargs["reference_id"], f"allocation_{allocation.id}")
+
+    def test_grant_registered_points_passes_bucket_specific_parameters(self):
+        """Granting to registered users should preserve source bucket metadata."""
+        recipient = User.objects.create_user(
+            username="bucket-recipient",
+            email="bucket-recipient@example.com",
+        )
+        cases = [
+            ("cash", self.cash_source_pool, PointType.CASH, None),
+            (
+                "gift-tagged",
+                self.gift_tagged_source_pool,
+                PointType.GIFT,
+                self.repo_tag.slug,
+            ),
+            ("gift-untagged", self.gift_untagged_source_pool, PointType.GIFT, None),
+        ]
+
+        for _, source_pool, expected_point_type, expected_tag_slug in cases:
+            allocation = self._create_allocation(source_pool=source_pool)
+            with patch("points.allocation_services.grant_points") as grant_points_mock:
+                success = AllocationService._grant_registered_points(
+                    allocation,
+                    {"user_id": recipient.id},
+                    456,
+                )
+
+            self.assertTrue(success)
+            kwargs = grant_points_mock.call_args.kwargs
+            self.assertEqual(kwargs["owner"], recipient)
+            self.assertEqual(kwargs["amount"], 456)
+            self.assertEqual(kwargs["point_type"], expected_point_type)
+            self.assertEqual(kwargs["tag_slug"], expected_tag_slug)
+            self.assertEqual(kwargs["reference_id"], f"allocation_{allocation.id}")

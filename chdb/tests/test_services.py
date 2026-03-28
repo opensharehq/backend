@@ -506,6 +506,65 @@ class HelperFunctionsTests(TestCase):
         self.assertEqual(parsed[1]["actor_id"], "456")
         self.assertEqual(parsed[1]["actor_login"], "other")
 
+    def test_parse_contribution_rows_four_column_default_github_row(self):
+        """4-column default rows should use GitHub platform and preserve details."""
+        rows = [
+            [12345, "default-github-user", 18.2, [("repo-x", 18.2, 202501)]],
+        ]
+
+        parsed = services._parse_contribution_rows(rows)
+
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["platform"], "GitHub")
+        self.assertEqual(parsed[0]["actor_id"], "12345")
+        self.assertEqual(parsed[0]["actor_login"], "default-github-user")
+        self.assertEqual(parsed[0]["contribution_score"], 18.2)
+        self.assertEqual(parsed[0]["details"], [("repo-x", 18.2, 202501)])
+
+    def test_parse_contribution_rows_five_column_platform_row(self):
+        """5-column rows should honor explicit platform and include details."""
+        rows = [
+            ["GitLab", "gl-77", "gitlab-user", 31.4, [("repo-y", 31.4, 202502)]],
+        ]
+
+        parsed = services._parse_contribution_rows(rows)
+
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["platform"], "GitLab")
+        self.assertEqual(parsed[0]["actor_id"], "gl-77")
+        self.assertEqual(parsed[0]["actor_login"], "gitlab-user")
+        self.assertEqual(parsed[0]["contribution_score"], 31.4)
+        self.assertEqual(parsed[0]["details"], [("repo-y", 31.4, 202502)])
+
+    def test_parse_contribution_rows_omits_details_when_not_present(self):
+        """Rows without details should not include a details key."""
+        rows = [
+            [888, "no-details-user", 12.0],
+            ["Gitee", 999, "gitee-no-details", 5.5],
+        ]
+
+        parsed = services._parse_contribution_rows(rows)
+
+        self.assertEqual(parsed[0]["platform"], "GitHub")
+        self.assertEqual(parsed[0]["actor_id"], "888")
+        self.assertNotIn("details", parsed[0])
+
+        self.assertEqual(parsed[1]["platform"], "Gitee")
+        self.assertEqual(parsed[1]["actor_id"], "999")
+        self.assertNotIn("details", parsed[1])
+
+    def test_parse_contribution_rows_normalizes_actor_id_to_string(self):
+        """actor_id should always be normalized to string across row formats."""
+        rows = [
+            ["GitHub", 1001, "platform-row", 1.0, []],
+            [2002, "default-row", 2.0, []],
+        ]
+
+        parsed = services._parse_contribution_rows(rows)
+
+        self.assertEqual(parsed[0]["actor_id"], "1001")
+        self.assertEqual(parsed[1]["actor_id"], "2002")
+
     def test_build_users_and_map_platform_values_align_lengths(self):
         names = ["github", "gitlab"]
         users = [[1, 2], [3]]

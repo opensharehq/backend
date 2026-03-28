@@ -226,3 +226,106 @@ class ContributionServiceTests(TestCase):
         )
 
         self.assertEqual(results, [])
+
+    @patch("chdb.services.query_contributions")
+    def test_get_contributions_success_path_uses_chdb_query(self, mock_query_contributions):
+        """get_contributions should flow through ClickHouse path on success."""
+        UserSocialAuth.objects.create(user=self.user2, provider="gitlab", uid="gl-42")
+        mock_query_contributions.return_value = [
+            {
+                "platform": "GitHub",
+                "actor_id": "123456",
+                "actor_login": "testuser1",
+                "contribution_score": 88.8,
+                "details": [("repo-a", 88.8, 202405)],
+            },
+            {
+                "platform": "GitLab",
+                "actor_id": "gl-42",
+                "actor_login": "testuser2",
+                "contribution_score": 66.6,
+                "details": [("repo-b", 66.6, 202405)],
+            },
+        ]
+
+        results = ContributionService.get_contributions(
+            project_identifiers=[":companies/test/project"],
+            start_month=date(2024, 5, 1),
+            end_month=date(2024, 6, 30),
+        )
+
+        mock_query_contributions.assert_called_once_with(
+            label_ids=[":companies/test/project"],
+            start_month=202405,
+            end_month=202406,
+        )
+        self.assertEqual(len(results), 2)
+
+        github_result = next(item for item in results if item["platform"] == "GitHub")
+        self.assertEqual(github_result["github_id"], "123456")
+        self.assertEqual(github_result["github_login"], "testuser1")
+        self.assertTrue(github_result["is_registered"])
+        self.assertEqual(github_result["user_id"], self.user1.id)
+        self.assertIsInstance(github_result["contribution_score"], Decimal)
+        self.assertIn("details", github_result)
+
+        gitlab_result = next(item for item in results if item["platform"] == "GitLab")
+        self.assertEqual(gitlab_result["gitlab_id"], "gl-42")
+        self.assertEqual(gitlab_result["gitlab_login"], "testuser2")
+        self.assertTrue(gitlab_result["is_registered"])
+        self.assertEqual(gitlab_result["user_id"], self.user2.id)
+        self.assertEqual(
+            gitlab_result["details"],
+            [("repo-b", 66.6, 202405)],
+        )
+
+    def test_enrich_with_registration_status_multi_platform_and_mixed_actor_id_types(self):
+        """Enrich should support multiple providers and mixed actor_id value types."""
+        UserSocialAuth.objects.create(user=self.user2, provider="gitlab", uid="gl-100")
+        contributions = [
+            {
+                "platform": "GitHub",
+                "actor_id": "123456",
+                "actor_login": "testuser1",
+                "contribution_score": 10.5,
+            },
+            {
+                "platform": "GitLab",
+                "actor_id": "gl-100",
+                "actor_login": "testuser2",
+                "contribution_score": 9.5,
+                "details": [("repo-c", 9.5, 202406)],
+            },
+            {
+                "platform": "GitLab",
+                "actor_id": 987654,
+                "actor_login": "unregistered-numeric-id",
+                "contribution_score": 3.0,
+            },
+        ]
+
+        results = ContributionService._enrich_with_registration_status(contributions)
+        self.assertEqual(len(results), 3)
+
+        github_result = next(item for item in results if item["platform"] == "GitHub")
+        self.assertEqual(github_result["github_id"], "123456")
+        self.assertTrue(github_result["is_registered"])
+        self.assertEqual(github_result["user_id"], self.user1.id)
+
+        gitlab_registered = next(
+            item for item in results if item.get("gitlab_login") == "testuser2"
+        )
+        self.assertEqual(gitlab_registered["gitlab_id"], "gl-100")
+        self.assertTrue(gitlab_registered["is_registered"])
+        self.assertEqual(gitlab_registered["user_id"], self.user2.id)
+        self.assertEqual(gitlab_registered["details"], [("repo-c", 9.5, 202406)])
+        self.assertIsInstance(gitlab_registered["contribution_score"], Decimal)
+
+        gitlab_unregistered = next(
+            item
+            for item in results
+            if item.get("gitlab_login") == "unregistered-numeric-id"
+        )
+        self.assertEqual(gitlab_unregistered["gitlab_id"], 987654)
+        self.assertFalse(gitlab_unregistered["is_registered"])
+        self.assertIsNone(gitlab_unregistered["user_id"])

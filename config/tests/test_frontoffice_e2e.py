@@ -9,7 +9,12 @@ from django.core import mail
 from django.test import override_settings, tag
 from django.urls import reverse
 
-from accounts.models import AccountMergeRequest, Organization, OrganizationMembership
+from accounts.models import (
+    AccountMergeRequest,
+    Organization,
+    OrganizationMembership,
+    UserProfile,
+)
 from common.test_utils import BrowserE2ETestCase
 from messages.models import UserMessage
 from messages.services import send_message
@@ -106,6 +111,50 @@ class FrontOfficeE2ETests(BrowserE2ETestCase):
         self.login_via_ui("reset-user", "NewPass123!")
         self.page.wait_for_url(re.compile(r".*/accounts/profile/$"))
         self.assert_page_contains("reset-user")
+
+    def test_homepage_search_filters_refresh_after_profile_update(self):
+        alice = User.objects.create_user(
+            username="search-cache-alice",
+            email="search-cache-alice@example.com",
+            password="SearchPass123!",
+        )
+        UserProfile.objects.create(
+            user=alice,
+            bio="Searchable profile",
+            company="Cache Labs",
+            location="Shanghai",
+        )
+        bob = User.objects.create_user(
+            username="search-cache-bob",
+            email="search-cache-bob@example.com",
+            password="SearchPass123!",
+        )
+        UserProfile.objects.create(
+            user=bob,
+            bio="Another profile",
+            company="Cache Labs",
+            location="Beijing",
+        )
+
+        self.goto("/search/?q=search-cache")
+
+        self.page.select_option("#filter-location", "Shanghai")
+        self.page.locator("button[type='submit']:has-text('应用筛选')").click()
+        self.page.wait_for_load_state("networkidle")
+        self.assert_page_contains("search-cache-alice")
+
+        profile = alice.profile
+        profile.location = "Shenzhen"
+        profile.save(update_fields=["location"])
+
+        self.goto("/search/?q=search-cache&location=Shanghai")
+        self.assert_page_contains("暂无匹配的用户")
+
+    def test_invalid_password_reset_link_shows_expired_state(self):
+        self.goto(reverse("accounts:password_reset_confirm", args=["invalid", "bad"]))
+
+        self.assert_page_contains("链接无效或已过期")
+        self.assertEqual(self.page.locator("#id_new_password1").count(), 0)
 
     def test_shipping_redemption_wallet_and_withdrawal_journey(self):
         user = User.objects.create_user(

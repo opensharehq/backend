@@ -134,6 +134,63 @@ class BackOfficeE2ETests(BrowserE2ETestCase):
             ).exists()
         )
 
+    def test_admin_grant_points_form_validation_errors_are_visible(self):
+        admin = User.objects.create_superuser(
+            username="admin-validate",
+            email="admin-validate@example.com",
+            password="AdminPass123!",
+        )
+        recipient = User.objects.create_user(
+            username="validate-recipient",
+            email="validate-recipient@example.com",
+            password="UserPass123!",
+        )
+
+        self.login_admin_via_ui(admin.username, "AdminPass123!")
+        self.goto(f"/admin/points/grant-to-users/?ids={recipient.id}")
+        self.page.check("input[value='gift']")
+        self.page.fill("#id_amount", "10")
+        self.page.fill("#id_reason", "Validation case without tag")
+        self.page.locator("input[type='submit'][value='提交发放']").click()
+        self.page.wait_for_load_state("networkidle")
+
+        self.assertIn(
+            "/admin/points/grant-to-users/",
+            self.page.url,
+        )
+        self.assertGreater(self.page.locator("ul.errorlist li").count(), 0)
+        self.assertEqual(points_services.get_balance(recipient, PointType.CASH), 0)
+
+    @patch("chdb.services.search_tags", return_value=[])
+    def test_allocation_config_handles_empty_search_results(
+        self,
+        _mock_search_tags,
+    ):
+        operator = User.objects.create_user(
+            username="allocation-empty-search",
+            email="allocation-empty-search@example.com",
+            password="AllocPass123!",
+        )
+        source_pool = points_services.grant_points(
+            operator,
+            500,
+            PointType.CASH,
+            "Allocation source pool",
+            created_by=operator,
+        )
+
+        self.login_via_ui(operator.username, "AllocPass123!")
+        self.goto(reverse("points:allocation_config"))
+        self.page.select_option("#allocation-pool-select", str(source_pool.id))
+        self.page.fill("#project-tag-search", "unlikely-keyword")
+        self.page.wait_for_timeout(400)
+
+        self.assertEqual(
+            self.page.locator("#project-tag-search-results .search-result-item").count(),
+            0,
+        )
+        self.assertTrue(self.page.locator("#preview-contributions-button").is_disabled())
+
     @patch(
         "chdb.services.search_tags",
         return_value=[

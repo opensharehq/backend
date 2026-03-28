@@ -48,6 +48,28 @@ class CanonicalHostRedirectMiddlewareTests(SimpleTestCase):
 
         self.assertEqual(response.headers["Location"], "https://open-share.cn/")
 
+    def test_preserves_path_and_query_string(self):
+        """Redirects should keep the original path and query string."""
+        request = self.factory.get(
+            "/community/search/",
+            {"q": "django", "location": "上海"},
+            HTTP_HOST="www.open-share.cn",
+        )
+        response = self.middleware(request)
+
+        self.assertEqual(
+            response.headers["Location"],
+            "https://open-share.cn/community/search/?q=django&location=%E4%B8%8A%E6%B5%B7",
+        )
+
+    def test_redirect_is_case_insensitive_for_matching_host(self):
+        """Uppercase host headers should still redirect to the canonical host."""
+        request = self.factory.get("/team/", HTTP_HOST="WWW.OPEN-SHARE.CN")
+        response = self.middleware(request)
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.headers["Location"], "https://open-share.cn/team/")
+
     def test_does_not_append_backend_port_when_host_omits_it(self):
         """When the host omits a port, the redirect should omit it as well."""
         request = self.factory.get(
@@ -80,6 +102,17 @@ class CanonicalHostRedirectMiddlewareTests(SimpleTestCase):
     def test_other_hosts_pass_through(self):
         """Requests that already target the canonical host pass through."""
         request = self.factory.get("/", HTTP_HOST="open-share.cn")
+        response = self.middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"OK")
+
+    @override_settings(
+        ALLOWED_HOSTS=["open-share.cn", "www.open-share.cn", "blog.open-share.cn"]
+    )
+    def test_non_www_subdomains_pass_through(self):
+        """Hosts outside the configured www alias should not be redirected."""
+        request = self.factory.get("/", HTTP_HOST="blog.open-share.cn")
         response = self.middleware(request)
 
         self.assertEqual(response.status_code, 200)

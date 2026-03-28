@@ -1,5 +1,7 @@
 """Tests for homepage user search view."""
 
+import json
+import re
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -53,6 +55,17 @@ class HomepageUserSearchTests(TestCase):
             location="北京",
         )
 
+    def _extract_results_payload(self, response):
+        """Extract search results JSON payload embedded by json_script."""
+        html = response.content.decode("utf-8")
+        match = re.search(
+            r'<script id="search-results-data" type="application/json">(.*?)</script>',
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "Expected search-results-data payload in response.")
+        return json.loads(match.group(1))
+
     def test_redirects_on_exact_username_match(self):
         """Exact matches should redirect to the public profile page."""
         response = self.client.get(self.search_url, {"q": "Alice"})
@@ -66,8 +79,8 @@ class HomepageUserSearchTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "homepage/search_results.html")
-        self.assertIn("results", response.context)
-        usernames = {item["username"] for item in response.context["results"]}
+        payload = self._extract_results_payload(response)
+        usernames = {item["username"] for item in payload}
         self.assertIn("alice", usernames)
         self.assertIn("bob", usernames)
         self.assertContains(response, "search-results-data")
@@ -80,7 +93,7 @@ class HomepageUserSearchTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        results = response.context["results"]
+        results = self._extract_results_payload(response)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["username"], "alice")
         self.assertEqual(results[0]["location"], "上海")
@@ -93,7 +106,7 @@ class HomepageUserSearchTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        results = response.context["results"]
+        results = self._extract_results_payload(response)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["username"], "alice")
         self.assertEqual(results[0]["company"], "OpenShare")
@@ -109,13 +122,9 @@ class HomepageUserSearchTests(TestCase):
         """Context contains metadata for the filter summary."""
         response = self.client.get(self.search_url, {"q": "example"})
 
-        # In parallel tests, response.context may be None due to template caching
-        # Skip context checks if context is not available
-        if response.context is None:
-            self.skipTest("Context not available in parallel test mode")
-
-        self.assertGreaterEqual(response.context["results_count"], 2)
-        self.assertEqual(response.context["filters"]["sort"], "relevance")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "共找到 2 位用户")
+        self.assertContains(response, 'option value="relevance" selected')
 
     @override_settings(
         CACHES={
@@ -131,21 +140,12 @@ class HomepageUserSearchTests(TestCase):
 
         initial_response = self.client.get(self.search_url, params)
         self.assertEqual(initial_response.status_code, 200)
-
-        # In parallel tests, response.context may be None due to template caching
-        if initial_response.context is None:
-            self.skipTest("Context not available in parallel test mode")
-
-        self.assertEqual(len(initial_response.context["results"]), 2)
+        self.assertEqual(len(self._extract_results_payload(initial_response)), 2)
 
         initial_version = get_search_cache_version()
 
         cached_again = self.client.get(self.search_url, params)
-
-        if cached_again.context is None:
-            self.skipTest("Context not available in parallel test mode")
-
-        self.assertEqual(len(cached_again.context["results"]), 2)
+        self.assertEqual(len(self._extract_results_payload(cached_again)), 2)
 
         filters = homepage_views.SearchFilters()
         cache_key = homepage_views._build_search_cache_key(
@@ -173,9 +173,38 @@ class HomepageUserSearchTests(TestCase):
         self.assertNotEqual(initial_version, updated_version)
 
         refreshed_response = self.client.get(self.search_url, params)
-        usernames = {item["username"] for item in refreshed_response.context["results"]}
+        usernames = {
+            item["username"] for item in self._extract_results_payload(refreshed_response)
+        }
         self.assertIn("charlie", usernames)
         cache.clear()
+
+    def test_cached_search_reuses_payload_without_serializing_users_again(self):
+        """A cache hit should bypass result serialization for repeated queries."""
+        cache.clear()
+        params = {"q": "example"}
+
+        with patch(
+            "homepage.views._serialize_user",
+            wraps=homepage_views._serialize_user,
+        ) as serializer:
+            first_response = self.client.get(self.search_url, params)
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertGreater(serializer.call_count, 0)
+
+        with patch(
+            "homepage.views._serialize_user",
+            wraps=homepage_views._serialize_user,
+        ) as serializer:
+            second_response = self.client.get(self.search_url, params)
+
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(serializer.call_count, 0)
+        self.assertEqual(
+            self._extract_results_payload(first_response),
+            self._extract_results_payload(second_response),
+        )
 
     def test_cached_search_short_circuits_with_cached_context(self):
         """When cached context exists the view should return it immediately."""

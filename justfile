@@ -21,8 +21,10 @@ migrate:
     @uv run manage.py migrate
 
 test:
+    @uv run playwright install chromium
     @uv run coverage erase
-    @DJANGO_LOG_LEVEL=ERROR uv run coverage run --concurrency=multiprocessing --parallel-mode manage.py test --parallel --timing --durations 10
+    @DJANGO_LOG_LEVEL=ERROR uv run coverage run --concurrency=multiprocessing --parallel-mode manage.py test --exclude-tag=e2e --parallel --timing --durations 10
+    @DJANGO_LOG_LEVEL=ERROR uv run coverage run --parallel-mode manage.py test config.tests.test_frontoffice_e2e config.tests.test_backoffice_e2e --timing --durations 10
     @uv run coverage combine
     @uv run coverage report
     @uv run coverage report --skip-covered --skip-empty

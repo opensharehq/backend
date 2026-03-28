@@ -166,6 +166,11 @@ class GrantPointsCommandTests(TestCase):
         wallet = services.get_or_create_wallet(self.user)
         source = wallet.sources.first()
         self.assertIsNotNone(source.expires_at)
+        self.assertTrue(timezone.is_aware(source.expires_at))
+        self.assertEqual(
+            timezone.localtime(source.expires_at).strftime("%Y-%m-%d %H:%M"),
+            "2025-12-31 00:00",
+        )
         self.assertIn("过期时间: 2025-12-31", out.getvalue())
 
     def test_user_not_found_fails(self):

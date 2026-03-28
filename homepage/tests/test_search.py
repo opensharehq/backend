@@ -126,6 +126,33 @@ class HomepageUserSearchTests(TestCase):
         self.assertContains(response, "共找到 2 位用户")
         self.assertContains(response, 'option value="relevance" selected')
 
+    def test_results_page_only_exposes_supported_filter_controls(self):
+        """The results page should only render filters supported by the backend."""
+        response = self.client.get(self.search_url, {"q": "example"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="location"')
+        self.assertContains(response, 'name="company"')
+        self.assertContains(response, 'option value="username"')
+        self.assertNotContains(response, 'name="min_points"')
+        self.assertNotContains(response, 'option value="points_desc"')
+        self.assertNotContains(response, 'option value="points_asc"')
+
+    def test_invalid_sort_value_falls_back_to_relevance(self):
+        """Unsupported sort values should fall back to the default ordering."""
+        request = self.factory.get(
+            self.search_url,
+            {"q": "example", "sort": "points_desc"},
+        )
+        filters = homepage_views.SearchFilters.from_request(request)
+
+        self.assertEqual(filters.sort, homepage_views.SearchFilters.DEFAULT_SORT)
+
+        response = self.client.get(
+            self.search_url, {"q": "example", "sort": "points_desc"}
+        )
+        self.assertContains(response, 'option value="relevance" selected')
+
     @override_settings(
         CACHES={
             "default": {
@@ -174,7 +201,8 @@ class HomepageUserSearchTests(TestCase):
 
         refreshed_response = self.client.get(self.search_url, params)
         usernames = {
-            item["username"] for item in self._extract_results_payload(refreshed_response)
+            item["username"]
+            for item in self._extract_results_payload(refreshed_response)
         }
         self.assertIn("charlie", usernames)
         cache.clear()
@@ -205,6 +233,49 @@ class HomepageUserSearchTests(TestCase):
             self._extract_results_payload(first_response),
             self._extract_results_payload(second_response),
         )
+
+    def test_cached_search_hit_avoids_database_queries(self):
+        """A warm cache hit should render the results page without touching the database."""
+        filters = homepage_views.SearchFilters()
+        cache_key = homepage_views._build_search_cache_key(
+            query="example",
+            filters=filters,
+        )
+        cache.set(
+            cache_key,
+            {
+                "query": "example",
+                "results": [
+                    {
+                        "username": "cached-user",
+                        "display_name": "Cached User",
+                        "bio": "cached bio",
+                        "company": "Cached Co",
+                        "location": "Shanghai",
+                        "profile_url": "/cached-user/",
+                        "avatar_url": "https://example.com/avatar.png",
+                    }
+                ],
+                "results_count": 1,
+                "max_results": homepage_views.MAX_SEARCH_RESULTS,
+                "filters": {
+                    "location": "",
+                    "company": "",
+                    "sort": homepage_views.SearchFilters.DEFAULT_SORT,
+                },
+                "available_locations": [],
+                "available_companies": [],
+                "page_size": homepage_views.PAGE_SIZE,
+            },
+            homepage_views.SEARCH_RESULTS_CACHE_TIMEOUT,
+        )
+        request = self.factory.get(self.search_url, {"q": "example"})
+
+        with self.assertNumQueries(0):
+            response = homepage_views.user_search(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("cached-user", response.content.decode("utf-8"))
 
     def test_cached_search_short_circuits_with_cached_context(self):
         """When cached context exists the view should return it immediately."""

@@ -26,7 +26,9 @@ test:
     @DJANGO_LOG_LEVEL=ERROR uv run coverage run --concurrency=multiprocessing --parallel-mode manage.py test --exclude-tag=e2e --parallel --timing --durations 10
     @DJANGO_LOG_LEVEL=ERROR uv run coverage run --parallel-mode manage.py test config.tests.test_frontoffice_e2e config.tests.test_backoffice_e2e --timing --durations 10
     @uv run coverage combine
+    @uv run coverage json
     @uv run coverage report
+    @uv run python scripts/check_coverage.py coverage.json
     @uv run coverage report --skip-covered --skip-empty
 
 docker-build IMAGE='fullsite':

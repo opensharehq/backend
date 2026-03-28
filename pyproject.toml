@@ -33,6 +33,7 @@ profile="django"
 
 
 [tool.coverage.run]
+branch = true
 omit = [
     "manage.py",
     "*/migrations/*",

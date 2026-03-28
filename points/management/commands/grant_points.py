@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
 
 from accounts.models import Organization, User
 from points import services
@@ -104,7 +105,10 @@ class Command(BaseCommand):
         expires_at = None
         if expires_str:
             try:
-                expires_at = datetime.strptime(expires_str, "%Y-%m-%d")
+                expires_at = timezone.make_aware(
+                    datetime.strptime(expires_str, "%Y-%m-%d"),
+                    timezone.get_current_timezone(),
+                )
             except ValueError as err:
                 msg = f"无效的日期格式: {expires_str}，应为 YYYY-MM-DD"
                 raise CommandError(msg) from err

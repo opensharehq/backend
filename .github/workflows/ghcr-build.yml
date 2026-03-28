@@ -83,7 +83,9 @@ jobs:
             --durations 10
           uv run coverage combine
           uv run coverage xml
-          uv run coverage report --fail-under=90
+          uv run coverage json
+          uv run coverage report
+          uv run python scripts/check_coverage.py coverage.json
 
   build-and-push:
     runs-on: ubuntu-latest

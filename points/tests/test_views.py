@@ -1,12 +1,13 @@
 """Tests for points views."""
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import Client, TestCase
 from django.urls import reverse
 
 from accounts.models import Organization, OrganizationMembership, User
-from points import services
+from points import services, views
 from points.models import PointAllocation, PointType, Tag, TagType, WithdrawalStatus
 
 
@@ -484,6 +485,15 @@ class TagSearchAPIViewTests(TestCase):
         data = response.json()
         self.assertEqual(data["tags"], [])
 
+    def test_tag_search_api_whitespace_query_skips_backend(self):
+        """Whitespace-only queries should short-circuit before hitting ClickHouse."""
+        with patch("chdb.services.search_tags") as search_mock:
+            response = self.client.get(reverse("points:api_tag_search") + "?q=   ")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["tags"], [])
+        search_mock.assert_not_called()
+
     def test_tag_search_api_with_query(self):
         """Test tag search API with query keyword."""
         from unittest.mock import patch
@@ -551,6 +561,14 @@ class PoolListAPIViewTests(TestCase):
         self.client = Client()
         self.client.login(username="pool-user", password="testpass")
 
+    def test_pool_list_api_requires_login(self):
+        """Pool list API should require authentication."""
+        self.client.logout()
+
+        response = self.client.get(reverse("points:api_pool_list"))
+
+        self.assertEqual(response.status_code, 302)
+
     def test_pool_list_api_serializes_user_and_org_pools(self):
         """Test pool list API includes both personal and organization pools."""
         response = self.client.get(reverse("points:api_pool_list"))
@@ -562,6 +580,26 @@ class PoolListAPIViewTests(TestCase):
         self.assertTrue(any(pool["owner"] == "个人" for pool in data["user_pools"]))
         self.assertEqual(data["org_pools"][0]["owner"], str(self.org))
         self.assertEqual(data["user_pools"][1]["tag"], self.tag.slug)
+        self.assertEqual(
+            set(data["user_pools"][0].keys()),
+            {"id", "type", "type_display", "balance", "tag", "tag_name", "owner"},
+        )
+
+    def test_pool_list_excludes_org_pools_for_non_admin_members(self):
+        """Regular org members should not receive organization pools from the API."""
+        member = User.objects.create_user(username="org-member", password="testpass")
+        OrganizationMembership.objects.create(
+            user=member,
+            organization=self.org,
+            role=OrganizationMembership.Role.MEMBER,
+        )
+        self.client.login(username="org-member", password="testpass")
+
+        response = self.client.get(reverse("points:api_pool_list"))
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["org_pools"], [])
 
 
 class TagListAPIViewTests(TestCase):
@@ -590,6 +628,14 @@ class TagListAPIViewTests(TestCase):
             is_official=True,
         )
 
+    def test_tag_list_api_requires_login(self):
+        """Tag list API should require authentication."""
+        self.client.logout()
+
+        response = self.client.get(reverse("points:api_tag_list"))
+
+        self.assertEqual(response.status_code, 302)
+
     def test_tag_list_api_filters_by_type_and_official(self):
         """Test tag list API filters by tag type and official flag."""
         response = self.client.get(
@@ -608,6 +654,10 @@ class TagListAPIViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         tags = response.json()["tags"]
         self.assertEqual([tag["slug"] for tag in tags], [self.repo_unofficial.slug])
+        self.assertEqual(
+            set(tags[0].keys()),
+            {"slug", "name", "type", "is_official", "entity_identifier"},
+        )
 
 
 class ContributionPreviewAPIViewWithLabelsTests(TestCase):
@@ -618,6 +668,23 @@ class ContributionPreviewAPIViewWithLabelsTests(TestCase):
         self.user = User.objects.create_user(username="testuser", password="testpass")
         self.client = Client()
         self.client.login(username="testuser", password="testpass")
+
+    def test_contribution_preview_requires_login(self):
+        """Contribution preview API should require authentication."""
+        self.client.logout()
+
+        response = self.client.post(
+            reverse("points:api_contribution_preview"),
+            data={
+                "project_scope": {"tags": ["github-microsoft-vscode"]},
+                "start_month": "2024-01-01",
+                "end_month": "2024-01-31",
+                "total_amount": 75150,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 302)
 
     def test_contribution_preview_with_label_info(self):
         """Test contribution preview API includes label platforms info."""
@@ -674,6 +741,49 @@ class ContributionPreviewAPIViewWithLabelsTests(TestCase):
             self.assertEqual(label_info["platforms"], ["github", "gitee"])
             self.assertEqual(label_info["users"]["github"], [[123, 456]])
 
+    def test_contribution_preview_success_response_shape(self):
+        """Successful preview responses should expose the documented top-level fields."""
+        mock_preview = [
+            {
+                "github_login": "alice",
+                "github_id": "123",
+                "contribution_score": 250.5,
+                "calculated_points": 75150,
+                "adjusted_points": 75150,
+            }
+        ]
+
+        with (
+            patch(
+                "points.allocation_services.AllocationService.preview_allocation",
+                return_value=mock_preview,
+            ),
+            patch("chdb.services.get_label_users", return_value={}),
+        ):
+            response = self.client.post(
+                reverse("points:api_contribution_preview"),
+                data={
+                    "project_scope": {"tags": ["github-microsoft-vscode"]},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                    "total_amount": 75150,
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(
+            set(data.keys()),
+            {
+                "contributions",
+                "label_platforms_info",
+                "total_points",
+                "total_recipients",
+            },
+        )
+        self.assertIsInstance(data["contributions"][0]["contribution_score"], float)
+
     def test_contribution_preview_without_project_tags(self):
         """Test contribution preview without project tags returns empty label info."""
         from unittest.mock import patch
@@ -727,6 +837,84 @@ class ContributionPreviewAPIViewErrorTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.json())
 
+    def test_contribution_preview_get_is_not_allowed(self):
+        """Preview endpoint should reject GET requests."""
+        response = self.client.get(reverse("points:api_contribution_preview"))
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_contribution_preview_missing_required_field_returns_400(self):
+        """Missing required payload keys should be reported as JSON errors."""
+        response = self.client.post(
+            reverse("points:api_contribution_preview"),
+            data={
+                "project_scope": {"tags": ["tag"]},
+                "start_month": "2024-01-01",
+                "end_month": "2024-01-31",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+
+    def test_contribution_preview_invalid_date_returns_400(self):
+        """Invalid preview dates should surface as JSON validation errors."""
+        response = self.client.post(
+            reverse("points:api_contribution_preview"),
+            data={
+                "project_scope": {"tags": ["tag"]},
+                "start_month": "not-a-date",
+                "end_month": "2024-01-31",
+                "total_amount": 1000,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+
+    def test_contribution_preview_non_dict_project_scope_returns_400(self):
+        """Non-dict project scope payloads should be rejected."""
+        response = self.client.post(
+            reverse("points:api_contribution_preview"),
+            data={
+                "project_scope": ["tag"],
+                "start_month": "2024-01-01",
+                "end_month": "2024-01-31",
+                "total_amount": 1000,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+
+    def test_contribution_preview_requires_csrf(self):
+        """Session-authenticated preview POSTs should still enforce CSRF."""
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.login(username="preview-error-user", password="testpass")
+
+        with (
+            patch(
+                "points.allocation_services.AllocationService.preview_allocation",
+                return_value=[],
+            ),
+            patch("chdb.services.get_label_users", return_value={}),
+        ):
+            response = csrf_client.post(
+                reverse("points:api_contribution_preview"),
+                data={
+                    "project_scope": {"tags": ["tag"]},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                    "total_amount": 1000,
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 403)
+
 
 class AllocationExecuteAPIViewTests(TestCase):
     """Tests for AllocationExecuteAPIView."""
@@ -740,6 +928,24 @@ class AllocationExecuteAPIViewTests(TestCase):
         self.client.login(username="execute-user", password="testpass")
         services.grant_points(self.user, 1000, PointType.GIFT, "Initial pool")
         self.pool = self.user.point_wallet.sources.first()
+
+    def test_allocation_execute_requires_login(self):
+        """Execute API should require authentication."""
+        self.client.logout()
+
+        response = self.client.post(
+            reverse("points:api_allocation_execute"),
+            data={
+                "pool_id": self.pool.id,
+                "total_amount": 300,
+                "project_scope": {"tags": ["test-repo"], "operation": "AND"},
+                "start_month": "2024-01-01",
+                "end_month": "2024-01-31",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 302)
 
     def test_allocation_execute_api_creates_allocation_and_returns_result(self):
         """Test execute API creates an allocation before dispatching work."""
@@ -765,6 +971,10 @@ class AllocationExecuteAPIViewTests(TestCase):
         allocation = PointAllocation.objects.get(id=data["allocation_id"])
         self.assertEqual(allocation.source_pool_id, self.pool.id)
         self.assertEqual(allocation.initiator_id, self.user.id)
+        self.assertEqual(
+            set(data.keys()),
+            {"allocation_id", "success", "pending", "failed", "total_points"},
+        )
 
     def test_allocation_execute_api_invalid_payload_returns_400(self):
         """Test malformed execute payloads are rejected with a JSON error."""
@@ -776,6 +986,144 @@ class AllocationExecuteAPIViewTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.json())
+
+    def test_allocation_execute_get_is_not_allowed(self):
+        """Execute endpoint should reject GET requests."""
+        response = self.client.get(reverse("points:api_allocation_execute"))
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_allocation_execute_missing_required_field_returns_400(self):
+        """Missing execute payload fields should be reported as JSON errors."""
+        response = self.client.post(
+            reverse("points:api_allocation_execute"),
+            data={
+                "pool_id": self.pool.id,
+                "project_scope": {"tags": ["test-repo"], "operation": "AND"},
+                "start_month": "2024-01-01",
+                "end_month": "2024-01-31",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+
+    def test_allocation_execute_invalid_date_returns_400(self):
+        """Invalid execute dates should surface as JSON validation errors."""
+        response = self.client.post(
+            reverse("points:api_allocation_execute"),
+            data={
+                "pool_id": self.pool.id,
+                "total_amount": 300,
+                "project_scope": {"tags": ["test-repo"], "operation": "AND"},
+                "start_month": "not-a-date",
+                "end_month": "2024-01-31",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+
+    def test_allocation_execute_rejects_other_users_pool(self):
+        """Users should not be able to execute allocations from someone else's pool."""
+        other_user = User.objects.create_user(
+            username="pool-owner", password="testpass"
+        )
+        services.grant_points(other_user, 500, PointType.GIFT, "Other pool")
+        other_pool = other_user.point_wallet.sources.first()
+
+        with patch("points.views.AllocationService.execute_allocation") as execute_mock:
+            response = self.client.post(
+                reverse("points:api_allocation_execute"),
+                data={
+                    "pool_id": other_pool.id,
+                    "total_amount": 300,
+                    "project_scope": {"tags": ["test-repo"], "operation": "AND"},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                },
+                content_type="application/json",
+            )
+
+        self.assertIn(response.status_code, {400, 403})
+        execute_mock.assert_not_called()
+        self.assertFalse(
+            PointAllocation.objects.filter(
+                initiator_id=self.user.id,
+                source_pool_id=other_pool.id,
+            ).exists()
+        )
+
+    def test_allocation_execute_rejects_org_pool_for_non_admin_member(self):
+        """Regular members should not be able to execute allocations from org pools."""
+        org = Organization.objects.create(name="Execute Org", slug="execute-org")
+        member = User.objects.create_user(username="org-member", password="testpass")
+        OrganizationMembership.objects.create(
+            user=member,
+            organization=org,
+            role=OrganizationMembership.Role.MEMBER,
+        )
+        services.grant_points(org, 800, PointType.GIFT, "Org pool")
+        org_pool = org.point_wallet.sources.first()
+        self.client.login(username="org-member", password="testpass")
+
+        with patch("points.views.AllocationService.execute_allocation") as execute_mock:
+            response = self.client.post(
+                reverse("points:api_allocation_execute"),
+                data={
+                    "pool_id": org_pool.id,
+                    "total_amount": 300,
+                    "project_scope": {"tags": ["test-repo"], "operation": "AND"},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                },
+                content_type="application/json",
+            )
+
+        self.assertIn(response.status_code, {400, 403})
+        execute_mock.assert_not_called()
+        self.assertFalse(
+            PointAllocation.objects.filter(
+                initiator_id=member.id,
+                source_pool_id=org_pool.id,
+            ).exists()
+        )
+
+    def test_allocation_execute_requires_csrf(self):
+        """Session-authenticated execute POSTs should still enforce CSRF."""
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.login(username="execute-user", password="testpass")
+
+        with patch(
+            "points.views.AllocationService.execute_allocation",
+            return_value={"success": 1, "pending": 0, "failed": 0, "total_points": 300},
+        ):
+            response = csrf_client.post(
+                reverse("points:api_allocation_execute"),
+                data={
+                    "pool_id": self.pool.id,
+                    "total_amount": 300,
+                    "project_scope": {"tags": ["test-repo"], "operation": "AND"},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_can_use_source_pool_rejects_unexpected_owner_types(self):
+        """Pools with unsupported owners should be rejected defensively."""
+        source_pool = SimpleNamespace(wallet=SimpleNamespace(owner=object()))
+
+        self.assertFalse(
+            views.AllocationExecuteAPIView._can_use_source_pool(
+                self.user,
+                source_pool,
+            )
+        )
 
 
 class PointAllocationConfigViewTests(TestCase):

@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 from django.test import TestCase
 
 from accounts.models import ShippingAddress
@@ -121,6 +122,31 @@ class RedeemItemServiceTests(TestCase):
         item_from_db = ShopItem.objects.get(id=item.id)
 
         self.assertEqual(item_from_db.stock, 9)
+
+    def test_redeem_item_rejects_second_stale_stock_snapshot(self):
+        """A stale second stock snapshot should not be able to create another redemption."""
+        item = ShopItem.objects.create(
+            name="Last Item", description="Test", cost=50, stock=1
+        )
+        stale_item_1 = ShopItem.objects.get(id=item.id)
+        stale_item_2 = ShopItem.objects.get(id=item.id)
+
+        with patch(
+            "shop.services.ShopItem.objects.get",
+            side_effect=[stale_item_1, stale_item_2],
+        ):
+            redeem_item(user=self.user, item_id=item.id)
+            try:
+                redeem_item(user=self.user, item_id=item.id)
+            except IntegrityError as exc:
+                self.fail(
+                    "Expected RedemptionError for stale stock, "
+                    f"got {exc.__class__.__name__}"
+                )
+            except RedemptionError as exc:
+                self.assertIn("该商品已售罄", str(exc))
+            else:
+                self.fail("Expected RedemptionError for stale stock snapshot")
 
     def test_redemption_error_exception_inheritance(self):
         """Test that RedemptionError is properly defined."""
@@ -269,6 +295,61 @@ class RedeemItemServiceTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.stock, 5)
 
+    @patch("shop.services.points_services.get_balance")
+    @patch("shop.services.points_services.spend_points")
+    def test_allowed_tags_prefers_first_sufficient_tag(
+        self, mock_spend_points, mock_get_balance
+    ):
+        """When multiple tags qualify, the first allowed tag should be selected."""
+        tag_a = Tag.objects.create(name="Alpha Tag", slug="alpha-tag")
+        tag_b = Tag.objects.create(name="Beta Tag", slug="beta-tag")
+
+        item = ShopItem.objects.create(
+            name="Priority Item",
+            description="Test",
+            cost=100,
+            stock=5,
+        )
+        item.allowed_tags.set([tag_a, tag_b])
+        mock_get_balance.side_effect = (
+            lambda owner, point_type, tag_slug=None, **kwargs: {
+                tag_a.slug: 200,
+                tag_b.slug: 300,
+            }.get(tag_slug, 0)
+        )
+
+        redeem_item(user=self.user, item_id=item.id)
+
+        _, kwargs = mock_spend_points.call_args
+        self.assertEqual(kwargs["tag_slug"], tag_a.slug)
+
+    @patch("shop.services.points_services.get_balance")
+    def test_allowed_tags_do_not_combine_partial_balances(self, mock_get_balance):
+        """Two insufficient tag buckets should not be combined to satisfy a purchase."""
+        tag_a = Tag.objects.create(name="Partial A", slug="partial-a")
+        tag_b = Tag.objects.create(name="Partial B", slug="partial-b")
+
+        item = ShopItem.objects.create(
+            name="Split Balance Item",
+            description="Test",
+            cost=100,
+            stock=5,
+        )
+        item.allowed_tags.set([tag_a, tag_b])
+        mock_get_balance.side_effect = (
+            lambda owner, point_type, tag_slug=None, **kwargs: {
+                tag_a.slug: 60,
+                tag_b.slug: 50,
+            }.get(tag_slug, 0)
+        )
+
+        with self.assertRaisesMessage(
+            RedemptionError, "您没有足够的符合条件的积分来兑换此商品"
+        ):
+            redeem_item(user=self.user, item_id=item.id)
+
+        self.assertEqual(Redemption.objects.count(), 0)
+
     @patch("shop.services.points_services.spend_points")
     def test_spend_points_insufficient_points_wrapped(self, mock_spend_points):
         """Wrap spend_points errors in RedemptionError while keeping state unchanged."""
@@ -283,6 +364,50 @@ class RedeemItemServiceTests(TestCase):
         self.assertEqual(Redemption.objects.count(), 0)
         item.refresh_from_db()
         self.assertEqual(item.stock, 10)
+
+    def test_redeem_item_rolls_back_when_redemption_creation_fails(self):
+        """Late failures while creating the redemption should restore points and stock."""
+        item = ShopItem.objects.create(
+            name="Creation Failure", description="Test", cost=120, stock=3
+        )
+        initial_balance = points_services.get_balance(self.user, PointType.GIFT)
+
+        with patch(
+            "shop.services.Redemption.objects.create",
+            side_effect=RuntimeError("create failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                redeem_item(user=self.user, item_id=item.id)
+
+        self.assertEqual(Redemption.objects.count(), 0)
+        self.assertEqual(
+            points_services.get_balance(self.user, PointType.GIFT),
+            initial_balance,
+        )
+        item.refresh_from_db()
+        self.assertEqual(item.stock, 3)
+
+    def test_redeem_item_rolls_back_when_stock_update_fails(self):
+        """Stock persistence failures should roll back the spent points and redemption row."""
+        item = ShopItem.objects.create(
+            name="Save Failure", description="Test", cost=150, stock=4
+        )
+        initial_balance = points_services.get_balance(self.user, PointType.GIFT)
+
+        with patch(
+            "django.db.models.query.QuerySet.update",
+            side_effect=RuntimeError("save failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                redeem_item(user=self.user, item_id=item.id)
+
+        self.assertEqual(Redemption.objects.count(), 0)
+        self.assertEqual(
+            points_services.get_balance(self.user, PointType.GIFT),
+            initial_balance,
+        )
+        item.refresh_from_db()
+        self.assertEqual(item.stock, 4)
 
     def test_redeem_item_requires_shipping_success(self):
         """Test successful redemption of item requiring shipping."""

@@ -10,12 +10,10 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils.decorators import method_decorator
 from django.views import View
-from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import TemplateView
 
-from accounts.models import Organization, OrganizationMembership
+from accounts.models import Organization, OrganizationMembership, User
 
 from . import services
 from .allocation_services import AllocationService
@@ -499,11 +497,6 @@ class TagListAPIView(LoginRequiredMixin, View):
 class ContributionPreviewAPIView(LoginRequiredMixin, View):
     """API: 预览贡献度列表."""
 
-    @method_decorator(csrf_exempt)
-    def dispatch(self, *args, **kwargs):
-        """Dispatch."""
-        return super().dispatch(*args, **kwargs)
-
     def post(self, request):
         """Preview contributions."""
         try:
@@ -551,22 +544,43 @@ class ContributionPreviewAPIView(LoginRequiredMixin, View):
 class AllocationExecuteAPIView(LoginRequiredMixin, View):
     """API: 执行积分分配."""
 
-    @method_decorator(csrf_exempt)
-    def dispatch(self, *args, **kwargs):
-        """Dispatch."""
-        return super().dispatch(*args, **kwargs)
+    @staticmethod
+    def _can_use_source_pool(user, source_pool: PointSource) -> bool:
+        owner = source_pool.wallet.owner
+
+        if isinstance(owner, User):
+            return owner.pk == user.pk
+
+        if isinstance(owner, Organization):
+            return OrganizationMembership.objects.filter(
+                user=user,
+                organization=owner,
+                role__in=[
+                    OrganizationMembership.Role.OWNER,
+                    OrganizationMembership.Role.ADMIN,
+                ],
+            ).exists()
+
+        return False
 
     def post(self, request):
         """Execute allocation."""
         try:
             data = json.loads(request.body)
+            source_pool = PointSource.objects.select_related(
+                "wallet__content_type",
+                "tag",
+            ).get(id=data["pool_id"])
+
+            if not self._can_use_source_pool(request.user, source_pool):
+                return JsonResponse({"error": "您没有权限使用该积分池"}, status=403)
 
             # 创建 PointAllocation 记录
             user_content_type = ContentType.objects.get_for_model(request.user)
             allocation = PointAllocation.objects.create(
                 initiator_type=user_content_type,
                 initiator_id=request.user.id,
-                source_pool_id=data["pool_id"],
+                source_pool=source_pool,
                 total_amount=data["total_amount"],
                 project_scope=data["project_scope"],
                 user_scope=data.get("user_scope"),

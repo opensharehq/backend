@@ -47,6 +47,10 @@ class ContributionService:
             ]
 
         """
+        if start_month is None or end_month is None:
+            msg = "start_month and end_month are required"
+            raise ValueError(msg)
+
         # 使用真实数据
         try:
             return ContributionService.query_from_clickhouse(
@@ -181,7 +185,7 @@ class ContributionService:
         platform_user_map = {}  # {platform: {actor_id: actor_login}}
         for contrib in contributions:
             platform = contrib["platform"].lower()
-            actor_id = contrib["actor_id"]
+            actor_id = str(contrib["actor_id"])
             actor_login = contrib["actor_login"]
 
             if platform not in platform_user_map:
@@ -205,12 +209,13 @@ class ContributionService:
         for contrib in contributions:
             platform = contrib["platform"].lower()
             actor_id = contrib["actor_id"]
+            normalized_actor_id = str(actor_id)
             actor_login = contrib["actor_login"]
             contribution_score = contrib["contribution_score"]
             details = contrib.get("details")
 
             # 检查是否已注册
-            key = (platform, actor_id)
+            key = (platform, normalized_actor_id)
             user_id = registered_users.get(key)
             is_registered = user_id is not None
 

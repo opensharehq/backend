@@ -95,6 +95,9 @@
 
 {% block content %}
     <div x-data="allocationConfigManager()" x-init="init()">
+        <div class="d-none">
+            {% csrf_token %}
+        </div>
         <!-- 页面标题 -->
         <div class="d-flex justify-content-between align-items-center flex-wrap grid-margin">
             <div>

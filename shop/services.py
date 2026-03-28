@@ -156,8 +156,19 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # 
 
     # 4. 更新库存 (使用 F() 表达式防止并发问题)
     if item.stock is not None:
-        item.stock = F("stock") - 1
-        item.save(update_fields=["stock"])
+        updated_rows = ShopItem.objects.filter(id=item.id, stock__gt=0).update(
+            stock=F("stock") - 1
+        )
+        if updated_rows == 0:
+            msg = "该商品已售罄。"
+            logger.warning(
+                "兑换失败（并发库存不足）: 用户=%s (ID=%s), 商品=%s (ID=%s)",
+                user.username,
+                user.id,
+                item.name,
+                item.id,
+            )
+            raise RedemptionError(msg)
 
     logger.info(
         "商品兑换成功: 用户=%s (ID=%s), 商品=%s (ID=%s), 消费积分=%s, 兑换记录ID=%s",

@@ -228,7 +228,9 @@ class ContributionServiceTests(TestCase):
         self.assertEqual(results, [])
 
     @patch("chdb.services.query_contributions")
-    def test_get_contributions_success_path_uses_chdb_query(self, mock_query_contributions):
+    def test_get_contributions_success_path_uses_chdb_query(
+        self, mock_query_contributions
+    ):
         """get_contributions should flow through ClickHouse path on success."""
         UserSocialAuth.objects.create(user=self.user2, provider="gitlab", uid="gl-42")
         mock_query_contributions.return_value = [
@@ -279,7 +281,9 @@ class ContributionServiceTests(TestCase):
             [("repo-b", 66.6, 202405)],
         )
 
-    def test_enrich_with_registration_status_multi_platform_and_mixed_actor_id_types(self):
+    def test_enrich_with_registration_status_multi_platform_and_mixed_actor_id_types(
+        self,
+    ):
         """Enrich should support multiple providers and mixed actor_id value types."""
         UserSocialAuth.objects.create(user=self.user2, provider="gitlab", uid="gl-100")
         contributions = [
@@ -329,3 +333,59 @@ class ContributionServiceTests(TestCase):
         self.assertEqual(gitlab_unregistered["gitlab_id"], 987654)
         self.assertFalse(gitlab_unregistered["is_registered"])
         self.assertIsNone(gitlab_unregistered["user_id"])
+
+    @patch("chdb.services.query_contributions", return_value=[])
+    def test_get_contributions_preserves_empty_success_result(self, _mock_query):
+        """Successful empty ClickHouse queries should not fall back to fake data."""
+        results = ContributionService.get_contributions(
+            project_identifiers=["repo:github:empty"],
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 1, 31),
+        )
+
+        self.assertEqual(results, [])
+
+    def test_get_fake_contributions_synthesizes_github_id_without_social_auth(self):
+        """Registered users without GitHub auth should still receive synthetic IDs."""
+        user_without_social = User.objects.create_user(
+            username="nosocial",
+            email="nosocial@example.com",
+        )
+
+        results = ContributionService._get_fake_contributions(
+            project_identifiers=["repo:github:test"],
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        user_result = next(
+            item for item in results if item["user_id"] == user_without_social.id
+        )
+        self.assertEqual(user_result["github_login"], user_without_social.username)
+        self.assertEqual(user_result["github_id"], str(1000000 + 2))
+        self.assertTrue(user_result["is_registered"])
+
+    def test_enrich_with_registration_status_normalizes_numeric_actor_ids(self):
+        """Numeric actor IDs should match social-auth UIDs stored as strings."""
+        contributions = [
+            {
+                "platform": "GitHub",
+                "actor_id": 123456,
+                "actor_login": "testuser1",
+                "contribution_score": 42,
+            }
+        ]
+
+        results = ContributionService._enrich_with_registration_status(contributions)
+
+        self.assertEqual(results[0]["user_id"], self.user1.id)
+        self.assertTrue(results[0]["is_registered"])
+
+    def test_get_contributions_rejects_missing_date_range(self):
+        """Missing date bounds should raise a clear error instead of silent fallback."""
+        with self.assertRaises(ValueError):
+            ContributionService.get_contributions(
+                project_identifiers=["repo:github:test"],
+                start_month=None,
+                end_month=None,
+            )

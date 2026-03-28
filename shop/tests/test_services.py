@@ -1,11 +1,13 @@
 """Test cases for shop service layer."""
 
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from accounts.models import ShippingAddress
 from points import services as points_services
-from points.models import PointType
+from points.models import PointType, Tag
 from shop.models import Redemption, ShopItem
 from shop.services import RedemptionError, redeem_item
 
@@ -208,6 +210,79 @@ class RedeemItemServiceTests(TestCase):
                 item_id=item.id,
                 shipping_address_id=other_address.id,
             )
+
+    @patch("shop.services.points_services.get_balance")
+    @patch("shop.services.points_services.spend_points")
+    def test_allowed_tags_selects_sufficient_tag(
+        self, mock_spend_points, mock_get_balance
+    ):
+        """Ensure allowed tag balance selection prefers a tag with enough points."""
+        tag_a = Tag.objects.create(name="Tag A", slug="tag-a")
+        tag_b = Tag.objects.create(name="Tag B", slug="tag-b")
+
+        item = ShopItem.objects.create(
+            name="Tagged Item",
+            description="Test",
+            cost=100,
+            stock=5,
+        )
+        item.allowed_tags.set([tag_a, tag_b])
+
+        def fake_balance(owner, point_type, tag_slug=None, **kwargs):
+            if tag_slug == tag_a.slug:
+                return 10
+            if tag_slug == tag_b.slug:
+                return 200
+            return 0
+
+        mock_get_balance.side_effect = fake_balance
+
+        redemption = redeem_item(user=self.user, item_id=item.id)
+
+        self.assertIsNotNone(redemption)
+        mock_spend_points.assert_called_once()
+        _, kwargs = mock_spend_points.call_args
+        self.assertEqual(kwargs["tag_slug"], tag_b.slug)
+        item.refresh_from_db()
+        self.assertEqual(item.stock, 4)
+
+    @patch("shop.services.points_services.get_balance", return_value=0)
+    def test_allowed_tags_insufficient_balance(self, _mock_get_balance):
+        """Fail if every allowed tag lacks enough balance."""
+        tag_a = Tag.objects.create(name="Tag A", slug="tag-a")
+        tag_b = Tag.objects.create(name="Tag B", slug="tag-b")
+
+        item = ShopItem.objects.create(
+            name="Tagged Item",
+            description="Test",
+            cost=100,
+            stock=5,
+        )
+        item.allowed_tags.set([tag_a, tag_b])
+
+        with self.assertRaisesMessage(
+            RedemptionError, "您没有足够的符合条件的积分来兑换此商品"
+        ):
+            redeem_item(user=self.user, item_id=item.id)
+
+        self.assertEqual(Redemption.objects.count(), 0)
+        item.refresh_from_db()
+        self.assertEqual(item.stock, 5)
+
+    @patch("shop.services.points_services.spend_points")
+    def test_spend_points_insufficient_points_wrapped(self, mock_spend_points):
+        """Wrap spend_points errors in RedemptionError while keeping state unchanged."""
+        mock_spend_points.side_effect = points_services.InsufficientPointsError("不足")
+        item = ShopItem.objects.create(
+            name="Expensive Tag", description="Test", cost=500, stock=10
+        )
+
+        with self.assertRaisesMessage(RedemptionError, "积分不足"):
+            redeem_item(user=self.user, item_id=item.id)
+
+        self.assertEqual(Redemption.objects.count(), 0)
+        item.refresh_from_db()
+        self.assertEqual(item.stock, 10)
 
     def test_redeem_item_requires_shipping_success(self):
         """Test successful redemption of item requiring shipping."""

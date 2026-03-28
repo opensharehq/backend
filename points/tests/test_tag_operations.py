@@ -159,3 +159,177 @@ class TagOperationTests(TestCase):
 
         result = TagOperation.evaluate_user_tags(["user-label"])
         self.assertEqual(result, {"101", "202"})
+
+    @patch("chdb.services.get_label_entities")
+    def test_evaluate_xor_operation(self, mock_get_labels):
+        """Test XOR operation on project tags."""
+        mock_get_labels.return_value = {
+            "label-a": {"repos": {"github": [1, 2]}, "orgs": {}, "children": []},
+            "label-b": {"repos": {"github": [2, 3]}, "orgs": {}, "children": []},
+        }
+
+        result = TagOperation.evaluate_project_tags(
+            ["label-a", "label-b"], operation=TagOperation.XOR
+        )
+
+        self.assertEqual(result, {"repo:github:1", "repo:github:3"})
+
+    @patch("chdb.services.get_label_entities")
+    def test_projects_fall_back_to_orgs(self, mock_get_labels):
+        """Test project resolution falls back to org identifiers."""
+        mock_get_labels.return_value = {
+            "org-label": {
+                "repos": {},
+                "orgs": {"gitee": [99]},
+                "children": [],
+                "name": "",
+                "name_zh": "",
+                "id": "org-label",
+            }
+        }
+
+        result = TagOperation.evaluate_project_tags(["org-label"])
+
+        self.assertEqual(result, {"org:gitee:99"})
+
+    @patch("chdb.services.get_label_entities")
+    def test_projects_fall_back_to_children(self, mock_get_labels):
+        """Test project resolution falls back to child identifiers."""
+        mock_get_labels.return_value = {
+            "child-label": {
+                "repos": {},
+                "orgs": {},
+                "children": ["child-1", "", None],
+                "name": "",
+                "name_zh": "",
+                "id": "child-label",
+            }
+        }
+
+        result = TagOperation.evaluate_project_tags(["child-label"])
+
+        self.assertEqual(result, {"child-1"})
+
+    @patch("chdb.services.get_label_entities")
+    def test_projects_fall_back_to_name(self, mock_get_labels):
+        """Test project resolution falls back to display names."""
+        mock_get_labels.return_value = {
+            "named-label": {
+                "repos": {},
+                "orgs": {},
+                "children": [],
+                "name": "",
+                "name_zh": "中文标签",
+                "id": "named-label",
+            }
+        }
+
+        result = TagOperation.evaluate_project_tags(["named-label"])
+
+        self.assertEqual(result, {"中文标签"})
+
+    @patch("chdb.services.get_label_entities")
+    def test_evaluate_project_tags_missing_label_uses_empty_set(self, mock_get_labels):
+        """Test missing labels participate as empty sets in set operations."""
+        mock_get_labels.return_value = {
+            "label-a": {
+                "repos": {"github": [1]},
+                "orgs": {},
+                "children": [],
+                "name": "org/a",
+                "name_zh": "",
+                "id": "label-a",
+            }
+        }
+
+        result = TagOperation.evaluate_project_tags(
+            ["label-a", "missing"], operation=TagOperation.AND
+        )
+
+        self.assertEqual(result, set())
+
+    def test_evaluate_project_tags_handles_truthy_empty_normalized_list(self):
+        """Test project evaluation safely handles a truthy iterable with no values."""
+
+        class TruthyEmptyList(list):
+            def __bool__(self):
+                return True
+
+        with patch.object(
+            TagOperation, "_normalize_tag_ids", return_value=TruthyEmptyList()
+        ):
+            result = TagOperation.evaluate_project_tags(["ignored"])
+
+        self.assertEqual(result, set())
+
+    def test_evaluate_user_tags_empty_tags(self):
+        """Test evaluating empty user tags returns an empty set."""
+        self.assertEqual(TagOperation.evaluate_user_tags([]), set())
+
+    @patch("chdb.services.get_label_entities", return_value={})
+    def test_evaluate_user_tags_missing_label_uses_empty_set(self, _mock_get_labels):
+        """Test missing user labels contribute empty sets."""
+        result = TagOperation.evaluate_user_tags(["missing"])
+
+        self.assertEqual(result, set())
+
+    @patch("chdb.services.get_label_entities")
+    def test_evaluate_user_tags_xor_operation(self, mock_get_labels):
+        """Test XOR operation on user tags."""
+        mock_get_labels.return_value = {
+            "label-a": {"users": {"github": [101, 202]}},
+            "label-b": {"users": {"github": [202, 303]}},
+        }
+
+        result = TagOperation.evaluate_user_tags(
+            ["label-a", "label-b"], operation=TagOperation.XOR
+        )
+
+        self.assertEqual(result, {"101", "303"})
+
+    @patch("chdb.services.get_label_entities")
+    def test_evaluate_user_tags_and_or_not_operations(self, mock_get_labels):
+        """Test set operations beyond XOR for user tags."""
+        mock_get_labels.return_value = {
+            "label-a": {"users": {"github": [101, 202]}},
+            "label-b": {"users": {"github": [202, 303]}},
+        }
+
+        and_result = TagOperation.evaluate_user_tags(
+            ["label-a", "label-b"], operation=TagOperation.AND
+        )
+        or_result = TagOperation.evaluate_user_tags(
+            ["label-a", "label-b"], operation=TagOperation.OR
+        )
+        not_result = TagOperation.evaluate_user_tags(
+            ["label-a", "label-b"], operation=TagOperation.NOT
+        )
+
+        self.assertEqual(and_result, {"202"})
+        self.assertEqual(or_result, {"101", "202", "303"})
+        self.assertEqual(not_result, {"101"})
+
+    def test_evaluate_user_tags_handles_truthy_empty_normalized_list(self):
+        """Test user evaluation safely handles a truthy iterable with no values."""
+
+        class TruthyEmptyList(list):
+            def __bool__(self):
+                return True
+
+        with patch.object(
+            TagOperation, "_normalize_tag_ids", return_value=TruthyEmptyList()
+        ):
+            result = TagOperation.evaluate_user_tags(["ignored"])
+
+        self.assertEqual(result, set())
+
+    @patch("chdb.services.get_label_entities", side_effect=Exception("boom"))
+    def test_fetch_label_entities_returns_empty_on_exception(self, _mock_get_labels):
+        """Test entity fetch failures are downgraded to an empty result."""
+        self.assertEqual(TagOperation._fetch_label_entities(["tag"]), {})
+
+    def test_normalize_tag_ids_ignores_none_and_blank_values(self):
+        """Test tag normalization removes empty values and strips whitespace."""
+        normalized = TagOperation._normalize_tag_ids([None, " ", " tag-a ", 123])
+
+        self.assertEqual(normalized, ["tag-a", "123"])

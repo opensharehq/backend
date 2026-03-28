@@ -1,5 +1,8 @@
 """Tests for points models."""
 
+from datetime import date
+from decimal import Decimal
+
 from django.contrib.contenttypes.models import ContentType
 from django.db import IntegrityError
 from django.test import TestCase
@@ -7,6 +10,10 @@ from django.utils import timezone
 
 from accounts.models import Organization, User
 from points.models import (
+    AllocationStatus,
+    ContributionCache,
+    PendingPointGrant,
+    PointAllocation,
     PointSource,
     PointTransaction,
     PointType,
@@ -316,3 +323,86 @@ class OrganizationPointWalletPropertyTests(TestCase):
         # Second access should return same wallet
         wallet2 = org.point_wallet
         self.assertEqual(wallet.id, wallet2.id)
+
+
+class ModelStrTests(TestCase):
+    """Ensure model __str__ helpers describe state for auditing."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="testuser", password="testpass")
+        ct = ContentType.objects.get_for_model(User)
+        self.wallet = PointWallet.objects.create(
+            content_type=ct, object_id=self.user.id
+        )
+        self.source_pool = PointSource.objects.create(
+            wallet=self.wallet,
+            point_type=PointType.GIFT,
+            original_amount=1000,
+            remaining_amount=1000,
+            reason="测试",
+        )
+        self.user_ct = ContentType.objects.get_for_model(User)
+
+    def _create_allocation(self, *, status=AllocationStatus.DRAFT) -> PointAllocation:
+        return PointAllocation.objects.create(
+            initiator_type=self.user_ct,
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=5000,
+            project_scope={"tags": [], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+            status=status,
+        )
+
+    def test_pending_point_grant_str_uses_login_when_pending(self):
+        allocation = self._create_allocation()
+        grant = PendingPointGrant.objects.create(
+            github_login="git-user",
+            email="user@example.com",
+            amount=2000,
+            point_type=PointType.GIFT,
+            reason="测试",
+            granter_type=self.user_ct,
+            granter_id=self.user.id,
+            allocation=allocation,
+        )
+
+        description = str(grant)
+        self.assertIn("git-user", description)
+        self.assertIn("待领取", description)
+
+    def test_pending_point_grant_str_falls_back_to_email_and_claimed(self):
+        allocation = self._create_allocation()
+        grant = PendingPointGrant.objects.create(
+            github_login="",
+            email="no-login@example.com",
+            amount=1000,
+            point_type=PointType.GIFT,
+            reason="测试",
+            granter_type=self.user_ct,
+            granter_id=self.user.id,
+            allocation=allocation,
+            is_claimed=True,
+        )
+
+        description = str(grant)
+        self.assertIn("no-login@example.com", description)
+        self.assertIn("已领取", description)
+
+    def test_point_allocation_str_includes_status_display(self):
+        allocation = self._create_allocation(status=AllocationStatus.EXECUTING)
+        description = str(allocation)
+        self.assertIn(str(allocation.total_amount), description)
+        self.assertIn("执行中", description)
+
+    def test_contribution_cache_str_includes_score(self):
+        cache = ContributionCache.objects.create(
+            project_identifier="org/repo",
+            github_login="alice",
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 1, 31),
+            contribution_score=Decimal("123.45"),
+        )
+
+        self.assertEqual(str(cache), "alice @ org/repo: 123.45")

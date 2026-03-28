@@ -153,6 +153,25 @@ class ContributionServiceTests(TestCase):
         self.assertFalse(unregistered_result["is_registered"])
         self.assertIsNone(unregistered_result["user_id"])
 
+    def test_enrich_with_details_preserved(self):
+        """Verify _enrich_with_registration_status keeps the details payload."""
+
+        contributions = [
+            {
+                "platform": "GitHub",
+                "actor_id": "123456",
+                "actor_login": "user_one",
+                "contribution_score": 100.5,
+                "details": {"repos": [("repo1", 10)]},
+            }
+        ]
+
+        results = ContributionService._enrich_with_registration_status(contributions)
+
+        self.assertEqual(len(results), 1)
+        self.assertIn("details", results[0])
+        self.assertEqual(results[0]["details"], contributions[0]["details"])
+
     @patch("chdb.services.query_contributions")
     def test_query_from_clickhouse(self, mock_query_contributions):
         """Test querying from ClickHouse."""
@@ -193,3 +212,17 @@ class ContributionServiceTests(TestCase):
         unregistered = [r for r in results if not r["is_registered"]]
         self.assertEqual(len(unregistered), 1)
         self.assertIsNone(unregistered[0]["user_id"])
+
+    @patch("chdb.services.query_contributions")
+    def test_query_from_clickhouse_empty_returns_empty(self, mock_query_contributions):
+        """Querying contributions with no results should return an empty list."""
+
+        mock_query_contributions.return_value = []
+
+        results = ContributionService.query_from_clickhouse(
+            project_identifiers=[":companies/test/project"],
+            start_month=date(2024, 5, 1),
+            end_month=date(2024, 6, 30),
+        )
+
+        self.assertEqual(results, [])

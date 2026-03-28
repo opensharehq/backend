@@ -1,11 +1,13 @@
 """Tests for points views."""
 
+from unittest.mock import patch
+
 from django.test import Client, TestCase
 from django.urls import reverse
 
 from accounts.models import Organization, OrganizationMembership, User
 from points import services
-from points.models import PointType, WithdrawalStatus
+from points.models import PointAllocation, PointType, Tag, TagType, WithdrawalStatus
 
 
 class UserWalletViewTests(TestCase):
@@ -520,6 +522,94 @@ class TagSearchAPIViewTests(TestCase):
             self.assertIn("error", data)
 
 
+class PoolListAPIViewTests(TestCase):
+    """Tests for PoolListAPIView."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="pool-user", password="testpass")
+        self.org = Organization.objects.create(name="Pool Org", slug="pool-org")
+        OrganizationMembership.objects.create(
+            user=self.user,
+            organization=self.org,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        self.tag = Tag.objects.create(
+            name="Pool Tag",
+            slug="pool-tag",
+            tag_type=TagType.REPO,
+        )
+        services.grant_points(self.user, 100, PointType.CASH, "User cash")
+        services.grant_points(
+            self.user,
+            50,
+            PointType.GIFT,
+            "User tagged gift",
+            tag_slug=self.tag.slug,
+        )
+        services.grant_points(self.org, 80, PointType.GIFT, "Org gift")
+
+        self.client = Client()
+        self.client.login(username="pool-user", password="testpass")
+
+    def test_pool_list_api_serializes_user_and_org_pools(self):
+        """Test pool list API includes both personal and organization pools."""
+        response = self.client.get(reverse("points:api_pool_list"))
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data["user_pools"]), 2)
+        self.assertEqual(len(data["org_pools"]), 1)
+        self.assertTrue(any(pool["owner"] == "个人" for pool in data["user_pools"]))
+        self.assertEqual(data["org_pools"][0]["owner"], str(self.org))
+        self.assertEqual(data["user_pools"][1]["tag"], self.tag.slug)
+
+
+class TagListAPIViewTests(TestCase):
+    """Tests for TagListAPIView."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="tag-user", password="testpass")
+        self.client = Client()
+        self.client.login(username="tag-user", password="testpass")
+        self.repo_official = Tag.objects.create(
+            name="Official Repo",
+            slug="official-repo",
+            tag_type=TagType.REPO,
+            is_official=True,
+        )
+        self.repo_unofficial = Tag.objects.create(
+            name="Unofficial Repo",
+            slug="unofficial-repo",
+            tag_type=TagType.REPO,
+            is_official=False,
+        )
+        Tag.objects.create(
+            name="Official User",
+            slug="official-user",
+            tag_type=TagType.USER,
+            is_official=True,
+        )
+
+    def test_tag_list_api_filters_by_type_and_official(self):
+        """Test tag list API filters by tag type and official flag."""
+        response = self.client.get(
+            reverse("points:api_tag_list") + "?type=repo&official=true"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        tags = response.json()["tags"]
+        self.assertEqual(len(tags), 1)
+        self.assertEqual(tags[0]["slug"], self.repo_official.slug)
+
+    def test_tag_list_api_filters_unofficial_tags(self):
+        """Test tag list API returns unofficial tags when requested."""
+        response = self.client.get(reverse("points:api_tag_list") + "?official=false")
+
+        self.assertEqual(response.status_code, 200)
+        tags = response.json()["tags"]
+        self.assertEqual([tag["slug"] for tag in tags], [self.repo_unofficial.slug])
+
+
 class ContributionPreviewAPIViewWithLabelsTests(TestCase):
     """Tests for ContributionPreviewAPIView with label info."""
 
@@ -613,6 +703,79 @@ class ContributionPreviewAPIViewWithLabelsTests(TestCase):
             self.assertEqual(data["label_platforms_info"], {})
             # When project_scope has no tags, get_label_users should not be called
             mock_get_labels.assert_not_called()
+
+
+class ContributionPreviewAPIViewErrorTests(TestCase):
+    """Tests for error handling in ContributionPreviewAPIView."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="preview-error-user",
+            password="testpass",
+        )
+        self.client = Client()
+        self.client.login(username="preview-error-user", password="testpass")
+
+    def test_contribution_preview_invalid_payload_returns_400(self):
+        """Test malformed preview payloads are rejected with a JSON error."""
+        response = self.client.post(
+            reverse("points:api_contribution_preview"),
+            data="{invalid json",
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+
+
+class AllocationExecuteAPIViewTests(TestCase):
+    """Tests for AllocationExecuteAPIView."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="execute-user",
+            password="testpass",
+        )
+        self.client = Client()
+        self.client.login(username="execute-user", password="testpass")
+        services.grant_points(self.user, 1000, PointType.GIFT, "Initial pool")
+        self.pool = self.user.point_wallet.sources.first()
+
+    def test_allocation_execute_api_creates_allocation_and_returns_result(self):
+        """Test execute API creates an allocation before dispatching work."""
+        with patch(
+            "points.views.AllocationService.execute_allocation",
+            return_value={"success": 1, "pending": 0, "failed": 0, "total_points": 300},
+        ):
+            response = self.client.post(
+                reverse("points:api_allocation_execute"),
+                data={
+                    "pool_id": self.pool.id,
+                    "total_amount": 300,
+                    "project_scope": {"tags": ["test-repo"], "operation": "AND"},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["success"], 1)
+        allocation = PointAllocation.objects.get(id=data["allocation_id"])
+        self.assertEqual(allocation.source_pool_id, self.pool.id)
+        self.assertEqual(allocation.initiator_id, self.user.id)
+
+    def test_allocation_execute_api_invalid_payload_returns_400(self):
+        """Test malformed execute payloads are rejected with a JSON error."""
+        response = self.client.post(
+            reverse("points:api_allocation_execute"),
+            data="{invalid json",
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
 
 
 class PointAllocationConfigViewTests(TestCase):

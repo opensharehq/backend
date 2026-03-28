@@ -280,6 +280,18 @@ class SpendPointsTests(TestCase):
                 self.user, 50, PointType.CASH, "Test", tag_slug="event"
             )
 
+    def test_spend_points_tag_and_null_conflict(self):
+        """Test that tag_slug and tag_is_null cannot both be used."""
+        with self.assertRaises(services.InvalidPointOperationError):
+            services.spend_points(
+                self.user,
+                10,
+                PointType.GIFT,
+                "Conflict",
+                tag_slug="event",
+                tag_is_null=True,
+            )
+
 
 class WithdrawalRequestTests(TestCase):
     """Tests for withdrawal request functions."""

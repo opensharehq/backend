@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.contenttypes.models import ContentType
+from django.db import connection
 from django.test import TestCase
 from django.utils import timezone
 
@@ -602,3 +603,358 @@ class AllocationServiceTests(TestCase):
 
         # 空项目范围应该返回空列表
         self.assertEqual(len(preview), 0)
+
+    def test_get_project_identifiers_normalizes_values(self):
+        """Test project tags are normalized before querying contributions."""
+        allocation = SimpleNamespace(project_scope={"tags": [None, " ", " repo ", 123]})
+
+        identifiers = AllocationService._get_project_identifiers(allocation)
+
+        self.assertEqual(identifiers, ["repo", "123"])
+
+    def test_filter_contributions_by_user_scope_matches_login_or_id(self):
+        """Test user scope matches either GitHub login or GitHub ID."""
+        allocation = SimpleNamespace(user_scope={"tags": ["scope"], "operation": "AND"})
+        contributions = [
+            {"github_login": "alice", "github_id": "100"},
+            {"github_login": "bob", "github_id": "200"},
+            {"github_login": "charlie", "github_id": "300"},
+        ]
+
+        with patch(
+            "points.allocation_services.TagOperation.evaluate_user_tags",
+            return_value={"alice", "300"},
+        ):
+            filtered = AllocationService._filter_contributions_by_user_scope(
+                allocation, contributions
+            )
+
+        self.assertEqual(filtered, [contributions[0], contributions[2]])
+
+    def test_preview_allocation_returns_empty_after_user_scope_filter(self):
+        """Test preview returns empty when user scope removes all contributions."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            user_scope={"tags": ["test-users"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+        contributions = [
+            {
+                "github_login": "alice",
+                "github_id": "100",
+                "email": "alice@example.com",
+                "contribution_score": Decimal("1.5"),
+                "is_registered": False,
+                "user_id": None,
+            }
+        ]
+
+        with (
+            patch.object(
+                AllocationService, "_get_contributions", return_value=contributions
+            ),
+            patch(
+                "points.allocation_services.TagOperation.evaluate_user_tags",
+                return_value={"nobody"},
+            ),
+        ):
+            preview = AllocationService.preview_allocation(allocation)
+
+        self.assertEqual(preview, [])
+
+    def test_preview_allocation_returns_empty_when_total_contribution_is_zero(self):
+        """Test preview returns empty when total contribution sums to zero."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+        contributions = [
+            {
+                "github_login": "alice",
+                "github_id": "100",
+                "email": "alice@example.com",
+                "contribution_score": Decimal("0"),
+                "is_registered": False,
+                "user_id": None,
+            }
+        ]
+
+        with patch.object(
+            AllocationService, "_get_contributions", return_value=contributions
+        ):
+            preview = AllocationService.preview_allocation(allocation)
+
+        self.assertEqual(preview, [])
+
+    def test_execute_allocation_marks_failed_when_preview_raises(self):
+        """Test execute_allocation marks allocation failed on unexpected errors."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        with (
+            self.assertRaises(RuntimeError),
+            patch.object(
+                AllocationService,
+                "preview_allocation",
+                side_effect=RuntimeError("preview failed"),
+            ),
+            patch.object(
+                AllocationService,
+                "_mark_allocation_failed",
+                wraps=AllocationService._mark_allocation_failed,
+            ) as mark_failed_mock,
+        ):
+            AllocationService.execute_allocation(allocation)
+
+        mark_failed_mock.assert_called_once_with(allocation)
+
+    def test_process_preview_item_skips_non_positive_amounts(self):
+        """Test preview items with zero adjusted points are ignored."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        result = AllocationService._process_preview_item(
+            allocation,
+            {"adjusted_points": 0, "is_registered": True},
+        )
+
+        self.assertEqual(result, (0, 0, 0, 0))
+
+    def test_process_preview_item_counts_failed_registered_grants(self):
+        """Test failed registered grants increase the failure counter only."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+        item = {"adjusted_points": 1200, "is_registered": True, "user_id": self.user.id}
+
+        with patch.object(
+            AllocationService, "_grant_registered_points", return_value=False
+        ):
+            result = AllocationService._process_preview_item(allocation, item)
+
+        self.assertEqual(result, (0, 0, 1, 0))
+
+    def test_deduct_source_pool_ignores_non_positive_amount(self):
+        """Test source pool deduction is skipped when there is nothing to deduct."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        with patch("points.allocation_services.spend_points") as spend_points_mock:
+            AllocationService._deduct_source_pool(allocation, 0)
+
+        spend_points_mock.assert_not_called()
+
+    def test_grant_registered_points_returns_false_when_grant_fails(self):
+        """Test grant failures are converted into False for allocation stats."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        with patch(
+            "points.allocation_services.grant_points",
+            side_effect=RuntimeError("grant failed"),
+        ):
+            success = AllocationService._grant_registered_points(
+                allocation,
+                {"user_id": self.user.id},
+                1200,
+            )
+
+        self.assertFalse(success)
+
+    def test_build_pending_claim_query_without_identifiers_matches_nothing(self):
+        """Test users without identifiers do not match blank pending grants."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+        PendingPointGrant.objects.create(
+            github_id="",
+            github_login="",
+            email="",
+            amount=3000,
+            point_type=PointType.GIFT,
+            reason="空标识测试",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+        )
+        user = SimpleNamespace(username=" ", email=" ")
+
+        with patch.object(
+            AllocationService, "_get_github_social_auth", return_value=None
+        ):
+            query = AllocationService._build_pending_claim_query(user)
+
+        self.assertEqual(PendingPointGrant.objects.filter(query).count(), 0)
+
+    def test_rollback_claimed_points_for_user_returns_zero_without_grants(self):
+        """Test rollback is a no-op when there are no claimed grants."""
+        result = AllocationService.rollback_claimed_points_for_user(self.user)
+
+        self.assertEqual(result, {"rolled_back_count": 0, "total_amount": 0})
+
+    def test_get_rollback_claimed_points_summary_returns_defaults_without_grants(self):
+        """Test empty rollback summary reports safe defaults."""
+        summary = AllocationService.get_rollback_claimed_points_summary(self.user)
+
+        self.assertEqual(
+            summary,
+            {
+                "rollbackable_count": 0,
+                "total_amount": 0,
+                "can_execute": True,
+                "blocking_error": "",
+            },
+        )
+
+    def test_get_rollback_target_grants_filters_by_grant_ids(self):
+        """Test rollback targets can be restricted to specific grant IDs."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+        first_grant = PendingPointGrant.objects.create(
+            github_id="",
+            github_login=self.user.username,
+            email=self.user.email,
+            amount=1000,
+            point_type=PointType.GIFT,
+            reason="first",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+            is_claimed=True,
+            claimed_by=self.user,
+            claimed_at=timezone.now(),
+        )
+        PendingPointGrant.objects.create(
+            github_id="",
+            github_login=self.user.username,
+            email=self.user.email,
+            amount=1200,
+            point_type=PointType.GIFT,
+            reason="second",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+            is_claimed=True,
+            claimed_by=self.user,
+            claimed_at=timezone.now(),
+        )
+
+        grants = AllocationService._get_rollback_target_grants(
+            user=self.user,
+            grant_ids=[first_grant.id],
+        )
+
+        self.assertEqual([grant.id for grant in grants], [first_grant.id])
+
+    def test_get_rollback_target_grants_uses_select_for_update_of_when_supported(self):
+        """Test rollback target locking uses OF syntax when the backend supports it."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+        grant = PendingPointGrant.objects.create(
+            github_id="",
+            github_login=self.user.username,
+            email=self.user.email,
+            amount=1500,
+            point_type=PointType.GIFT,
+            reason="lock test",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+            is_claimed=True,
+            claimed_by=self.user,
+            claimed_at=timezone.now(),
+        )
+
+        with patch.object(connection.features, "has_select_for_update_of", True):
+            grants = AllocationService._get_rollback_target_grants(
+                user=self.user,
+                for_update=True,
+            )
+
+        self.assertEqual([item.id for item in grants], [grant.id])
+
+    def test_ensure_rollback_balance_sufficient_supports_cash_and_tagged_buckets(self):
+        """Test rollback balance checks handle cash and tagged gift buckets."""
+        grant_points(
+            owner=self.user,
+            amount=500,
+            point_type=PointType.CASH,
+            reason="现金余额",
+        )
+        grant_points(
+            owner=self.user,
+            amount=800,
+            point_type=PointType.GIFT,
+            reason="标签余额",
+            tag_slug=self.tag_repo.slug,
+        )
+        grants = [
+            SimpleNamespace(point_type=PointType.CASH, tag=None, amount=200),
+            SimpleNamespace(point_type=PointType.GIFT, tag=self.tag_repo, amount=300),
+        ]
+
+        AllocationService._ensure_rollback_balance_sufficient(self.user, grants)

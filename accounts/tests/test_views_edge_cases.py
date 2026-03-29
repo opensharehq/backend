@@ -158,6 +158,24 @@ class ProfileEditHelperTests(TestCase):
         self.assertEqual(education_formset, "education_formset_get")
         self.assertFalse(is_post)
 
+    def test_persist_inline_formset_without_save_m2m_still_tracks_changes(self):
+        """Inline formsets without save_m2m should still save and delete rows."""
+        saved_instance = Mock()
+        deleted_instance = Mock()
+
+        class FormsetWithoutSaveM2M:
+            deleted_objects = [deleted_instance]
+
+            def save(self, commit=False):
+                self.commit = commit
+                return [saved_instance]
+
+        changed = account_views._persist_inline_formset(FormsetWithoutSaveM2M())
+
+        self.assertTrue(changed)
+        saved_instance.save.assert_called_once()
+        deleted_instance.delete.assert_called_once()
+
 
 class ProfileEditViewEdgeCaseTests(TestCase):
     """Edge case tests for profile edit view."""

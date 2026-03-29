@@ -1,6 +1,7 @@
 """消息视图测试."""
 
 import json
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -123,6 +124,18 @@ class MessageDetailViewTests(TestCase):
 
         self.user_message.refresh_from_db()
         self.assertTrue(self.user_message.is_read)
+
+    def test_message_detail_leaves_already_read_messages_unchanged(self):
+        """已读消息再次查看时不应重复触发 mark_as_read."""
+        self.user_message.mark_as_read()
+
+        with patch("messages.models.UserMessage.mark_as_read") as mark_as_read:
+            response = self.client.get(
+                reverse("messages:detail", args=[self.message.id])
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mark_as_read.assert_not_called()
 
     def test_message_detail_not_found(self):
         """测试访问不存在的消息."""

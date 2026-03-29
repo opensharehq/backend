@@ -175,6 +175,42 @@ class TagOperationTests(TestCase):
         self.assertEqual(result, {"repo:github:1", "repo:github:3"})
 
     @patch("chdb.services.get_label_entities")
+    def test_evaluate_project_tags_with_three_labels_continues_looping(
+        self, mock_get_labels
+    ):
+        """Project tag evaluation should keep applying the operator across all labels."""
+        mock_get_labels.return_value = {
+            "label-a": {"repos": {"github": [1, 2]}, "orgs": {}, "children": []},
+            "label-b": {"repos": {"github": [2, 3]}, "orgs": {}, "children": []},
+            "label-c": {"repos": {"github": [3, 4]}, "orgs": {}, "children": []},
+        }
+
+        result = TagOperation.evaluate_project_tags(
+            ["label-a", "label-b", "label-c"],
+            operation=TagOperation.XOR,
+        )
+
+        self.assertEqual(result, {"repo:github:1", "repo:github:4"})
+
+    @patch("chdb.services.get_label_entities")
+    def test_evaluate_project_tags_ignores_unknown_operation_across_multiple_labels(
+        self, mock_get_labels
+    ):
+        """Unsupported project tag operations should safely retain the seed set."""
+        mock_get_labels.return_value = {
+            "label-a": {"repos": {"github": [1, 2]}, "orgs": {}, "children": []},
+            "label-b": {"repos": {"github": [2, 3]}, "orgs": {}, "children": []},
+            "label-c": {"repos": {"github": [3, 4]}, "orgs": {}, "children": []},
+        }
+
+        result = TagOperation.evaluate_project_tags(
+            ["label-a", "label-b", "label-c"],
+            operation="UNKNOWN",
+        )
+
+        self.assertEqual(result, {"repo:github:1", "repo:github:2"})
+
+    @patch("chdb.services.get_label_entities")
     def test_projects_fall_back_to_orgs(self, mock_get_labels):
         """Test project resolution falls back to org identifiers."""
         mock_get_labels.return_value = {
@@ -227,6 +263,19 @@ class TagOperationTests(TestCase):
         result = TagOperation.evaluate_project_tags(["named-label"])
 
         self.assertEqual(result, {"中文标签"})
+
+    def test_projects_without_any_identifiers_return_empty_set(self):
+        """Labels without repos, orgs, children, or names should resolve to an empty set."""
+        label = {
+            "repos": {},
+            "orgs": {},
+            "children": [],
+            "name": "",
+            "name_zh": "",
+            "id": None,
+        }
+
+        self.assertEqual(TagOperation._get_projects_for_label(label), set())
 
     @patch("chdb.services.get_label_entities")
     def test_evaluate_project_tags_missing_label_uses_empty_set(self, mock_get_labels):
@@ -286,6 +335,42 @@ class TagOperationTests(TestCase):
         )
 
         self.assertEqual(result, {"101", "303"})
+
+    @patch("chdb.services.get_label_entities")
+    def test_evaluate_user_tags_with_three_labels_continues_looping(
+        self, mock_get_labels
+    ):
+        """User tag evaluation should keep applying the operator across every label."""
+        mock_get_labels.return_value = {
+            "label-a": {"users": {"github": [101, 202]}},
+            "label-b": {"users": {"github": [202, 303]}},
+            "label-c": {"users": {"github": [303, 404]}},
+        }
+
+        result = TagOperation.evaluate_user_tags(
+            ["label-a", "label-b", "label-c"],
+            operation=TagOperation.XOR,
+        )
+
+        self.assertEqual(result, {"101", "404"})
+
+    @patch("chdb.services.get_label_entities")
+    def test_evaluate_user_tags_ignores_unknown_operation_across_multiple_labels(
+        self, mock_get_labels
+    ):
+        """Unsupported user tag operations should safely retain the seed set."""
+        mock_get_labels.return_value = {
+            "label-a": {"users": {"github": [101, 202]}},
+            "label-b": {"users": {"github": [202, 303]}},
+            "label-c": {"users": {"github": [303, 404]}},
+        }
+
+        result = TagOperation.evaluate_user_tags(
+            ["label-a", "label-b", "label-c"],
+            operation="UNKNOWN",
+        )
+
+        self.assertEqual(result, {"101", "202"})
 
     @patch("chdb.services.get_label_entities")
     def test_evaluate_user_tags_and_or_not_operations(self, mock_get_labels):

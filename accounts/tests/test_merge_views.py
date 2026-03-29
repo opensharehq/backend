@@ -10,6 +10,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from accounts import views as account_views
 from accounts.models import AccountMergeRequest
 
 
@@ -61,6 +62,25 @@ class MergeViewsEdgeCaseTests(TestCase):
                 )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("accounts:merge_request"))
+
+    def test_generate_unique_token_retries_until_it_finds_a_free_value(self):
+        """Token generation should loop until AccountMergeRequest approves a candidate."""
+        exists_mock = mock.Mock(side_effect=[True, False])
+
+        with (
+            mock.patch(
+                "accounts.views.secrets.token_urlsafe",
+                side_effect=["duplicate-token", "fresh-token"],
+            ),
+            mock.patch(
+                "accounts.views.AccountMergeRequest.objects.filter"
+            ) as filter_mock,
+        ):
+            filter_mock.return_value.exists = exists_mock
+            token = account_views._generate_unique_token()
+
+        self.assertEqual(token, "fresh-token")
+        self.assertEqual(exists_mock.call_count, 2)
 
     def test_merge_agree_redirects_on_get(self):
         """Non-POST requests are redirected to review page."""
@@ -147,6 +167,20 @@ class MergeViewsEdgeCaseTests(TestCase):
             reverse("accounts:merge_reject", args=[self.merge_request.approve_token])
         )
         self.assertEqual(response.status_code, 302)
+
+    def test_merge_reject_noops_for_already_rejected_requests(self):
+        """Rejected requests should simply redirect without running the pending branch."""
+        self._login_target()
+        self.merge_request.status = AccountMergeRequest.Status.REJECTED
+        self.merge_request.save(update_fields=["status"])
+
+        response = self.client.post(
+            reverse("accounts:merge_reject", args=[self.merge_request.approve_token])
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.merge_request.refresh_from_db()
+        self.assertEqual(self.merge_request.status, AccountMergeRequest.Status.REJECTED)
 
     def test_merge_reject_permission_denied(self):
         """Only target user may reject."""

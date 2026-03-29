@@ -62,6 +62,18 @@ class CanonicalHostRedirectMiddlewareTests(SimpleTestCase):
             "https://open-share.cn/community/search/?q=django&location=%E4%B8%8A%E6%B5%B7",
         )
 
+    def test_build_redirect_url_helper_rewrites_host_for_www_requests(self):
+        """The helper should preserve path/query while swapping to the apex host."""
+        request = self.factory.get(
+            "/docs/",
+            {"page": "2"},
+            HTTP_HOST="www.open-share.cn",
+        )
+
+        redirect_url = self.middleware._build_redirect_url(request)
+
+        self.assertEqual(redirect_url, "https://open-share.cn/docs/?page=2")
+
     def test_redirect_is_case_insensitive_for_matching_host(self):
         """Uppercase host headers should still redirect to the canonical host."""
         request = self.factory.get("/team/", HTTP_HOST="WWW.OPEN-SHARE.CN")

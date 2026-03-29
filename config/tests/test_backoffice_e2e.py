@@ -186,10 +186,14 @@ class BackOfficeE2ETests(BrowserE2ETestCase):
         self.page.wait_for_timeout(400)
 
         self.assertEqual(
-            self.page.locator("#project-tag-search-results .search-result-item").count(),
+            self.page.locator(
+                "#project-tag-search-results .search-result-item"
+            ).count(),
             0,
         )
-        self.assertTrue(self.page.locator("#preview-contributions-button").is_disabled())
+        self.assertTrue(
+            self.page.locator("#preview-contributions-button").is_disabled()
+        )
 
     @patch(
         "chdb.services.search_tags",

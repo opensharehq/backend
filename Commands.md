@@ -22,6 +22,12 @@
 - 示例：
   - `just run`
 
+### `just run_plus`
+- 用途：`just run` 的别名，方便直接表达“启动 runserver_plus”
+- 等价：`uv run manage.py runserver_plus`
+- 示例：
+  - `just run_plus`
+
 ### `just sh`
 - 用途：进入增强版 Django Shell（`shell_plus`）
 - 等价：`uv run manage.py shell_plus`
@@ -62,13 +68,54 @@
 ### `just test`
 - 用途：以覆盖率模式并行运行测试（与 CI 对齐）
 - 依次执行：
+  - `uv run playwright install chromium`
   - `uv run coverage erase`
-  - `DJANGO_LOG_LEVEL=ERROR uv run coverage run --concurrency=multiprocessing --parallel-mode manage.py test --parallel --timing --durations 10`
+  - `DJANGO_LOG_LEVEL=ERROR uv run coverage run --concurrency=multiprocessing --parallel-mode manage.py test --exclude-tag=e2e --parallel --timing --durations 10`
+  - `DJANGO_LOG_LEVEL=ERROR uv run coverage run --parallel-mode manage.py test config.tests.test_frontoffice_e2e config.tests.test_backoffice_e2e --timing --durations 10`
   - `uv run coverage combine`
+  - `uv run coverage json`
   - `uv run coverage report`
+  - `uv run python scripts/check_coverage.py coverage.json`
   - `uv run coverage report --skip-covered --skip-empty`
 - 示例：
   - `just test`
+
+### `just test-security`
+- 用途：运行 OWASP 基线安全回归测试
+- 等价：`DJANGO_LOG_LEVEL=ERROR uv run manage.py test config.tests.test_security_owasp --timing`
+- 示例：
+  - `just test-security`
+
+### `just load-test`
+- 用途：对正在运行的站点执行轻量并发压测
+- 等价：
+  - `uv run python scripts/load_test.py [args...]`
+- 默认情况下直接使用脚本内置参数：
+  - `--base-url http://127.0.0.1:8000`
+  - `--scenario anonymous-browse`
+  - `--concurrency 20`
+  - `--duration 30`
+  - `--timeout 5`
+  - `--p95-ms 750`
+  - `--max-error-rate 1`
+- 示例：
+  - `just run_plus`（先启动服务）
+  - `just load-test`
+  - `just load-test --base-url http://127.0.0.1:8001`
+  - `just load-test --concurrency 50 --duration 60 --p95-ms 1000`
+
+### `just mutmut`
+- 用途：执行 mutation testing，验证现有测试对高价值模块的杀伤力
+- 等价：`uv run --with mutmut --with pytest --with pytest-django mutmut run`
+- 说明：默认只覆盖一组经过筛选的低噪声模块，适合作为预发布或夜间质量检查
+- 示例：
+  - `just mutmut`
+
+### `just mutmut-results`
+- 用途：查看最近一次 mutation testing 结果
+- 等价：`uv run --with mutmut --with pytest --with pytest-django mutmut results`
+- 示例：
+  - `just mutmut-results`
 
 ### `just docker-build IMAGE='fullsite'`
 - 用途：构建 Docker 镜像

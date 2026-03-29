@@ -533,6 +533,8 @@ if not DEBUG:
     # Content Security
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_BROWSER_XSS_FILTER = True
+    SECURE_REFERRER_POLICY = "same-origin"
+    SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
     X_FRAME_OPTIONS = "DENY"
 
     # Session security

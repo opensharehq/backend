@@ -1,6 +1,9 @@
 run:
     @uv run manage.py runserver_plus
 
+run_plus:
+    @uv run manage.py runserver_plus
+
 sh:
     @uv run manage.py shell_plus
 
@@ -30,6 +33,18 @@ test:
     @uv run coverage report
     @uv run python scripts/check_coverage.py coverage.json
     @uv run coverage report --skip-covered --skip-empty
+
+test-security:
+    @DJANGO_LOG_LEVEL=ERROR uv run manage.py test config.tests.test_security_owasp --timing
+
+load-test *args:
+    @uv run python scripts/load_test.py {{args}}
+
+mutmut:
+    @uv run --python 3.12 --with mutmut --with pytest --with pytest-django mutmut run
+
+mutmut-results:
+    @uv run --python 3.12 --with mutmut --with pytest --with pytest-django mutmut results
 
 docker-build IMAGE='fullsite':
     docker build --tag {{IMAGE}} .

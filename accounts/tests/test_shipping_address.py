@@ -126,6 +126,16 @@ class ShippingAddressCreateViewTests(TestCase):
         address = ShippingAddress.objects.get(user=self.user)
         assert address.receiver_name == "张三"
 
+    def test_create_address_post_invalid_rerenders_form(self):
+        """Invalid create submissions should stay on the form page."""
+        self.client.force_login(self.user)
+
+        response = self.client.post(self.url, {"receiver_name": "张三"})
+
+        assert response.status_code == 200
+        assert "form" in response.context
+        assert ShippingAddress.objects.filter(user=self.user).count() == 0
+
 
 class ShippingAddressEditViewTests(TestCase):
     """Test cases for shipping address edit view."""
@@ -192,6 +202,16 @@ class ShippingAddressEditViewTests(TestCase):
         assert self.address.receiver_name == "李四"
         assert self.address.address == "新地址"
         assert self.address.is_default is True
+
+    def test_update_address_invalid_data_rerenders_form(self):
+        """Invalid address updates should not persist changes."""
+        self.client.force_login(self.user)
+
+        response = self.client.post(self.url, {"receiver_name": "李四"})
+
+        assert response.status_code == 200
+        self.address.refresh_from_db()
+        assert self.address.receiver_name == "张三"
 
 
 class ShippingAddressDeleteViewTests(TestCase):
@@ -306,6 +326,18 @@ class ShippingAddressSetDefaultViewTests(TestCase):
         # address1 should no longer be default
         assert self.address1.is_default is False
 
+    def test_set_default_get_only_redirects_without_changes(self):
+        """GET requests should not toggle the default address."""
+        self.client.force_login(self.user)
+
+        response = self.client.get(self.url)
+
+        assert response.status_code == 302
+        self.address1.refresh_from_db()
+        self.address2.refresh_from_db()
+        assert self.address1.is_default is True
+        assert self.address2.is_default is False
+
 
 class ShippingAddressCreateGuideViewTests(TestCase):
     """Test cases for shipping address create guide view."""
@@ -367,6 +399,16 @@ class ShippingAddressCreateGuideViewTests(TestCase):
 
         # Address should be created
         assert ShippingAddress.objects.filter(user=self.user).count() == 1
+
+    def test_guide_invalid_post_rerenders_form(self):
+        """Invalid guide submissions should stay on the guide page."""
+        self.client.force_login(self.user)
+
+        response = self.client.post(self.url, {"receiver_name": "张三"})
+
+        assert response.status_code == 200
+        assert response.context["item"] == self.item
+        assert ShippingAddress.objects.filter(user=self.user).count() == 0
 
     def test_first_address_defaults_to_default(self):
         """Test that form suggests is_default=True for first address."""

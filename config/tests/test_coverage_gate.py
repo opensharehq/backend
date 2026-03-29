@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import importlib.util
+import io
 import json
-import subprocess
-import sys
+from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from django.test import SimpleTestCase
+
+
+@dataclass(frozen=True)
+class ScriptRunResult:
+    """Captured result of invoking the coverage gate entrypoint directly."""
+
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 class CoverageGateScriptTests(SimpleTestCase):
@@ -19,19 +30,36 @@ class CoverageGateScriptTests(SimpleTestCase):
         """Return the path to the coverage gate script."""
         return Path(__file__).resolve().parents[2] / "scripts" / "check_coverage.py"
 
-    def _run_gate(self, totals: dict) -> subprocess.CompletedProcess[str]:
-        """Write a temporary coverage report and execute the gate script against it."""
+    @property
+    def script_module(self):
+        """Load the coverage gate module from its script path."""
+        spec = importlib.util.spec_from_file_location(
+            "scripts.check_coverage",
+            self.script_path,
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec is not None
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+    def _run_gate(self, totals: dict) -> ScriptRunResult:
+        """Write a temporary coverage report and invoke the script entrypoint."""
         with TemporaryDirectory() as tmpdir:
             report_path = Path(tmpdir) / "coverage.json"
             report_path.write_text(
                 json.dumps({"meta": {}, "files": {}, "totals": totals}),
                 encoding="utf-8",
             )
-            return subprocess.run(  # noqa: S603 - trusted local script path and temp file.
-                [sys.executable, str(self.script_path), str(report_path)],
-                capture_output=True,
-                check=False,
-                text=True,
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                returncode = self.script_module.main([str(report_path)])
+
+            return ScriptRunResult(
+                returncode=returncode,
+                stdout=stdout.getvalue(),
+                stderr=stderr.getvalue(),
             )
 
     def test_gate_passes_when_line_and_branch_thresholds_are_met(self):

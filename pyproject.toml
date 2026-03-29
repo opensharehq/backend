@@ -30,6 +30,33 @@ dependencies = [
 [tool.djlint]
 profile="django"
 
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py"]
+addopts = "-q"
+
+[tool.mutmut]
+paths_to_mutate = [
+    "common/load_testing.py",
+    "common/middleware.py",
+    "config/settings_helpers.py",
+    "scripts/check_coverage.py",
+]
+also_copy = [
+    "common/__init__.py",
+    "common/tests",
+    "config/tests",
+    "homepage/tests",
+    "templates",
+]
+pytest_add_cli_args = ["--import-mode=importlib"]
+pytest_add_cli_args_test_selection = [
+    "common/tests/test_load_testing.py",
+    "config/tests/test_canonical_host_redirect_middleware.py",
+    "config/tests/test_coverage_gate.py",
+    "config/tests/test_settings_helpers_mutation.py",
+]
+max_stack_depth = -1
 
 
 [tool.coverage.run]

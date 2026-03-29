@@ -378,6 +378,44 @@ class AllocationServiceTests(TestCase):
         self.assertEqual(result["claimed_count"], 0)
         self.assertEqual(result["total_amount"], 0)
 
+    def test_claim_pending_points_skips_zero_amount_results_and_continues(self):
+        """Zero-amount claim results should be ignored while later claims still count."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        claimant = User.objects.create_user(
+            username="continued-claim-user",
+            email="continued-claim@example.com",
+        )
+        for amount in (1000, 1800):
+            PendingPointGrant.objects.create(
+                github_id="",
+                github_login=claimant.username,
+                email=claimant.email,
+                amount=amount,
+                point_type=PointType.GIFT,
+                reason="continue on zero claim",
+                granter_type=ContentType.objects.get_for_model(User),
+                granter_id=self.user.id,
+                allocation=allocation,
+            )
+
+        with patch.object(
+            AllocationService,
+            "_claim_pending_grant",
+            side_effect=[0, 1800],
+        ):
+            result = AllocationService.claim_pending_points(claimant)
+
+        self.assertEqual(result, {"claimed_count": 1, "total_amount": 1800})
+
     def test_get_claimable_pending_points_summary(self):
         """Test claimable pending points summary returns count and total."""
         allocation = PointAllocation.objects.create(
@@ -588,6 +626,33 @@ class AllocationServiceTests(TestCase):
         self.assertEqual(ensure_mock.call_count, 1)
         self.assertTrue(ensure_mock.call_args.kwargs["lock_sources"])
 
+    def test_get_rollback_bucket_available_amount_keeps_unfiltered_gift_sources(self):
+        """Gift lookups without tag filters should retain all positive sources."""
+        grant_points(
+            owner=self.user,
+            amount=500,
+            point_type=PointType.GIFT,
+            reason="tagged gift source",
+            tag_slug=self.tag_repo.slug,
+        )
+
+        available_amount = AllocationService._get_rollback_bucket_available_amount(
+            self.wallet,
+            point_type=PointType.GIFT,
+            tag_slug=None,
+            tag_is_null=False,
+        )
+
+        expected_amount = sum(
+            source.remaining_amount
+            for source in PointSource.objects.filter(
+                wallet=self.wallet,
+                point_type=PointType.GIFT,
+                remaining_amount__gt=0,
+            )
+        )
+        self.assertEqual(available_amount, expected_amount)
+
     def test_preview_allocation_empty_projects(self):
         """Test allocation preview with empty project tags."""
         allocation = PointAllocation.objects.create(
@@ -696,6 +761,20 @@ class AllocationServiceTests(TestCase):
             preview = AllocationService.preview_allocation(allocation)
 
         self.assertEqual(preview, [])
+
+    def test_scale_results_to_total_amount_skips_negative_adjustments_for_remainders(
+        self,
+    ):
+        """Negative adjusted rows should not participate in positive remainder balancing."""
+        results = [
+            {"adjusted_points": 10},
+            {"adjusted_points": -3},
+        ]
+
+        AllocationService._scale_results_to_total_amount(results, total_amount=5)
+
+        self.assertEqual(results[0]["adjusted_points"], 7)
+        self.assertEqual(results[1]["adjusted_points"], -2)
 
     def test_execute_allocation_marks_failed_when_preview_raises(self):
         """Test execute_allocation marks allocation failed on unexpected errors."""

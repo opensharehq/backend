@@ -213,6 +213,26 @@ class CancelWithdrawalViewTests(TestCase):
         withdrawal.refresh_from_db()
         self.assertEqual(withdrawal.status, WithdrawalStatus.CANCELLED)
 
+    def test_cancel_withdrawal_get_only_redirects_without_changes(self):
+        """GET requests should not mutate the withdrawal status."""
+        withdrawal = services.create_withdrawal_request(
+            self.user,
+            500,
+            "张三",
+            "13800138000",
+            "11010519491231002X",
+            "中国银行",
+            "6222000000000000000",
+        )
+
+        response = self.client.get(
+            reverse("points:cancel_withdrawal", args=[withdrawal.id])
+        )
+
+        self.assertRedirects(response, reverse("points:withdrawal_list"))
+        withdrawal.refresh_from_db()
+        self.assertEqual(withdrawal.status, WithdrawalStatus.PENDING)
+
 
 class OrgWalletViewTests(TestCase):
     """Tests for org_wallet_view."""
@@ -335,6 +355,21 @@ class OrgCreateWithdrawalViewTests(TestCase):
         self.assertRedirects(
             response, reverse("points:org_wallet", args=[self.org.slug])
         )
+
+    def test_org_withdrawal_invalid_post_rerenders_form(self):
+        """Invalid org withdrawal submissions should stay on the form page."""
+        self.client.login(username="owner", password="pass")
+
+        response = self.client.post(
+            reverse("points:org_create_withdrawal", args=[self.org.slug]),
+            {
+                "amount": "",
+                "real_name": "张三",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "points/organization_withdrawal_form.html")
 
 
 class ViewEdgeCaseTests(TestCase):
@@ -659,6 +694,17 @@ class TagListAPIViewTests(TestCase):
             {"slug", "name", "type", "is_official", "entity_identifier"},
         )
 
+    def test_tag_list_api_without_official_filter_returns_all_matching_types(self):
+        """Omitting the official flag should keep both official and unofficial matches."""
+        response = self.client.get(reverse("points:api_tag_list") + "?type=repo")
+
+        self.assertEqual(response.status_code, 200)
+        tags = response.json()["tags"]
+        self.assertEqual(
+            {tag["slug"] for tag in tags},
+            {self.repo_official.slug, self.repo_unofficial.slug},
+        )
+
 
 class ContributionPreviewAPIViewWithLabelsTests(TestCase):
     """Tests for ContributionPreviewAPIView with label info."""
@@ -783,6 +829,47 @@ class ContributionPreviewAPIViewWithLabelsTests(TestCase):
             },
         )
         self.assertIsInstance(data["contributions"][0]["contribution_score"], float)
+
+    def test_contribution_preview_keeps_items_without_contribution_score(self):
+        """Preview serialization should only coerce contribution_score when present."""
+        mock_preview = [
+            {
+                "github_login": "alice",
+                "github_id": "123",
+                "contribution_score": 250.5,
+                "calculated_points": 100,
+                "adjusted_points": 100,
+            },
+            {
+                "github_login": "bob",
+                "github_id": "456",
+                "calculated_points": 80,
+                "adjusted_points": 80,
+            },
+        ]
+
+        with (
+            patch(
+                "points.allocation_services.AllocationService.preview_allocation",
+                return_value=mock_preview,
+            ),
+            patch("chdb.services.get_label_users", return_value={}),
+        ):
+            response = self.client.post(
+                reverse("points:api_contribution_preview"),
+                data={
+                    "project_scope": {"tags": ["github-microsoft-vscode"]},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                    "total_amount": 180,
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        contributions = response.json()["contributions"]
+        self.assertIn("contribution_score", contributions[0])
+        self.assertNotIn("contribution_score", contributions[1])
 
     def test_contribution_preview_without_project_tags(self):
         """Test contribution preview without project tags returns empty label info."""

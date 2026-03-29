@@ -31,7 +31,7 @@ test:
     @uv run coverage combine
     @uv run coverage json
     @uv run coverage report
-    @uv run python scripts/check_coverage.py coverage.json
+    @uv run python scripts/check_coverage.py coverage.json --line-threshold 95 --branch-threshold 85
     @uv run coverage report --skip-covered --skip-empty
 
 test-security:

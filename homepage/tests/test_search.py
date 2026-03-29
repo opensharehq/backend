@@ -304,3 +304,41 @@ class HomepageUserSearchTests(TestCase):
             cached_context,
         )
         self.assertEqual(response, mock_render.return_value)
+
+    def test_exact_match_redirect_survives_warm_partial_search_cache(self):
+        """User cache invalidation should prevent stale partial pages blocking redirects."""
+        cache.clear()
+        params = {"q": "ali"}
+
+        initial_response = self.client.get(self.search_url, params)
+
+        self.assertEqual(initial_response.status_code, 200)
+        self.assertTemplateUsed(initial_response, "homepage/search_results.html")
+
+        cache_key = homepage_views._build_search_cache_key(
+            query="ali",
+            filters=homepage_views.SearchFilters(),
+        )
+        self.assertIsNotNone(cache.get(cache_key))
+
+        ali = self.User.objects.create_user(
+            username="ali",
+            email="ali@example.com",
+            password="pass1234",
+            first_name="Ali",
+            last_name="Newcomer",
+        )
+        UserProfile.objects.create(
+            user=ali,
+            bio="Joined after the search cache warmed up",
+            company="OpenShare",
+            location="杭州",
+        )
+
+        redirected_response = self.client.get(self.search_url, params)
+
+        self.assertEqual(redirected_response.status_code, 302)
+        self.assertEqual(
+            redirected_response.url,
+            reverse("public_profile", args=["ali"]),
+        )

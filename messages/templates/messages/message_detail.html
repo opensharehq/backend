@@ -138,16 +138,19 @@
         // Markdown 内容
         const content = JSON.parse(document.getElementById('markdown-content').textContent);
 
-        // 配置 marked
-        marked.setOptions({
-            breaks: true,
-            gfm: true,
-            headerIds: true,
-            mangle: false
-        });
-
-        // 渲染 Markdown
-        document.getElementById('messageContent').innerHTML = marked.parse(content);
+        // 优先渲染 Markdown；外部脚本不可用时回退到纯文本，避免整页脚本失效。
+        if (window.marked) {
+            marked.setOptions({
+                breaks: true,
+                gfm: true,
+                headerIds: true,
+                mangle: false
+            });
+            document.getElementById('messageContent').innerHTML = marked.parse(content);
+        } else {
+            document.getElementById('messageContent').textContent = content;
+            console.warn('marked unavailable, rendered plain text content instead.');
+        }
 
         // 标记为未读
         function markAsUnread() {

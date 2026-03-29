@@ -37,38 +37,62 @@ addopts = "-q"
 
 [tool.mutmut]
 paths_to_mutate = [
+    "accounts/views.py",
     "common/load_testing.py",
     "common/middleware.py",
     "config/settings_helpers.py",
+    "points/allocation_services.py",
+    "points/services.py",
     "scripts/check_coverage.py",
 ]
 also_copy = [
+    "accounts/tests",
+    "chdb/tests",
     "common/__init__.py",
     "common/tests",
     "config/tests",
+    "contributions/tests",
     "homepage/tests",
+    "points/tests",
     "templates",
 ]
 pytest_add_cli_args = ["--import-mode=importlib"]
 pytest_add_cli_args_test_selection = [
+    "accounts/tests/test_views.py",
     "common/tests/test_load_testing.py",
     "config/tests/test_canonical_host_redirect_middleware.py",
     "config/tests/test_coverage_gate.py",
     "config/tests/test_settings_helpers_mutation.py",
+    "points/tests/test_allocation_contract.py",
+    "points/tests/test_allocation_services.py",
+    "points/tests/test_services.py",
 ]
 max_stack_depth = -1
 
 
 [tool.coverage.run]
 branch = true
+relative_files = true
+source = [
+    "accounts",
+    "chdb",
+    "common",
+    "config",
+    "contributions",
+    "homepage",
+    "messages",
+    "points",
+    "scripts",
+    "shop",
+]
 omit = [
     "manage.py",
     "*/migrations/*",
-    "*/admin.py",
     "*/conftest.py",
     "conftest.py",
     "*/tests/*",
     "*/tests.py",
+    "*/__init__.py",
 ]
 
 [tool.coverage.report]

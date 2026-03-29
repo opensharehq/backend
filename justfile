@@ -27,6 +27,7 @@ test:
     @uv run playwright install chromium
     @uv run coverage erase
     @DJANGO_LOG_LEVEL=ERROR uv run coverage run --concurrency=multiprocessing --parallel-mode manage.py test --exclude-tag=e2e --parallel --timing --durations 10
+    @DJANGO_LOG_LEVEL=ERROR uv run coverage run --parallel-mode manage.py test config.tests.test_asgi config.tests.test_wsgi config.tests.test_coverage_gate --timing
     @DJANGO_LOG_LEVEL=ERROR uv run coverage run --parallel-mode manage.py test config.tests.test_frontoffice_e2e config.tests.test_backoffice_e2e --timing --durations 10
     @uv run coverage combine
     @uv run coverage json

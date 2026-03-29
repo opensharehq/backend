@@ -2,12 +2,12 @@
 
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 
 from accounts.models import ShippingAddress
 from points import services as points_services
 from points.models import PointType
-from shop.admin import RedemptionAdmin, ShopItemAdmin
+from shop.admin import RedemptionAdmin, RedemptionInline, ShopItemAdmin
 from shop.models import Redemption, ShopItem
 from shop.services import redeem_item
 
@@ -24,6 +24,7 @@ class ShopItemAdminTests(TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.site = AdminSite()
+        self.factory = RequestFactory()
         self.admin = ShopItemAdmin(ShopItem, self.site)
 
     def test_requires_shipping_in_list_display(self):
@@ -57,6 +58,43 @@ class ShopItemAdminTests(TestCase):
         # Stock >= 10 returns plain number
         assert stock_display == 15
 
+    def test_stock_display_handles_infinite_and_low_stock(self):
+        """Test colorized stock display branches."""
+        unlimited = ShopItem.objects.create(
+            name="Unlimited",
+            description="Unlimited item",
+            cost=100,
+            stock=None,
+        )
+        low_stock = ShopItem.objects.create(
+            name="Low",
+            description="Low stock item",
+            cost=100,
+            stock=3,
+        )
+        sold_out = ShopItem.objects.create(
+            name="Sold out",
+            description="Sold out item",
+            cost=100,
+            stock=0,
+        )
+
+        assert "无限" in str(self.admin.stock_display(unlimited))
+        assert "orange" in str(self.admin.stock_display(low_stock))
+        assert "售罄" in str(self.admin.stock_display(sold_out))
+
+    def test_has_image_and_redemption_count_helpers(self):
+        """Test additional ShopItem admin helpers."""
+        item = ShopItem.objects.create(
+            name="With Image",
+            description="Test",
+            cost=100,
+            stock=5,
+        )
+
+        assert self.admin.has_image(item) is False
+        assert self.admin.redemption_count(item) == 0
+
 
 class RedemptionAdminTests(TestCase):
     """Test cases for RedemptionAdmin."""
@@ -64,6 +102,7 @@ class RedemptionAdminTests(TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.site = AdminSite()
+        self.factory = RequestFactory()
         self.admin = RedemptionAdmin(Redemption, self.site)
         self.user = get_user_model().objects.create_user(
             username="testuser",
@@ -189,3 +228,51 @@ class RedemptionAdminTests(TestCase):
 
         # Should show "无需发货"
         assert "无需发货" in result
+
+    def test_status_display_and_actions(self):
+        """Test redemption status formatting and batch actions."""
+        request = self.factory.post("/admin/shop/redemption/")
+        request.user = get_user_model().objects.create_superuser(
+            username="shop-admin",
+            email="shop-admin@example.com",
+            password="password123",
+        )
+        self.admin.message_user = MockRequest()
+        self.admin.message_user = lambda _request, _message: None
+
+        item = ShopItem.objects.create(
+            name="Action Item",
+            description="Action",
+            cost=100,
+            requires_shipping=False,
+        )
+        pending_redemption = Redemption.objects.create(
+            user_profile=self.user,
+            item=item,
+            points_cost_at_redemption=item.cost,
+        )
+        redemption = redeem_item(user=self.user, item_id=item.id)
+
+        assert "orange" in str(self.admin.status_display(pending_redemption))
+
+        self.admin.mark_as_completed(
+            request, Redemption.objects.filter(pk=redemption.pk)
+        )
+        redemption.refresh_from_db()
+        assert redemption.status == Redemption.StatusChoices.COMPLETED
+        assert "green" in str(self.admin.status_display(redemption))
+
+        self.admin.mark_as_cancelled(
+            request, Redemption.objects.filter(pk=redemption.pk)
+        )
+        redemption.refresh_from_db()
+        assert redemption.status == Redemption.StatusChoices.CANCELLED
+        assert "red" in str(self.admin.status_display(redemption))
+
+    def test_redemption_inline_disables_add_permission(self):
+        """Redemptions should remain read-only inside the ShopItem admin."""
+        inline = RedemptionInline(ShopItem, self.site)
+        request = self.factory.get("/admin/shop/shopitem/")
+        request.user = self.user
+
+        assert inline.has_add_permission(request) is False

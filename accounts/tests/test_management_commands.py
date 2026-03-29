@@ -1,10 +1,16 @@
 """Tests for accounts management commands."""
 
+from datetime import timedelta
 from io import StringIO
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import CommandError, call_command
 from django.test import TestCase
+from django.utils import timezone
+
+from accounts.models import AccountMergeRequest
+from accounts.services import AccountMergeError
 
 
 class SetAdminCommandTests(TestCase):
@@ -82,3 +88,94 @@ class SetAdminCommandTests(TestCase):
         call_command("setadmin", username=self.user.username, stdout=output)
 
         assert "already an admin" in output.getvalue().lower()
+
+
+class MergeAccountsCommandTests(TestCase):
+    """Exercise the merge_accounts management command branches."""
+
+    databases = {"default"}
+
+    def setUp(self):
+        """Create reusable source/target accounts for merge command tests."""
+        self.source = get_user_model().objects.create_user(
+            username="merge-source",
+            email="merge-source@example.com",
+            password="password123",
+        )
+        self.target = get_user_model().objects.create_user(
+            username="merge-target",
+            email="merge-target@example.com",
+            password="password123",
+        )
+
+    def _create_merge_request(self, **overrides):
+        """Create a pending merge request with reasonable defaults."""
+        return AccountMergeRequest.objects.create(
+            source_user=overrides.get("source_user", self.source),
+            target_user=overrides.get("target_user", self.target),
+            target_username_input=overrides.get(
+                "target_username_input",
+                self.target.username,
+            ),
+            status=overrides.get("status", AccountMergeRequest.Status.PENDING),
+            approve_token=overrides.get("approve_token", "merge-command-token"),
+            expires_at=overrides.get(
+                "expires_at",
+                timezone.now() + timedelta(days=1),
+            ),
+            asset_snapshot=overrides.get("asset_snapshot", {}),
+        )
+
+    @patch("accounts.management.commands.merge_accounts.perform_merge")
+    def test_runs_pending_request_and_prints_success(self, mock_perform_merge):
+        """Pending requests should be passed through to the merge service."""
+        merge_request = self._create_merge_request()
+        output = StringIO()
+
+        call_command("merge_accounts", request_id=str(merge_request.id), stdout=output)
+
+        mock_perform_merge.assert_called_once()
+        self.assertEqual(mock_perform_merge.call_args.args[0].id, merge_request.id)
+        self.assertIn("Merge completed for request", output.getvalue())
+        self.assertIn(str(merge_request.id), output.getvalue())
+
+    @patch("accounts.management.commands.merge_accounts.perform_merge")
+    def test_processed_request_warns_and_skips_merge(self, mock_perform_merge):
+        """Non-pending requests should emit a warning and exit early."""
+        merge_request = self._create_merge_request(
+            status=AccountMergeRequest.Status.ACCEPTED,
+            approve_token="processed-command-token",
+        )
+        output = StringIO()
+
+        call_command("merge_accounts", request_id=str(merge_request.id), stdout=output)
+
+        mock_perform_merge.assert_not_called()
+        self.assertIn("already processed", output.getvalue())
+        self.assertIn(AccountMergeRequest.Status.ACCEPTED, output.getvalue())
+
+    def test_missing_request_raises_command_error(self):
+        """Unknown request ids should produce a user-facing command error."""
+        with self.assertRaisesMessage(
+            CommandError,
+            "Merge request 00000000-0000-0000-0000-000000000000 does not exist",
+        ):
+            call_command(
+                "merge_accounts",
+                request_id="00000000-0000-0000-0000-000000000000",
+            )
+
+    @patch(
+        "accounts.management.commands.merge_accounts.perform_merge",
+        side_effect=AccountMergeError("service failed"),
+    )
+    def test_merge_service_error_is_promoted_to_command_error(
+        self, _mock_perform_merge
+    ):
+        """Service-level merge failures should abort the command cleanly."""
+        merge_request = self._create_merge_request(
+            approve_token="failing-command-token"
+        )
+
+        with self.assertRaisesMessage(CommandError, "service failed"):
+            call_command("merge_accounts", request_id=str(merge_request.id))

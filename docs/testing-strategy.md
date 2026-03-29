@@ -5,10 +5,28 @@
 ## 目标
 
 - 尽早发现业务回归，优先在模型、表单、服务和视图级别拦截问题。
+- 让 coverage 口径真实反映仓库源码范围，而不是只统计“刚好被报告看见”的文件。
 - 让高价值用户路径通过 E2E 得到端到端保障，但避免 E2E 数量失控。
 - 用安全回归测试守住 OWASP 基线，减少“功能没坏但安全退化了”的风险。
 - 用并发压测验证关键匿名流量场景在高并发下的稳定性。
 - 用 mutation testing 检查测试是否真的能识别逻辑被破坏后的行为差异。
+
+## Coverage 口径
+
+- 默认 coverage 范围是 repo-owned Python 源码根目录：
+  - `accounts/`
+  - `chdb/`
+  - `common/`
+  - `config/`
+  - `contributions/`
+  - `homepage/`
+  - `messages/`
+  - `points/`
+  - `scripts/`
+  - `shop/`
+- 排除项仅限测试、迁移、`__init__.py`、`manage.py` 和 `conftest.py`。
+- `admin.py`、管理命令、`config/asgi.py`、`config/wsgi.py`、脚本入口都属于 coverage denominator。
+- coverage gate 不只检查 line / branch 阈值，也会检查 coverage 报告是否遗漏了任何应统计源码文件。
 
 ## 分层职责
 
@@ -42,6 +60,7 @@
 职责：
 - 验证请求入口、权限边界、数据库状态变化
 - 覆盖“单个模块没问题，但组合起来会出错”的场景
+- 用固定夹具覆盖外部数据契约，例如 `chdb -> contributions -> points` 的字段形状和序列化约定
 
 推荐命令：
 - `just test`
@@ -56,6 +75,7 @@
 
 职责：
 - 验证真实页面交互、前后端连通性和关键文案可见性
+- 自动捕获同源页面上的 `pageerror`、`console.error`、失败的 `xhr` / `fetch` / 文档级 5xx 响应
 - 只覆盖最核心路径，不承担穷举职责
 
 推荐命令：
@@ -109,17 +129,21 @@
 
 ## Mutation Testing 策略
 
-Mutation testing 的目标不是替代 coverage，而是判断“测试是否真的足够敏感”。本仓库目前采用渐进式接入，只对一组高信噪模块执行 mutation：
+Mutation testing 的目标不是替代 coverage，而是判断“测试是否真的足够敏感”。本仓库目前采用渐进式接入，优先覆盖一组高信噪且高风险的模块：
 
+- `accounts/views.py`
 - `common/load_testing.py`
 - `common/middleware.py`
 - `config/settings_helpers.py`
+- `points/allocation_services.py`
+- `points/services.py`
 - `scripts/check_coverage.py`
 
 这样做的原因：
 - 这些模块边界清晰、执行快
-- 依赖少，mutation 结果更稳定
-- 适合作为首次接入的基线集合
+- 既覆盖基础设施逻辑，也覆盖账户入口与积分分配这类核心业务链路
+- 适合作为当前阶段的基线集合
+- 后台 admin、浏览器交互和真实外部环境烟测仍主要依赖常规测试与集成测试
 
 推荐命令：
 - `just mutmut`
@@ -127,8 +151,8 @@ Mutation testing 的目标不是替代 coverage，而是判断“测试是否真
 
 执行建议：
 - 夜间任务或预发布前运行
-- 当新增 helper / middleware / 脚本时，优先把它们纳入这组模块
-- 如果 mutation 结果长期稳定，再逐步扩展到更多业务代码
+- 当新增 helper / middleware / 核心服务时，优先把它们纳入这组模块
+- 如果 mutation 结果长期稳定，再逐步扩展到更多后台与业务代码
 
 ## 变更时如何选择测试
 
@@ -147,5 +171,6 @@ Mutation testing 的目标不是替代 coverage，而是判断“测试是否真
 
 - 新功能优先补单元或集成测试，不要默认增加 E2E。
 - E2E 只保留高价值主路径，避免把细枝末节堆到浏览器层。
+- 外部数据源默认用确定性的契约夹具守住接口形状；真实 ClickHouse 烟测应作为单独环境级检查，而不是默认 CI 前提。
 - 安全测试优先验证“禁止发生什么”，例如禁止外部跳转、禁止缺失 CSRF、禁止未信任 Host。
 - 压测和 mutation testing 都要控制范围，追求长期可执行，而不是一次性堆满工具。

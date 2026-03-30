@@ -6,7 +6,6 @@ from datetime import timedelta
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import (
-    authenticate,
     get_user_model,
     login,
     logout,
@@ -52,6 +51,7 @@ from .models import (
     WorkExperience,
 )
 from .services import AccountMergeError, perform_merge
+from .services.authentication import PasswordLoginError, authenticate_by_login_id
 from .tasks import send_password_reset_email
 
 
@@ -72,37 +72,10 @@ def sign_in_view(request):
         login_id = request.POST.get("login-id") or ""
         password = request.POST.get("password") or ""
 
-        UserModel = get_user_model()
-        username_match = UserModel.objects.filter(username=login_id).first()
-        email_user = None
-        if "@" in login_id:
-            email_qs = UserModel.objects.filter(email=login_id)
-            email_user = email_qs.filter(is_active=True).first() or email_qs.first()
-
-        user = authenticate(request, username=login_id, password=password)
-        if not user and email_user:
-            user = authenticate(
-                request, username=email_user.username, password=password
-            )
-
-        candidate_user = username_match or email_user
-
-        if not user:
-            if (
-                username_match
-                and username_match.merged_into_id
-                and login_id == username_match.username
-            ):
-                target = username_match.merged_into
-                target_label = target.email or target.username
-                error_message = f"该账号已合并到 {target_label}，请使用目标账号登录"
-            elif candidate_user and not candidate_user.is_active:
-                error_message = "账号已被停用，请联系管理员"
-            else:
-                error_message = "用户名或密码错误，请重试"
-            messages.error(request, error_message)
-        elif not user.is_active:
-            error_message = "账号已被停用，请联系管理员"
+        try:
+            user = authenticate_by_login_id(login_id, password, request=request)
+        except PasswordLoginError as exc:
+            error_message = exc.message
             messages.error(request, error_message)
         else:
             login(request, user, backend="django.contrib.auth.backends.ModelBackend")

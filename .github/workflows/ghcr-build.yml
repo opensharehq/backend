@@ -52,6 +52,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      - name: Install Playwright Chromium
+        run: uv run playwright install --with-deps chromium
+
       - name: Run Ruff check
         run: uvx ruff check .
 
@@ -65,13 +68,24 @@ jobs:
             --concurrency=multiprocessing \
             --parallel-mode \
             manage.py test \
+            --exclude-tag=e2e \
             --parallel \
+            --keepdb \
+            --timing \
+            --durations 10
+          uv run coverage run \
+            --parallel-mode \
+            manage.py test \
+            config.tests.test_frontoffice_e2e \
+            config.tests.test_backoffice_e2e \
             --keepdb \
             --timing \
             --durations 10
           uv run coverage combine
           uv run coverage xml
-          uv run coverage report --fail-under=90
+          uv run coverage json
+          uv run coverage report
+          uv run python scripts/check_coverage.py coverage.json --line-threshold 90 --branch-threshold 85
 
   build-and-push:
     runs-on: ubuntu-latest

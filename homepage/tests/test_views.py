@@ -1,4 +1,4 @@
-"""Tests for homepage app views."""
+"""Focused regression tests for the homepage index view."""
 
 from django.contrib.auth import get_user_model
 from django.test import Client, RequestFactory, override_settings
@@ -19,186 +19,98 @@ User = get_user_model()
     },
 )
 class HomepageViewTests(CacheClearTestCase):
-    """Test cases for homepage views."""
+    """Homepage tests that lock user-visible behavior rather than presentation noise."""
 
     def setUp(self):
-        """Set up test fixtures."""
+        """Set up a request factory and client."""
         self.factory = RequestFactory()
         self.client = Client()
 
-    def test_homepage_client_renders_template(self):
-        """Test that homepage renders correct template via client."""
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(
-            any(
-                template.name == "homepage/index.html"
-                for template in response.templates
-                if template.name is not None
-            )
-        )
-
-    def test_homepage_view_handles_request(self):
-        """Test that homepage view handles request correctly."""
-        request = self.factory.get("/")
-
-        response = index(request)
-
-        self.assertEqual(response.status_code, 200)
-
-    def test_homepage_url_resolves_to_index(self):
-        """Test that homepage URL resolves to index view."""
-        match = resolve("/")
-
-        self.assertEqual(match.func, index)
-
-    def test_homepage_url_reverse_resolves_correctly(self):
-        """Test that homepage URL can be reversed correctly."""
-        url = reverse("homepage:index")
-
-        self.assertEqual(url, "/")
-
-    def test_homepage_returns_correct_content_type(self):
-        """Test that homepage returns HTML content type."""
+    def test_homepage_renders_index_template_with_html_response(self):
+        """GET / should render the homepage template as HTML."""
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response["Content-Type"])
-
-    def test_homepage_contains_expected_content(self):
-        """Test that homepage contains expected Chinese content."""
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
-        self.assertIn("OpenShare", content)
-        self.assertIn("开源贡献激励平台", content)
-
-    def test_homepage_with_authenticated_user(self):
-        """Test that homepage displays correctly for authenticated users."""
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
+        self.assertIn(
+            "homepage/index.html",
+            [template.name for template in response.templates if template.name],
         )
-        self.client.force_login(user)
+        self.assertContains(response, "OpenShare")
+        self.assertContains(response, "开源贡献激励平台")
 
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.context["user"].is_authenticated)
-        self.assertEqual(response.context["user"], user)
-        content = response.content.decode("utf-8")
-        # Check for user-specific content
-        self.assertTrue("testuser" in content or "个人资料" in content)
-
-    def test_homepage_with_anonymous_user(self):
-        """Test that homepage displays correctly for anonymous users."""
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.context["user"].is_authenticated)
-        content = response.content.decode("utf-8")
-        # Check for login/signup buttons
-        self.assertIn("登录", content)
-        self.assertIn("注册", content)
-
-    def test_homepage_get_request_direct_view_call(self):
-        """Test homepage view with GET request using RequestFactory."""
+    def test_homepage_supports_get_and_head_requests(self):
+        """GET should render content and HEAD should reuse the same status without a body."""
         request = self.factory.get("/")
-
         response = index(request)
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"OpenShare", response.content)
 
-    def test_homepage_post_request_not_allowed(self):
-        """Test that POST requests to homepage return 405 Method Not Allowed."""
+        head_response = self.client.head("/")
+        self.assertEqual(head_response.status_code, 200)
+        self.assertEqual(head_response.content, b"")
+
+    def test_homepage_post_matches_current_rendering_contract(self):
+        """POST / currently renders the same landing page instead of rejecting the method."""
         response = self.client.post("/")
 
-        # Django's generic views return 405 for disallowed methods,
-        # but our function-based view doesn't explicitly handle this.
-        # It will still render the page, which is acceptable for a simple view.
-        # If we want strict REST semantics, we'd need to add method checking.
-        self.assertIn(response.status_code, [200, 405])
-
-    def test_homepage_uses_correct_template_name(self):
-        """Test that the correct template is used for rendering."""
-        response = self.client.get("/")
-
         self.assertEqual(response.status_code, 200)
-        template_names = [t.name for t in response.templates if t.name]
-        self.assertIn("homepage/index.html", template_names)
+        self.assertIn(
+            "homepage/index.html",
+            [template.name for template in response.templates if template.name],
+        )
+        self.assertContains(response, "OpenShare")
 
-    def test_homepage_template_has_required_sections(self):
-        """Test that homepage template contains all required sections."""
+    def test_homepage_url_resolves_and_reverses(self):
+        """The homepage route should keep resolving to the index view."""
+        self.assertEqual(resolve("/").func, index)
+        self.assertEqual(reverse("homepage:index"), "/")
+
+    def test_anonymous_users_see_sign_in_and_sign_up_links(self):
+        """Anonymous visitors should be prompted to sign in or register."""
         response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
         content = response.content.decode("utf-8")
 
-        # Check for key sections
-        self.assertIn("hero-section", content)  # Hero section
-        self.assertIn("stats-section", content)  # Statistics
-        self.assertIn("features", content)  # Features section
-        self.assertIn("benefits", content)  # Benefits section
-        self.assertIn("footer", content)  # Footer
+        self.assertFalse(response.context["user"].is_authenticated)
+        self.assertIn(f'href="{reverse("accounts:sign_in")}"', content)
+        self.assertIn(f'href="{reverse("accounts:sign_up")}"', content)
 
-    def test_homepage_includes_meta_tags(self):
-        """Test that homepage includes proper meta tags for SEO."""
+    def test_authenticated_users_see_profile_and_logout_links(self):
+        """Authenticated visitors should get account navigation instead of auth CTAs."""
+        user = User.objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+
         response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
         content = response.content.decode("utf-8")
 
-        # Check meta tags
-        self.assertIn('name="description"', content)
-        self.assertIn('name="keywords"', content)
-        self.assertIn('name="author"', content)
-        self.assertIn("OpenShare", content)
+        self.assertTrue(response.context["user"].is_authenticated)
+        self.assertEqual(response.context["user"], user)
+        self.assertIn(f'href="{reverse("accounts:profile")}"', content)
+        self.assertIn(f'href="{reverse("accounts:logout")}"', content)
+        self.assertIn("个人资料", content)
 
-    def test_homepage_includes_static_files(self):
-        """Test that homepage template includes necessary static files."""
+    def test_homepage_contains_core_sections_and_cta_copy(self):
+        """The landing page should keep its core navigation, stats, and CTA content."""
         response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
         content = response.content.decode("utf-8")
 
-        # Check for NobleUI CSS
-        self.assertIn("nobleui/vendors/core/core.css", content)
-        self.assertIn("nobleui/css/demo2/style.css", content)
-
-        # Check for scripts
-        self.assertIn("nobleui/vendors/lucide/lucide.min.js", content)
-        self.assertIn("lucide.createIcons()", content)
-
-    def test_homepage_charset_is_utf8(self):
-        """Test that homepage uses UTF-8 charset for Chinese content."""
-        response = self.client.get("/")
-
         self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
-        self.assertTrue('charset="UTF-8"' in content or 'charset="utf-8"' in content)
+        self.assertIn("hero-section", content)
+        self.assertIn("stats-section", content)
+        self.assertIn('id="features"', content)
+        self.assertIn('id="benefits"', content)
+        self.assertIn("注册开发者", content)
+        self.assertIn("项目贡献", content)
+        self.assertIn("积分发放", content)
+        self.assertIn("准备好开始了吗？", content)
 
-    def test_homepage_language_is_chinese(self):
-        """Test that homepage language is set to Chinese."""
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
-        self.assertIn('lang="zh-CN"', content)
-
-    def test_homepage_responsive_viewport_meta(self):
-        """Test that homepage includes responsive viewport meta tag."""
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
-        self.assertIn('name="viewport"', content)
-        self.assertIn("width=device-width", content)
-
-    def test_homepage_xss_protection_in_template(self):
-        """Test that template properly escapes user input to prevent XSS."""
-        # Create user with potentially malicious username
+    def test_homepage_escapes_username_fragments_in_user_menu(self):
+        """User-controlled names should still be escaped before they reach the UI."""
         user = User.objects.create_user(
             username="<script>alert('xss')</script>",
             email="xss@example.com",
@@ -207,134 +119,25 @@ class HomepageViewTests(CacheClearTestCase):
         self.client.force_login(user)
 
         response = self.client.get("/")
+        content = response.content.decode("utf-8")
 
         self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
-        # Django templates auto-escape by default, and template uses slice:":2"
-        # which only shows first 2 characters, then uppercases them
         self.assertNotIn("<script>alert('xss')</script>", content)
-        self.assertNotIn("alert('xss')", content)  # Script should not execute
-        # Template escapes < to &lt;, slices first 2 chars (&l), then uppercases to &L
-        # But actually it escapes AFTER slicing, so we get &lt;S
-        self.assertTrue(
-            "&lt;S" in content
-        )  # Escaped, + first letter of "script" uppercased
+        self.assertNotIn("alert('xss')", content)
+        self.assertIn("&lt;S", content)
 
-    def test_homepage_contains_navigation_links(self):
-        """Test that homepage contains expected navigation links."""
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
-
-        # Check for navigation
-        self.assertIn("功能", content)  # Features link
-        self.assertIn("优势", content)  # Benefits link
-
-    def test_homepage_contains_social_proof_stats(self):
-        """Test that homepage displays social proof statistics."""
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
-
-        # Check for stats
-        self.assertIn("注册开发者", content)
-        self.assertIn("项目贡献", content)
-        self.assertIn("积分发放", content)
-
-    def test_homepage_request_with_query_parameters(self):
-        """Test homepage handles query parameters gracefully."""
+    def test_homepage_handles_query_parameters_without_changing_content(self):
+        """Tracking parameters should not change the rendered landing page."""
         response = self.client.get("/?ref=github&utm_source=social")
 
         self.assertEqual(response.status_code, 200)
-        # View should ignore query params but still render correctly
+        self.assertContains(response, "OpenShare")
 
-    def test_homepage_request_with_different_http_headers(self):
-        """Test homepage handles various HTTP headers correctly."""
-        response = self.client.get(
-            "/",
-            HTTP_USER_AGENT="Mozilla/5.0 TestBot",
-            HTTP_ACCEPT_LANGUAGE="zh-CN,zh;q=0.9,en;q=0.8",
-        )
+    def test_homepage_anonymous_responses_are_stable_between_requests(self):
+        """Anonymous homepage responses should be deterministic across repeated requests."""
+        first_response = self.client.get("/")
+        second_response = self.client.get("/")
 
-        self.assertEqual(response.status_code, 200)
-
-    def test_homepage_head_request(self):
-        """Test homepage responds to HEAD requests."""
-        response = self.client.head("/")
-
-        # HEAD requests should return same status as GET but no body
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.content), 0)
-
-    def test_homepage_multiple_requests_consistency(self):
-        """Test that multiple requests to homepage return consistent results."""
-        response1 = self.client.get("/")
-        response2 = self.client.get("/")
-
-        self.assertEqual(response1.status_code, 200)
-        self.assertEqual(response2.status_code, 200)
-        # Content should be identical for anonymous users
-        self.assertEqual(response1.content, response2.content)
-
-    def test_homepage_view_callable(self):
-        """Test that index view is callable."""
-        self.assertTrue(callable(index))
-
-    def test_homepage_contains_cta_section(self):
-        """Test that homepage contains call-to-action section."""
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
-
-        self.assertTrue("准备好开始了吗" in content or "立即注册" in content)
-
-
-class TestHomepageIntegration(CacheClearTestCase):
-    """Integration tests for homepage view with full request/response cycle."""
-
-    def setUp(self):
-        """Set up test client."""
-        self.client = Client()
-
-    def test_homepage_full_request_cycle(self):
-        """Test complete request/response cycle for homepage."""
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(
-            "homepage/index.html", [t.name for t in response.templates if t.name]
-        )
-
-    def test_homepage_with_session_data(self):
-        """Test homepage with session data present."""
-        session = self.client.session
-        session["test_key"] = "test_value"
-        session.save()
-
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-
-    def test_homepage_url_name_resolution(self):
-        """Test homepage URL name can be resolved."""
-        url = reverse("homepage:index")
-
-        self.assertEqual(url, "/")
-
-    def test_homepage_with_authenticated_user_profile_link(self):
-        """Test authenticated user sees profile-related links."""
-        user = User.objects.create_user(
-            username="profileuser", email="profile@test.com", password="pass123"
-        )
-        self.client.force_login(user)
-
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
-        self.assertTrue(
-            "个人资料" in content or "PR" in content
-        )  # Profile or user initials
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(first_response.content, second_response.content)

@@ -19,7 +19,14 @@ class ConfigSettingsBranchTests(SimpleTestCase):
         original_env = os.environ.copy()
         original_argv = sys.argv[:]
         try:
-            os.environ.update(env)
+            effective_env = original_env.copy()
+            for key, value in env.items():
+                if value is None:
+                    effective_env.pop(key, None)
+                else:
+                    effective_env[key] = value
+            os.environ.clear()
+            os.environ.update(effective_env)
             if argv is not None:
                 sys.argv = argv
             sys.modules.pop("config.settings", None)
@@ -50,7 +57,7 @@ class ConfigSettingsBranchTests(SimpleTestCase):
     def test_debug_toolbar_injected_when_available(self):
         fake_toolbar = mock.MagicMock()
         reloaded = self.reload_settings(
-            env={"DEBUG": "true"},
+            env={"DEBUG": "true", "PYTEST_VERSION": None},
             argv=["manage.py"],
             extra_modules={"debug_toolbar": fake_toolbar},
         )
@@ -70,9 +77,13 @@ class ConfigSettingsBranchTests(SimpleTestCase):
         self.assertNotIn("debug_toolbar", reloaded.INSTALLED_APPS)
 
     def test_security_flags_enabled_for_production(self):
-        reloaded = self.reload_settings(env={"DEBUG": "false"}, argv=["manage.py"])
+        reloaded = self.reload_settings(
+            env={"DEBUG": "false", "PYTEST_VERSION": None},
+            argv=["manage.py"],
+        )
         self.assertTrue(reloaded.SECURE_SSL_REDIRECT)
         self.assertTrue(reloaded.SECURE_HSTS_INCLUDE_SUBDOMAINS)
+        self.assertEqual(reloaded.SECURE_REFERRER_POLICY, "same-origin")
         self.assertEqual(reloaded.SESSION_COOKIE_SAMESITE, "Strict")
 
 

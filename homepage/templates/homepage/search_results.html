@@ -44,7 +44,7 @@
         <form method="get" class="row g-3 align-items-end">
             <input type="hidden" name="q" value="{{ query }}" />
 
-            <div class="col-md-3 col-sm-6">
+            <div class="col-md-4 col-sm-6">
                 <label class="filter-label" for="filter-location">所在地</label>
                 <select class="form-select" id="filter-location" name="location">
                     <option value="">全部</option>
@@ -54,7 +54,7 @@
                 </select>
             </div>
 
-            <div class="col-md-3 col-sm-6">
+            <div class="col-md-4 col-sm-6">
                 <label class="filter-label" for="filter-company">公司 / 组织</label>
                 <select class="form-select" id="filter-company" name="company">
                     <option value="">全部</option>
@@ -65,24 +65,9 @@
             </div>
 
             <div class="col-md-2 col-sm-6">
-                <label class="filter-label" for="filter-min-points">最低积分</label>
-                <input
-                    type="number"
-                    class="form-control"
-                    id="filter-min-points"
-                    name="min_points"
-                    min="0"
-                    value="{{ filters.min_points }}"
-                    placeholder="例如 100"
-                />
-            </div>
-
-            <div class="col-md-2 col-sm-6">
                 <label class="filter-label" for="filter-sort">排序</label>
                 <select class="form-select" id="filter-sort" name="sort">
                     <option value="relevance" {% if filters.sort == "relevance" %}selected{% endif %}>按活跃度</option>
-                    <option value="points_desc" {% if filters.sort == "points_desc" %}selected{% endif %}>积分从高到低</option>
-                    <option value="points_asc" {% if filters.sort == "points_asc" %}selected{% endif %}>积分从低到高</option>
                     <option value="username" {% if filters.sort == "username" %}selected{% endif %}>按用户名排序</option>
                 </select>
             </div>
@@ -157,11 +142,7 @@
                                 <span x-text="user.company || '自由职业者'"></span>
                             </span>
                         </div>
-                        <div class="d-flex justify-content-between align-items-center mt-auto">
-                            <div class="fw-semibold text-primary">
-                                <span class="me-1">积分</span>
-                                <span x-text="formatPoints(user.total_points)"></span>
-                            </div>
+                        <div class="d-flex justify-content-end align-items-center mt-auto">
                             <a :href="user.profile_url" class="btn btn-outline-primary btn-sm">查看主页</a>
                         </div>
                     </div>
@@ -253,11 +234,6 @@
                     this.pageSize = size;
                     this.currentPage = 1;
                 },
-
-                formatPoints(value) {
-                    return new Intl.NumberFormat("zh-CN").format(value || 0);
-                },
-
                 refreshIcons() {
                     this.$nextTick(() => {
                         if (window.lucide) {

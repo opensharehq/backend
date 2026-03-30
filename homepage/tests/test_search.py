@@ -1,5 +1,7 @@
 """Tests for homepage user search view."""
 
+import json
+import re
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -53,6 +55,17 @@ class HomepageUserSearchTests(TestCase):
             location="北京",
         )
 
+    def _extract_results_payload(self, response):
+        """Extract search results JSON payload embedded by json_script."""
+        html = response.content.decode("utf-8")
+        match = re.search(
+            r'<script id="search-results-data" type="application/json">(.*?)</script>',
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "Expected search-results-data payload in response.")
+        return json.loads(match.group(1))
+
     def test_redirects_on_exact_username_match(self):
         """Exact matches should redirect to the public profile page."""
         response = self.client.get(self.search_url, {"q": "Alice"})
@@ -66,8 +79,8 @@ class HomepageUserSearchTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "homepage/search_results.html")
-        self.assertIn("results", response.context)
-        usernames = {item["username"] for item in response.context["results"]}
+        payload = self._extract_results_payload(response)
+        usernames = {item["username"] for item in payload}
         self.assertIn("alice", usernames)
         self.assertIn("bob", usernames)
         self.assertContains(response, "search-results-data")
@@ -80,7 +93,7 @@ class HomepageUserSearchTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        results = response.context["results"]
+        results = self._extract_results_payload(response)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["username"], "alice")
         self.assertEqual(results[0]["location"], "上海")
@@ -93,7 +106,7 @@ class HomepageUserSearchTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        results = response.context["results"]
+        results = self._extract_results_payload(response)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["username"], "alice")
         self.assertEqual(results[0]["company"], "OpenShare")
@@ -109,13 +122,36 @@ class HomepageUserSearchTests(TestCase):
         """Context contains metadata for the filter summary."""
         response = self.client.get(self.search_url, {"q": "example"})
 
-        # In parallel tests, response.context may be None due to template caching
-        # Skip context checks if context is not available
-        if response.context is None:
-            self.skipTest("Context not available in parallel test mode")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "共找到 2 位用户")
+        self.assertContains(response, 'option value="relevance" selected')
 
-        self.assertGreaterEqual(response.context["results_count"], 2)
-        self.assertEqual(response.context["filters"]["sort"], "relevance")
+    def test_results_page_only_exposes_supported_filter_controls(self):
+        """The results page should only render filters supported by the backend."""
+        response = self.client.get(self.search_url, {"q": "example"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="location"')
+        self.assertContains(response, 'name="company"')
+        self.assertContains(response, 'option value="username"')
+        self.assertNotContains(response, 'name="min_points"')
+        self.assertNotContains(response, 'option value="points_desc"')
+        self.assertNotContains(response, 'option value="points_asc"')
+
+    def test_invalid_sort_value_falls_back_to_relevance(self):
+        """Unsupported sort values should fall back to the default ordering."""
+        request = self.factory.get(
+            self.search_url,
+            {"q": "example", "sort": "points_desc"},
+        )
+        filters = homepage_views.SearchFilters.from_request(request)
+
+        self.assertEqual(filters.sort, homepage_views.SearchFilters.DEFAULT_SORT)
+
+        response = self.client.get(
+            self.search_url, {"q": "example", "sort": "points_desc"}
+        )
+        self.assertContains(response, 'option value="relevance" selected')
 
     @override_settings(
         CACHES={
@@ -131,21 +167,12 @@ class HomepageUserSearchTests(TestCase):
 
         initial_response = self.client.get(self.search_url, params)
         self.assertEqual(initial_response.status_code, 200)
-
-        # In parallel tests, response.context may be None due to template caching
-        if initial_response.context is None:
-            self.skipTest("Context not available in parallel test mode")
-
-        self.assertEqual(len(initial_response.context["results"]), 2)
+        self.assertEqual(len(self._extract_results_payload(initial_response)), 2)
 
         initial_version = get_search_cache_version()
 
         cached_again = self.client.get(self.search_url, params)
-
-        if cached_again.context is None:
-            self.skipTest("Context not available in parallel test mode")
-
-        self.assertEqual(len(cached_again.context["results"]), 2)
+        self.assertEqual(len(self._extract_results_payload(cached_again)), 2)
 
         filters = homepage_views.SearchFilters()
         cache_key = homepage_views._build_search_cache_key(
@@ -173,9 +200,83 @@ class HomepageUserSearchTests(TestCase):
         self.assertNotEqual(initial_version, updated_version)
 
         refreshed_response = self.client.get(self.search_url, params)
-        usernames = {item["username"] for item in refreshed_response.context["results"]}
+        usernames = {
+            item["username"]
+            for item in self._extract_results_payload(refreshed_response)
+        }
         self.assertIn("charlie", usernames)
         cache.clear()
+
+    def test_cached_search_reuses_payload_without_serializing_users_again(self):
+        """A cache hit should bypass result serialization for repeated queries."""
+        cache.clear()
+        params = {"q": "example"}
+
+        with patch(
+            "homepage.views._serialize_user",
+            wraps=homepage_views._serialize_user,
+        ) as serializer:
+            first_response = self.client.get(self.search_url, params)
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertGreater(serializer.call_count, 0)
+
+        with patch(
+            "homepage.views._serialize_user",
+            wraps=homepage_views._serialize_user,
+        ) as serializer:
+            second_response = self.client.get(self.search_url, params)
+
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(serializer.call_count, 0)
+        self.assertEqual(
+            self._extract_results_payload(first_response),
+            self._extract_results_payload(second_response),
+        )
+
+    def test_cached_search_hit_avoids_database_queries(self):
+        """A warm cache hit should render the results page without touching the database."""
+        filters = homepage_views.SearchFilters()
+        cache_key = homepage_views._build_search_cache_key(
+            query="example",
+            filters=filters,
+        )
+        cache.set(
+            cache_key,
+            {
+                "query": "example",
+                "results": [
+                    {
+                        "username": "cached-user",
+                        "display_name": "Cached User",
+                        "bio": "cached bio",
+                        "company": "Cached Co",
+                        "location": "Shanghai",
+                        "profile_url": "/cached-user/",
+                        "avatar_url": "https://example.com/avatar.png",
+                    }
+                ],
+                "results_count": 1,
+                "max_results": homepage_views.MAX_SEARCH_RESULTS,
+                "filters": {
+                    "location": "",
+                    "company": "",
+                    "sort": homepage_views.SearchFilters.DEFAULT_SORT,
+                },
+                "available_locations": [],
+                "available_companies": [],
+                "page_size": homepage_views.PAGE_SIZE,
+                "exact_match_username": None,
+            },
+            homepage_views.SEARCH_RESULTS_CACHE_TIMEOUT,
+        )
+        request = self.factory.get(self.search_url, {"q": "example"})
+
+        with self.assertNumQueries(0):
+            response = homepage_views.user_search(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("cached-user", response.content.decode("utf-8"))
 
     def test_cached_search_short_circuits_with_cached_context(self):
         """When cached context exists the view should return it immediately."""
@@ -184,6 +285,7 @@ class HomepageUserSearchTests(TestCase):
             "results": [],
             "results_count": 0,
             "filters": {},
+            "exact_match_username": None,
         }
         request = self.factory.get(self.search_url, {"q": "example"})
 
@@ -204,3 +306,129 @@ class HomepageUserSearchTests(TestCase):
             cached_context,
         )
         self.assertEqual(response, mock_render.return_value)
+
+    def test_exact_match_redirect_takes_precedence_over_cached_context(self):
+        """Exact username hits should redirect even when a stale cache entry exists."""
+        cache.set(
+            homepage_views._build_search_cache_key(
+                query="alice",
+                filters=homepage_views.SearchFilters(),
+            ),
+            {
+                "query": "alice",
+                "results": [{"username": "cached-user"}],
+                "results_count": 1,
+                "max_results": homepage_views.MAX_SEARCH_RESULTS,
+                "filters": {
+                    "location": "",
+                    "company": "",
+                    "sort": homepage_views.SearchFilters.DEFAULT_SORT,
+                },
+                "available_locations": [],
+                "available_companies": [],
+                "page_size": homepage_views.PAGE_SIZE,
+            },
+            homepage_views.SEARCH_RESULTS_CACHE_TIMEOUT,
+        )
+
+        response = self.client.get(self.search_url, {"q": "alice"})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("public_profile", args=["alice"]))
+
+    def test_cached_search_redirects_when_cache_records_exact_match_username(self):
+        """Cache entries that already know the exact match should redirect immediately."""
+        cache.set(
+            homepage_views._build_search_cache_key(
+                query="alice",
+                filters=homepage_views.SearchFilters(),
+            ),
+            {
+                "query": "alice",
+                "results": [],
+                "results_count": 0,
+                "max_results": homepage_views.MAX_SEARCH_RESULTS,
+                "filters": {
+                    "location": "",
+                    "company": "",
+                    "sort": homepage_views.SearchFilters.DEFAULT_SORT,
+                },
+                "available_locations": [],
+                "available_companies": [],
+                "page_size": homepage_views.PAGE_SIZE,
+                "exact_match_username": "alice",
+            },
+            homepage_views.SEARCH_RESULTS_CACHE_TIMEOUT,
+        )
+
+        response = self.client.get(self.search_url, {"q": "alice"})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("public_profile", args=["alice"]))
+
+    def test_legacy_cached_search_without_marker_renders_when_no_exact_match(self):
+        """Legacy cache entries should still render when no exact-match user exists."""
+        cache.set(
+            homepage_views._build_search_cache_key(
+                query="ghost",
+                filters=homepage_views.SearchFilters(),
+            ),
+            {
+                "query": "ghost",
+                "results": [{"username": "ghost-result"}],
+                "results_count": 1,
+                "max_results": homepage_views.MAX_SEARCH_RESULTS,
+                "filters": {
+                    "location": "",
+                    "company": "",
+                    "sort": homepage_views.SearchFilters.DEFAULT_SORT,
+                },
+                "available_locations": [],
+                "available_companies": [],
+                "page_size": homepage_views.PAGE_SIZE,
+            },
+            homepage_views.SEARCH_RESULTS_CACHE_TIMEOUT,
+        )
+
+        response = self.client.get(self.search_url, {"q": "ghost"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "ghost-result")
+
+    def test_exact_match_redirect_survives_warm_partial_search_cache(self):
+        """User cache invalidation should prevent stale partial pages blocking redirects."""
+        cache.clear()
+        params = {"q": "ali"}
+
+        initial_response = self.client.get(self.search_url, params)
+
+        self.assertEqual(initial_response.status_code, 200)
+        self.assertTemplateUsed(initial_response, "homepage/search_results.html")
+
+        cache_key = homepage_views._build_search_cache_key(
+            query="ali",
+            filters=homepage_views.SearchFilters(),
+        )
+        self.assertIsNotNone(cache.get(cache_key))
+
+        ali = self.User.objects.create_user(
+            username="ali",
+            email="ali@example.com",
+            password="pass1234",
+            first_name="Ali",
+            last_name="Newcomer",
+        )
+        UserProfile.objects.create(
+            user=ali,
+            bio="Joined after the search cache warmed up",
+            company="OpenShare",
+            location="杭州",
+        )
+
+        redirected_response = self.client.get(self.search_url, params)
+
+        self.assertEqual(redirected_response.status_code, 302)
+        self.assertEqual(
+            redirected_response.url,
+            reverse("public_profile", args=["ali"]),
+        )

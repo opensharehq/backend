@@ -121,7 +121,14 @@ class SettingsBranchCoverageTests(SimpleTestCase):
         original_env = os.environ.copy()
         original_argv = sys.argv[:]
         try:
-            os.environ.update(env_overrides)
+            effective_env = original_env.copy()
+            for key, value in env_overrides.items():
+                if value is None:
+                    effective_env.pop(key, None)
+                else:
+                    effective_env[key] = value
+            os.environ.clear()
+            os.environ.update(effective_env)
             if argv is not None:
                 sys.argv = argv
             with mock.patch.dict(sys.modules, extra_modules, clear=False):
@@ -152,7 +159,7 @@ class SettingsBranchCoverageTests(SimpleTestCase):
         fake_debug_toolbar = mock.MagicMock(toolbar=mock_toolbar)
 
         reloaded = self.reload_settings(
-            env_overrides={"DEBUG": "true"},
+            env_overrides={"DEBUG": "true", "PYTEST_VERSION": None},
             argv=["manage.py"],
             extra_modules={
                 "debug_toolbar": fake_debug_toolbar,
@@ -166,11 +173,16 @@ class SettingsBranchCoverageTests(SimpleTestCase):
     def test_security_flags_enabled_in_production(self):
         """When DEBUG is false, security-related settings should be enforced."""
         reloaded = self.reload_settings(
-            env_overrides={"DEBUG": "false"},
+            env_overrides={"DEBUG": "false", "PYTEST_VERSION": None},
             argv=["manage.py"],
         )
         self.assertTrue(reloaded.SECURE_SSL_REDIRECT)
         self.assertTrue(reloaded.SECURE_HSTS_PRELOAD)
+        self.assertEqual(reloaded.SECURE_REFERRER_POLICY, "same-origin")
+        self.assertEqual(
+            reloaded.SECURE_CROSS_ORIGIN_OPENER_POLICY,
+            "same-origin",
+        )
         self.assertEqual(reloaded.SESSION_COOKIE_SAMESITE, "Strict")
 
     @override_settings(DEBUG=True, TESTING=False)
@@ -178,6 +190,7 @@ class SettingsBranchCoverageTests(SimpleTestCase):
         """config.urls should append debug toolbar URLs when available."""
         mock_toolbar = mock.MagicMock()
         mock_toolbar.debug_toolbar_urls.return_value = ["dbg/"]
+        sys.modules.pop("config.urls", None)
         with mock.patch.dict(
             sys.modules,
             {
@@ -186,7 +199,5 @@ class SettingsBranchCoverageTests(SimpleTestCase):
             },
             clear=False,
         ):
-            from config import urls
-
-            importlib.reload(urls)
+            urls = importlib.import_module("config.urls")
             self.assertIn("dbg/", urls.urlpatterns[-1])

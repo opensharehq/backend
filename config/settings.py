@@ -2,6 +2,8 @@
 
 import os
 import sys
+import tempfile
+import warnings
 from pathlib import Path
 
 import environ
@@ -219,7 +221,11 @@ AUTH_PASSWORD_VALIDATORS = [
 
 
 STATIC_URL = "static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+if TESTING:
+    STATIC_ROOT = Path(tempfile.gettempdir()) / "fullsite-staticfiles"
+    STATIC_ROOT.mkdir(parents=True, exist_ok=True)
+else:
+    STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
 LOG_DIR = BASE_DIR / "logs"
@@ -237,6 +243,18 @@ STORAGES = {
 CACHES = build_cache_settings(DEBUG and not TESTING, REDIS_URL, TESTING)
 CACHE_MIDDLEWARE_KEY_PREFIX = "middleware_cache_"
 CACHE_MIDDLEWARE_SECONDS = 300
+
+if TESTING:
+    warnings.filterwarnings(
+        "error",
+        message=r"No directory at: .*",
+        category=UserWarning,
+    )
+    warnings.filterwarnings(
+        "error",
+        message=r"DateTimeField .* received a naive datetime .*",
+        category=RuntimeWarning,
+    )
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -515,6 +533,8 @@ if not DEBUG:
     # Content Security
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_BROWSER_XSS_FILTER = True
+    SECURE_REFERRER_POLICY = "same-origin"
+    SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
     X_FRAME_OPTIONS = "DENY"
 
     # Session security

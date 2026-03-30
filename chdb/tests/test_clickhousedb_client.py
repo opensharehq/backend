@@ -64,6 +64,28 @@ class ClickHouseDBTests(ClickHouseMonkeyPatchedTestCase):
         self.assertTrue(all(inst is instances[0] for inst in instances))
         self.get_client_mock.assert_called_once()
 
+    def test_get_instance_uses_connection_created_while_waiting_for_lock(self):
+        """If another thread sets the singleton before the second check, get_client is skipped."""
+        existing_client = Mock(name="existing_clickhouse_client")
+        original_lock = ClickHouseDB._lock
+
+        class LockThatPublishesInstance:
+            def __enter__(self_inner):
+                ClickHouseDB._instance = existing_client
+
+            def __exit__(self_inner, exc_type, exc, tb):
+                return False
+
+        ClickHouseDB._instance = None
+        ClickHouseDB._lock = LockThatPublishesInstance()
+        try:
+            instance = ClickHouseDB.get_instance()
+        finally:
+            ClickHouseDB._lock = original_lock
+
+        self.assertIs(instance, existing_client)
+        self.get_client_mock.assert_not_called()
+
     def test_reset_connection(self):
         """reset_connection should close and clear instance."""
         instance1 = ClickHouseDB.get_instance()

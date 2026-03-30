@@ -246,6 +246,53 @@ class RedeemConfirmAddressSelectionTests(TestCase):
         self.assertIsNotNone(redemption)
         self.assertEqual(redemption.shipping_address_id, address2.id)
 
+    def test_redemption_with_other_users_address_is_rejected(self):
+        """Posting another user's address should fail without side effects."""
+        item = ShopItem.objects.create(
+            name="Physical Item",
+            description="Test",
+            cost=100,
+            requires_shipping=True,
+        )
+        ShippingAddress.objects.create(
+            user=self.user,
+            receiver_name="我的地址",
+            phone="13800138000",
+            province="北京",
+            city="北京市",
+            district="朝阳区",
+            address="地址1",
+            is_default=True,
+        )
+        other_user = get_user_model().objects.create_user(
+            username="otheruser",
+            email="other@example.com",
+            password="password123",
+        )
+        other_address = ShippingAddress.objects.create(
+            user=other_user,
+            receiver_name="陌生人",
+            phone="13800000000",
+            province="北京",
+            city="北京市",
+            district="海淀区",
+            address="地址X",
+            is_default=True,
+        )
+        initial_balance = points_services.get_balance(self.user, PointType.GIFT)
+
+        response = self.client.post(
+            reverse("accounts:redeem_confirm", args=[item.id]),
+            {"shipping_address": other_address.id},
+        )
+
+        self.assertRedirects(response, reverse("accounts:shop_list"))
+        self.assertEqual(self.user.redemptions.count(), 0)
+        self.assertEqual(
+            points_services.get_balance(self.user, PointType.GIFT),
+            initial_balance,
+        )
+
     def test_redemption_fails_without_address_selection(self):
         """Test that redemption fails if no address is selected."""
         # Create shipping item
@@ -315,3 +362,44 @@ class RedeemConfirmAddressSelectionTests(TestCase):
         for address in addresses:
             self.assertContains(response, address.receiver_name)
             self.assertContains(response, address.phone)
+
+    def test_foreign_addresses_are_not_rendered_in_confirmation_page(self):
+        """Users should only see their own addresses on the confirmation page."""
+        item = ShopItem.objects.create(
+            name="Physical Item",
+            description="Test",
+            cost=100,
+            requires_shipping=True,
+        )
+        ShippingAddress.objects.create(
+            user=self.user,
+            receiver_name="我的地址",
+            phone="13800138000",
+            province="北京",
+            city="北京市",
+            district="朝阳区",
+            address="地址1",
+            is_default=True,
+        )
+        other_user = get_user_model().objects.create_user(
+            username="hidden-user",
+            email="hidden@example.com",
+            password="password123",
+        )
+        hidden_address = ShippingAddress.objects.create(
+            user=other_user,
+            receiver_name="不该出现",
+            phone="13900139000",
+            province="上海",
+            city="上海市",
+            district="浦东新区",
+            address="地址2",
+            is_default=True,
+        )
+
+        response = self.client.get(reverse("accounts:redeem_confirm", args=[item.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "我的地址")
+        self.assertNotContains(response, hidden_address.receiver_name)
+        self.assertNotContains(response, hidden_address.phone)

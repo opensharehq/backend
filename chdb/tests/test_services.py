@@ -436,3 +436,171 @@ class GetLabelEntitiesTests(TestCase):
         mock_query.assert_called_once()
         call_args = mock_query.call_args
         self.assertEqual(call_args[1]["parameters"]["label_ids"], ["123", "456"])
+
+
+class HelperFunctionsTests(TestCase):
+    """Tests for helper utilities in chdb.services."""
+
+    def test_get_result_rows_prefers_data_when_only_data_present(self):
+        class DummyResult:
+            def __init__(self):
+                self.data = [[1, 2, 3]]
+
+        self.assertEqual(services._get_result_rows(DummyResult()), [[1, 2, 3]])
+
+    def test_get_result_rows_handles_none(self):
+        self.assertEqual(services._get_result_rows(None), [])
+
+    def test_get_result_rows_returns_empty_when_no_supported_attributes_exist(self):
+        """Unknown result objects should gracefully return no rows."""
+
+        class DummyResult:
+            pass
+
+        self.assertEqual(services._get_result_rows(DummyResult()), [])
+
+    def test_format_platform_display_defaults_to_unknown(self):
+        self.assertEqual(services._format_platform_display([]), ("unknown", "Unknown"))
+
+    def test_prepare_label_ids_logs_when_list_empty(self):
+        with self.assertLogs("chdb.services", level="WARNING") as cm:
+            self.assertEqual(services._prepare_label_ids([]), [])
+        self.assertIn("空标签列表查询被拒绝", cm.output[0])
+
+    def test_prepare_label_ids_logs_when_normalized_empty(self):
+        with self.assertLogs("chdb.services", level="WARNING") as cm:
+            self.assertEqual(services._prepare_label_ids([None, "   "]), [])
+        self.assertIn("标签列表去空后为空", cm.output[0])
+
+    def test_collect_repo_ids_only_github(self):
+        label_entities = {
+            "label-1": {"repos": {"github": [101], "gitlab": [202]}},
+            "label-2": {"repos": {"github": [303]}},
+        }
+
+        repo_ids = services._collect_repo_ids(label_entities)
+
+        self.assertCountEqual(repo_ids, [101, 303])
+
+    def test_collect_user_ids_only_github(self):
+        label_entities = {
+            "label-1": {"users": {"github": [1], "gitee": [2]}},
+            "label-2": {"users": {"github": [3]}},
+        }
+
+        user_ids = services._collect_user_ids(label_entities)
+
+        self.assertCountEqual(user_ids, [1, 3])
+
+    def test_parse_contribution_rows_handles_multiple_formats(self):
+        rows = [
+            ["GitHub", 123, "login", 99.5, [("repo", 1.0, 202501)]],
+            [456, "other", 25.0, [("repo2", 0.5, 202502)]],
+        ]
+
+        parsed = services._parse_contribution_rows(rows)
+
+        self.assertEqual(parsed[0]["platform"], "GitHub")
+        self.assertEqual(parsed[0]["actor_id"], "123")
+        self.assertIn("details", parsed[0])
+        self.assertEqual(parsed[1]["actor_id"], "456")
+        self.assertEqual(parsed[1]["actor_login"], "other")
+
+    def test_parse_contribution_rows_four_column_default_github_row(self):
+        """4-column default rows should use GitHub platform and preserve details."""
+        rows = [
+            [12345, "default-github-user", 18.2, [("repo-x", 18.2, 202501)]],
+        ]
+
+        parsed = services._parse_contribution_rows(rows)
+
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["platform"], "GitHub")
+        self.assertEqual(parsed[0]["actor_id"], "12345")
+        self.assertEqual(parsed[0]["actor_login"], "default-github-user")
+        self.assertEqual(parsed[0]["contribution_score"], 18.2)
+        self.assertEqual(parsed[0]["details"], [("repo-x", 18.2, 202501)])
+
+    def test_parse_contribution_rows_five_column_platform_row(self):
+        """5-column rows should honor explicit platform and include details."""
+        rows = [
+            ["GitLab", "gl-77", "gitlab-user", 31.4, [("repo-y", 31.4, 202502)]],
+        ]
+
+        parsed = services._parse_contribution_rows(rows)
+
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["platform"], "GitLab")
+        self.assertEqual(parsed[0]["actor_id"], "gl-77")
+        self.assertEqual(parsed[0]["actor_login"], "gitlab-user")
+        self.assertEqual(parsed[0]["contribution_score"], 31.4)
+        self.assertEqual(parsed[0]["details"], [("repo-y", 31.4, 202502)])
+
+    def test_parse_contribution_rows_omits_details_when_not_present(self):
+        """Rows without details should not include a details key."""
+        rows = [
+            [888, "no-details-user", 12.0],
+            ["Gitee", 999, "gitee-no-details", 5.5],
+        ]
+
+        parsed = services._parse_contribution_rows(rows)
+
+        self.assertEqual(parsed[0]["platform"], "GitHub")
+        self.assertEqual(parsed[0]["actor_id"], "888")
+        self.assertNotIn("details", parsed[0])
+
+        self.assertEqual(parsed[1]["platform"], "Gitee")
+        self.assertEqual(parsed[1]["actor_id"], "999")
+        self.assertNotIn("details", parsed[1])
+
+    def test_parse_contribution_rows_normalizes_actor_id_to_string(self):
+        """actor_id should always be normalized to string across row formats."""
+        rows = [
+            ["GitHub", 1001, "platform-row", 1.0, []],
+            [2002, "default-row", 2.0, []],
+        ]
+
+        parsed = services._parse_contribution_rows(rows)
+
+        self.assertEqual(parsed[0]["actor_id"], "1001")
+        self.assertEqual(parsed[1]["actor_id"], "2002")
+
+    def test_build_users_and_map_platform_values_align_lengths(self):
+        names = ["github", "gitlab"]
+        users = [[1, 2], [3]]
+        values = [["a"], None]
+
+        built_users = services._build_users_by_platform(names, users)
+        mapped_values = services._map_platform_values(names, values)
+
+        self.assertEqual(built_users["github"], [1, 2])
+        self.assertEqual(built_users["gitlab"], [3])
+        self.assertEqual(mapped_values["github"], ["a"])
+        self.assertEqual(mapped_values["gitlab"], [])
+
+    def test_format_search_tag_row_missing_fields(self):
+        row = ["id", "repo", None, "", [], None]
+        formatted = services._format_search_tag_row(row)
+
+        self.assertEqual(formatted["platform"], "unknown")
+        self.assertEqual(formatted["name"], "id")
+        self.assertEqual(formatted["slug"], "id")
+
+    def test_parse_openrank_returns_none_for_bad_payloads(self):
+        payload = {"openrank": "bad"}
+        self.assertIsNone(services._parse_openrank_payload(payload))
+
+    def test_parse_openrank_returns_none_when_key_is_missing(self):
+        """Missing OpenRank keys should return None."""
+        self.assertIsNone(services._parse_openrank_payload({"stars": 10}))
+
+    def test_extract_openrank_handles_numbers_and_invalid_json(self):
+        self.assertEqual(services._extract_openrank(123), 123.0)
+        self.assertIsNone(services._extract_openrank("not json"))
+        self.assertIsNone(services._extract_openrank("[1,2,3]"))
+
+    def test_get_label_entities_exception_falls_back_to_empty(self):
+        with patch("chdb.services.ClickHouseDB.query", side_effect=Exception("boom")):
+            with self.assertLogs("chdb.services", level="ERROR") as cm:
+                self.assertEqual(services.get_label_entities(["foo"]), {})
+        self.assertIn("查询标签实体失败", cm.output[0])

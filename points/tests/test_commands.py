@@ -14,8 +14,12 @@ from social_django.models import UserSocialAuth
 from accounts.models import Organization, User
 from points import services
 from points.allocation_services import AllocationService
+from points.management.commands.grant_points import Command as GrantPointsCommand
 from points.management.commands.retrigger_pending_point_claims import (
     Command as RetriggerPendingPointClaimsCommand,
+)
+from points.management.commands.rollback_pending_claims import (
+    Command as RollbackPendingClaimsCommand,
 )
 from points.models import (
     PendingPointGrant,
@@ -162,6 +166,11 @@ class GrantPointsCommandTests(TestCase):
         wallet = services.get_or_create_wallet(self.user)
         source = wallet.sources.first()
         self.assertIsNotNone(source.expires_at)
+        self.assertTrue(timezone.is_aware(source.expires_at))
+        self.assertEqual(
+            timezone.localtime(source.expires_at).strftime("%Y-%m-%d %H:%M"),
+            "2025-12-31 00:00",
+        )
         self.assertIn("过期时间: 2025-12-31", out.getvalue())
 
     def test_user_not_found_fails(self):
@@ -274,6 +283,13 @@ class GrantPointsCommandTests(TestCase):
             )
         # Django argparse returns English error for missing arguments
         self.assertIn("required", str(cm.exception).lower())
+
+    def test_get_owner_requires_target_when_called_directly(self):
+        """Test internal owner lookup still errors without a target."""
+        with self.assertRaises(CommandError) as cm:
+            GrantPointsCommand()._get_owner({})
+
+        self.assertIn("必须指定", str(cm.exception))
 
 
 class RollbackPendingClaimsCommandTests(TestCase):
@@ -427,6 +443,85 @@ class RollbackPendingClaimsCommandTests(TestCase):
             ).exists()
         )
         self.assertIn("余额检查: 未通过", out.getvalue())
+
+    def test_rollback_claimed_grants_no_records_warns(self):
+        """Test command warns when there is nothing to roll back."""
+        out = StringIO()
+        command = RollbackPendingClaimsCommand()
+        command.stdout = out
+
+        command.handle(
+            user=self.target_user.username, user_id=None, grant_ids=None, dry_run=False
+        )
+
+        self.assertIn("未找到可回退的已领取记录", out.getvalue())
+
+    def test_rollback_claimed_grants_dry_run_no_records_warns(self):
+        """Test dry-run warns when there is nothing to preview."""
+        out = StringIO()
+        command = RollbackPendingClaimsCommand()
+        command.stdout = out
+
+        command.handle(
+            user=self.target_user.username, user_id=None, grant_ids=None, dry_run=True
+        )
+
+        self.assertIn("预览结果：未找到可回退的已领取记录", out.getvalue())
+
+    def test_rollback_claimed_grants_dry_run_with_grant_ids_prints_ids(self):
+        """Test dry-run echoes selected grant IDs when provided."""
+        pending_grant = self._create_and_claim_grant(amount=5000)
+        out = StringIO()
+        command = RollbackPendingClaimsCommand()
+        command.stdout = out
+
+        command.handle(
+            user=self.target_user.username,
+            user_id=None,
+            grant_ids=[pending_grant.id],
+            dry_run=True,
+        )
+
+        self.assertIn(str(pending_grant.id), out.getvalue())
+
+    def test_rollback_claimed_grants_with_grant_ids_prints_ids(self):
+        """Test successful rollback echoes the selected grant IDs."""
+        pending_grant = self._create_and_claim_grant(amount=5000)
+        out = StringIO()
+        command = RollbackPendingClaimsCommand()
+        command.stdout = out
+
+        command.handle(
+            user=self.target_user.username,
+            user_id=None,
+            grant_ids=[pending_grant.id],
+            dry_run=False,
+        )
+
+        self.assertIn(str(pending_grant.id), out.getvalue())
+
+    def test_rollback_get_user_not_found_by_username(self):
+        """Test internal rollback user lookup reports unknown usernames."""
+        with self.assertRaises(CommandError) as cm:
+            RollbackPendingClaimsCommand()._get_user(
+                {"user": "missing", "user_id": None}
+            )
+
+        self.assertIn("用户不存在: missing", str(cm.exception))
+
+    def test_rollback_get_user_not_found_by_id(self):
+        """Test internal rollback user lookup reports unknown IDs."""
+        with self.assertRaises(CommandError) as cm:
+            RollbackPendingClaimsCommand()._get_user({"user": None, "user_id": 99999})
+
+        self.assertIn("用户不存在: ID=99999", str(cm.exception))
+
+    def test_rollback_get_user_requires_target_when_called_directly(self):
+        """Test internal rollback user lookup still guards missing targets."""
+        with self.assertRaises(CommandError) as cm:
+            RollbackPendingClaimsCommand()._get_user({"user": None, "user_id": None})
+
+        self.assertIn("必须指定", str(cm.exception))
 
 
 class RetriggerPendingPointClaimsCommandTests(TestCase):
@@ -699,3 +794,56 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             )
 
         self.assertIn("--batch-size 必须大于 0", str(cm.exception))
+
+    def test_get_target_users_username_not_found(self):
+        """Test internal target lookup reports unknown usernames."""
+        command = RetriggerPendingPointClaimsCommand()
+
+        with self.assertRaises(CommandError) as cm:
+            command._get_target_users(
+                {"all": False, "user": "missing", "user_id": None},
+                include_without_github=False,
+            )
+
+        self.assertIn("用户不存在: missing", str(cm.exception))
+
+    def test_get_target_users_user_id_not_found(self):
+        """Test internal target lookup reports unknown user IDs."""
+        command = RetriggerPendingPointClaimsCommand()
+
+        with self.assertRaises(CommandError) as cm:
+            command._get_target_users(
+                {"all": False, "user": None, "user_id": 99999},
+                include_without_github=False,
+            )
+
+        self.assertIn("用户不存在: ID=99999", str(cm.exception))
+
+    def test_get_target_users_by_user_id_returns_prefetched_queryset(self):
+        """Test user-id target lookup returns a queryset with GitHub prefetch."""
+        user = User.objects.create_user(
+            username="existing-id-user",
+            email="existing-id@example.com",
+            password="pass",
+        )
+        command = RetriggerPendingPointClaimsCommand()
+
+        queryset = command._get_target_users(
+            {"all": False, "user": None, "user_id": user.id},
+            include_without_github=False,
+        )
+
+        self.assertEqual(list(queryset.values_list("id", flat=True)), [user.id])
+        self._assert_has_github_social_auth_prefetch(queryset)
+
+    def test_get_target_users_requires_target_when_called_directly(self):
+        """Test internal target lookup still guards missing targets."""
+        command = RetriggerPendingPointClaimsCommand()
+
+        with self.assertRaises(CommandError) as cm:
+            command._get_target_users(
+                {"all": False, "user": None, "user_id": None},
+                include_without_github=False,
+            )
+
+        self.assertIn("必须指定", str(cm.exception))

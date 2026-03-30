@@ -143,7 +143,7 @@ except ImportError as e:
         """Test that manage.py can be executed as a script."""
         # Test the if __name__ == "__main__" block by actually running the script
         # We'll use subprocess to run it with --help to avoid hanging
-        result = subprocess.run(  # noqa: S603  # Safe: controlled inputs for testing
+        result = subprocess.run(  # Safe: controlled inputs for testing
             [sys.executable, "manage.py", "--help"],
             check=False,
             cwd=str(PROJECT_ROOT),

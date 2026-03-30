@@ -17,7 +17,14 @@ class SettingsBranchesExplicitTests(SimpleTestCase):
         original_env = os.environ.copy()
         original_argv = sys.argv[:]
         try:
-            os.environ.update(env)
+            effective_env = original_env.copy()
+            for key, value in env.items():
+                if value is None:
+                    effective_env.pop(key, None)
+                else:
+                    effective_env[key] = value
+            os.environ.clear()
+            os.environ.update(effective_env)
             if argv is not None:
                 sys.argv = argv
             sys.modules.pop("config.settings", None)
@@ -46,7 +53,7 @@ class SettingsBranchesExplicitTests(SimpleTestCase):
         """DEBUG toolbar is appended when available and not testing."""
         fake_toolbar = mock.MagicMock()
         reloaded = self.reload_settings(
-            env={"DEBUG": "true"},
+            env={"DEBUG": "true", "PYTEST_VERSION": None},
             argv=["manage.py"],
             extra_modules={"debug_toolbar": fake_toolbar},
         )
@@ -58,7 +65,14 @@ class SettingsBranchesExplicitTests(SimpleTestCase):
 
     def test_security_flags_enabled_when_not_debug(self):
         """Production security flags should be turned on when DEBUG is false."""
-        reloaded = self.reload_settings(env={"DEBUG": "false"}, argv=["manage.py"])
+        reloaded = self.reload_settings(
+            env={"DEBUG": "false", "PYTEST_VERSION": None},
+            argv=["manage.py"],
+        )
         self.assertTrue(reloaded.SECURE_SSL_REDIRECT)
         self.assertTrue(reloaded.CSRF_COOKIE_SECURE)
+        self.assertEqual(
+            reloaded.SECURE_CROSS_ORIGIN_OPENER_POLICY,
+            "same-origin",
+        )
         self.assertEqual(reloaded.CSRF_COOKIE_SAMESITE, "Strict")

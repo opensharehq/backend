@@ -30,17 +30,23 @@ def index(request):
 class SearchFilters:
     """Filters extracted from the incoming request."""
 
+    DEFAULT_SORT = "relevance"
+    SUPPORTED_SORTS = (DEFAULT_SORT, "username")
+
     location: str = ""
     company: str = ""
-    sort: str = "relevance"
+    sort: str = DEFAULT_SORT
 
     @classmethod
     def from_request(cls, request):
         """Build filters from query parameters."""
+        sort = request.GET.get("sort", cls.DEFAULT_SORT)
+        if sort not in cls.SUPPORTED_SORTS:
+            sort = cls.DEFAULT_SORT
         return cls(
             location=request.GET.get("location", "").strip(),
             company=request.GET.get("company", "").strip(),
-            sort=request.GET.get("sort", "relevance"),
+            sort=sort,
         )
 
     def ordering(self) -> Iterable[str]:
@@ -103,11 +109,6 @@ def user_search(request):
         messages.info(request, "请输入要搜索的关键词。")
         return redirect("homepage:index")
 
-    User = get_user_model()
-    exact_match = User.objects.filter(username__iexact=query).first()
-    if exact_match:
-        return redirect("public_profile", username=exact_match.username)
-
     filters = SearchFilters.from_request(request)
 
     cache_key = _build_search_cache_key(
@@ -116,7 +117,20 @@ def user_search(request):
     )
     cached_context = cache.get(cache_key)
     if cached_context is not None:
+        cached_exact_match_username = cached_context.get("exact_match_username")
+        if cached_exact_match_username:
+            return redirect("public_profile", username=cached_exact_match_username)
+        if "exact_match_username" not in cached_context:
+            User = get_user_model()
+            exact_match = User.objects.filter(username__iexact=query).first()
+            if exact_match:
+                return redirect("public_profile", username=exact_match.username)
         return render(request, "homepage/search_results.html", cached_context)
+
+    User = get_user_model()
+    exact_match = User.objects.filter(username__iexact=query).first()
+    if exact_match:
+        return redirect("public_profile", username=exact_match.username)
 
     users_qs = (
         User.objects.filter(
@@ -145,7 +159,6 @@ def user_search(request):
     context = {
         "query": query,
         "results": results,
-        "results_json": json.dumps(results, ensure_ascii=False),
         "results_count": total_matches,
         "max_results": MAX_SEARCH_RESULTS,
         "filters": {
@@ -156,6 +169,7 @@ def user_search(request):
         "available_locations": available_locations,
         "available_companies": available_companies,
         "page_size": PAGE_SIZE,
+        "exact_match_username": None,
     }
 
     cache.set(cache_key, context, SEARCH_RESULTS_CACHE_TIMEOUT)

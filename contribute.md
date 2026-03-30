@@ -47,9 +47,11 @@ just worker
 - 禁止提交真实密钥与 `.env`。
 
 ## 测试规范
-- 使用 Django `TestCase`/`APITestCase`；测试放在各 app 的 `tests/` 目录。
+- 使用 Django `TestCase`/`StaticLiveServerTestCase`；测试放在各 app 的 `tests/` 目录。
 - 避免修改全局状态；外部服务（邮件、S3、Mailgun、ClickHouse）应做 mock。
-- 新功能/修复需覆盖关键路径，确保 `just test` 通过。
+- `just test` 现在会先跑常规测试，再跑带 `e2e` 标签的 Playwright 浏览器测试，两层都必须通过。
+- 多步骤用户路径优先补浏览器 E2E；异步任务、signal、外部依赖边界优先补集成测试。
+- 新功能/修复需覆盖关键路径，并尽量保证“页面结果 + 数据库副作用”同时被断言。
 
 ## 评审与协作
 - PR 保持小而聚焦，避免混入无关改动。

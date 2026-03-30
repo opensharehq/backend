@@ -210,11 +210,14 @@
     </div>
     <script>
         // 全选/取消全选
-        document.getElementById('selectAll').addEventListener('change', function() {
-            const checkboxes = document.querySelectorAll('input[name="message_ids[]"]');
-            checkboxes.forEach(cb => cb.checked = this.checked);
-            updateButtons();
-        });
+        const selectAllCheckbox = document.getElementById('selectAll');
+        if (selectAllCheckbox) {
+            selectAllCheckbox.addEventListener('change', function() {
+                const checkboxes = document.querySelectorAll('input[name="message_ids[]"]');
+                checkboxes.forEach(cb => cb.checked = this.checked);
+                updateButtons();
+            });
+        }
 
         // 更新按钮状态
         document.querySelectorAll('input[name="message_ids[]"]').forEach(cb => {

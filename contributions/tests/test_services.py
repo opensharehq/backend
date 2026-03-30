@@ -1,4 +1,4 @@
-"""Tests for contribution services."""
+"""Regression-focused tests for contribution services."""
 
 from datetime import date
 from decimal import Decimal
@@ -12,184 +12,259 @@ from contributions.services import ContributionService
 
 
 class ContributionServiceTests(TestCase):
-    """Tests for contribution service."""
+    """Tests that lock contribution payload semantics and integration boundaries."""
 
     def setUp(self):
-        """Set up test data."""
-        # 创建测试用户
+        """Create registered users used across the contribution scenarios."""
         self.user1 = User.objects.create_user(
-            username="testuser1", email="test1@example.com"
+            username="testuser1",
+            email="test1@example.com",
         )
         self.user2 = User.objects.create_user(
-            username="testuser2", email="test2@example.com"
+            username="testuser2",
+            email="test2@example.com",
         )
-
-        # 创建 GitHub social auth
         UserSocialAuth.objects.create(user=self.user1, provider="github", uid="123456")
         UserSocialAuth.objects.create(user=self.user2, provider="github", uid="789012")
 
-    def test_get_contributions_with_fallback(self):
-        """Test getting contributions with fallback to fake data."""
-        start_month = date(2024, 1, 1)
-        end_month = date(2024, 12, 1)
-
-        # Mock ClickHouse query to fail, should fallback to fake data
-        with patch(
-            "contributions.services.ContributionService.query_from_clickhouse"
-        ) as mock_query:
-            mock_query.side_effect = Exception("ClickHouse connection failed")
-
-            contributions = ContributionService.get_contributions(
-                project_identifiers=["alibaba/dubbo"],
-                start_month=start_month,
-                end_month=end_month,
-            )
-
-            # 应该返回一些贡献数据
-            self.assertTrue(len(contributions) > 0)
-
-            # 检查数据结构
-            for contrib in contributions:
-                # 应该包含平台特定的字段（github_id, github_login）
-                self.assertTrue(
-                    "github_id" in contrib
-                    or any(k.endswith("_id") for k in contrib.keys())
-                )
-                self.assertIn("email", contrib)
-                self.assertIn("contribution_score", contrib)
-                self.assertIn("is_registered", contrib)
-                self.assertIsInstance(contrib["contribution_score"], Decimal)
-
-    def test_contributions_include_registered_users(self):
-        """Test that contributions include registered users."""
-        # Mock ClickHouse to fail, use fake data
-        with patch(
-            "contributions.services.ContributionService.query_from_clickhouse"
-        ) as mock_query:
-            mock_query.side_effect = Exception("ClickHouse connection failed")
-
-            contributions = ContributionService.get_contributions(
-                project_identifiers=["test/project"],
-                start_month=date(2024, 1, 1),
-                end_month=date(2024, 12, 1),
-            )
-
-            # 应该包含已注册的用户
-            registered_users = [c for c in contributions if c["is_registered"]]
-            self.assertTrue(len(registered_users) > 0)
-
-            # 检查已注册用户有 user_id
-            for user_contrib in registered_users:
-                self.assertIsNotNone(user_contrib["user_id"])
-
-    def test_contributions_include_unregistered_users(self):
-        """Test that contributions include unregistered users."""
-        # Mock ClickHouse to fail, use fake data
-        with patch(
-            "contributions.services.ContributionService.query_from_clickhouse"
-        ) as mock_query:
-            mock_query.side_effect = Exception("ClickHouse connection failed")
-
-            contributions = ContributionService.get_contributions(
-                project_identifiers=["test/project"],
-                start_month=date(2024, 1, 1),
-                end_month=date(2024, 12, 1),
-            )
-
-            # 应该包含未注册的用户
-            unregistered_users = [c for c in contributions if not c["is_registered"]]
-            self.assertTrue(len(unregistered_users) > 0)
-
-            # 检查未注册用户没有 user_id
-            for user_contrib in unregistered_users:
-                self.assertIsNone(user_contrib["user_id"])
-
-    def test_enrich_with_registration_status(self):
-        """Test enriching contributions with registration status."""
-        # Mock 贡献数据（来自 ClickHouse）
-        mock_contributions = [
-            {
-                "platform": "GitHub",
-                "actor_id": "123456",  # 对应 user1
-                "actor_login": "user_one",
-                "contribution_score": 100.5,
-            },
-            {
-                "platform": "GitHub",
-                "actor_id": "789012",  # 对应 user2
-                "actor_login": "user_two",
-                "contribution_score": 50.3,
-            },
-            {
-                "platform": "GitHub",
-                "actor_id": "999999",  # 未注册
-                "actor_login": "unknown_user",
-                "contribution_score": 25.0,
-            },
-        ]
-
-        # 调用函数
-        results = ContributionService._enrich_with_registration_status(
-            mock_contributions
+    @patch(
+        "chdb.services.query_contributions",
+        side_effect=Exception("ClickHouse connection failed"),
+    )
+    def test_get_contributions_falls_back_to_exact_fake_payload(self, _mock_query):
+        """ClickHouse failures should fall back to the synthetic payload shape we expose."""
+        results = ContributionService.get_contributions(
+            project_identifiers=["repo:github:test"],
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
         )
 
-        # 检查结果数量
-        self.assertEqual(len(results), 3)
+        self.assertEqual(len(results), 5)
 
-        # 检查第一个用户（已注册）
-        user1_result = results[0]
-        self.assertTrue(user1_result["is_registered"])
-        self.assertEqual(user1_result["user_id"], self.user1.id)
-        self.assertEqual(user1_result["github_id"], "123456")
-        self.assertEqual(user1_result["github_login"], "user_one")
+        by_login = {item["github_login"]: item for item in results}
+        self.assertEqual(
+            set(by_login),
+            {
+                "testuser1",
+                "testuser2",
+                "bob_unregistered",
+                "charlie_dev",
+                "diana_contributor",
+            },
+        )
+        self.assertEqual(
+            by_login["testuser1"],
+            {
+                "github_id": "123456",
+                "github_login": "testuser1",
+                "email": "test1@example.com",
+                "contribution_score": Decimal("250.5"),
+                "is_registered": True,
+                "user_id": self.user1.id,
+            },
+        )
+        self.assertEqual(
+            by_login["testuser2"],
+            {
+                "github_id": "789012",
+                "github_login": "testuser2",
+                "email": "test2@example.com",
+                "contribution_score": Decimal("230.5"),
+                "is_registered": True,
+                "user_id": self.user2.id,
+            },
+        )
+        self.assertEqual(
+            by_login["bob_unregistered"],
+            {
+                "github_id": "2345678",
+                "github_login": "bob_unregistered",
+                "email": "bob@example.com",
+                "contribution_score": Decimal("180.3"),
+                "is_registered": False,
+                "user_id": None,
+            },
+        )
 
-        # 检查第二个用户（已注册）
-        user2_result = results[1]
-        self.assertTrue(user2_result["is_registered"])
-        self.assertEqual(user2_result["user_id"], self.user2.id)
+    @patch("chdb.services.query_contributions", return_value=[])
+    def test_get_contributions_preserves_empty_success_result(self, _mock_query):
+        """An empty ClickHouse response is still a successful query, not a fallback case."""
+        results = ContributionService.get_contributions(
+            project_identifiers=["repo:github:empty"],
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 1, 31),
+        )
 
-        # 检查第三个用户（未注册）
-        unregistered_result = results[2]
-        self.assertFalse(unregistered_result["is_registered"])
-        self.assertIsNone(unregistered_result["user_id"])
+        self.assertEqual(results, [])
 
     @patch("chdb.services.query_contributions")
-    def test_query_from_clickhouse(self, mock_query_contributions):
-        """Test querying from ClickHouse."""
-        # Mock ClickHouse 返回数据
+    def test_query_from_clickhouse_formats_months_and_registration_payload(
+        self, mock_query_contributions
+    ):
+        """ClickHouse rows should be normalized into the exact public payload contract."""
+        UserSocialAuth.objects.create(user=self.user2, provider="gitlab", uid="gl-42")
         mock_query_contributions.return_value = [
             {
                 "platform": "GitHub",
                 "actor_id": "123456",
                 "actor_login": "testuser1",
-                "contribution_score": 150.5,
+                "contribution_score": 88.8,
+                "details": [("repo-a", 88.8, 202405)],
             },
             {
-                "platform": "GitHub",
-                "actor_id": "999999",
-                "actor_login": "unknown",
-                "contribution_score": 50.0,
+                "platform": "GitLab",
+                "actor_id": "gl-42",
+                "actor_login": "testuser2",
+                "contribution_score": 66.6,
+                "details": [("repo-b", 66.6, 202405)],
             },
         ]
 
-        # 调用函数
-        start_month = date(2024, 5, 1)
-        end_month = date(2024, 6, 30)
         results = ContributionService.query_from_clickhouse(
             project_identifiers=[":companies/test/project"],
-            start_month=start_month,
-            end_month=end_month,
+            start_month=date(2024, 5, 1),
+            end_month=date(2024, 6, 30),
         )
 
-        # 检查结果
-        self.assertEqual(len(results), 2)
+        mock_query_contributions.assert_called_once_with(
+            label_ids=[":companies/test/project"],
+            start_month=202405,
+            end_month=202406,
+        )
+        self.assertEqual(
+            results,
+            [
+                {
+                    "platform": "GitHub",
+                    "github_id": "123456",
+                    "github_login": "testuser1",
+                    "email": "",
+                    "contribution_score": Decimal("88.8"),
+                    "is_registered": True,
+                    "user_id": self.user1.id,
+                    "details": [("repo-a", 88.8, 202405)],
+                },
+                {
+                    "platform": "GitLab",
+                    "gitlab_id": "gl-42",
+                    "gitlab_login": "testuser2",
+                    "email": "",
+                    "contribution_score": Decimal("66.6"),
+                    "is_registered": True,
+                    "user_id": self.user2.id,
+                    "details": [("repo-b", 66.6, 202405)],
+                },
+            ],
+        )
 
-        # 检查已注册用户
-        registered = [r for r in results if r["is_registered"]]
-        self.assertEqual(len(registered), 1)
-        self.assertEqual(registered[0]["user_id"], self.user1.id)
+    @patch("chdb.services.query_contributions", return_value=[])
+    def test_query_from_clickhouse_empty_returns_empty(self, mock_query_contributions):
+        """No contribution rows should return an empty result without enrichment work."""
+        results = ContributionService.query_from_clickhouse(
+            project_identifiers=[":companies/test/project"],
+            start_month=date(2024, 5, 1),
+            end_month=date(2024, 6, 30),
+        )
 
-        # 检查未注册用户
-        unregistered = [r for r in results if not r["is_registered"]]
-        self.assertEqual(len(unregistered), 1)
-        self.assertIsNone(unregistered[0]["user_id"])
+        mock_query_contributions.assert_called_once_with(
+            label_ids=[":companies/test/project"],
+            start_month=202405,
+            end_month=202406,
+        )
+        self.assertEqual(results, [])
+
+    def test_enrich_with_registration_status_supports_multiple_platforms_without_n_plus_one(
+        self,
+    ):
+        """Registration enrichment should batch by platform instead of querying per row."""
+        UserSocialAuth.objects.create(user=self.user2, provider="gitlab", uid="gl-100")
+        contributions = [
+            {
+                "platform": "GitHub",
+                "actor_id": "123456",
+                "actor_login": "testuser1",
+                "contribution_score": 10.5,
+            },
+            {
+                "platform": "GitLab",
+                "actor_id": "gl-100",
+                "actor_login": "testuser2",
+                "contribution_score": 9.5,
+                "details": [("repo-c", 9.5, 202406)],
+            },
+            {
+                "platform": "GitLab",
+                "actor_id": 987654,
+                "actor_login": "unregistered-numeric-id",
+                "contribution_score": 3.0,
+            },
+        ]
+
+        with self.assertNumQueries(2):
+            results = ContributionService._enrich_with_registration_status(
+                contributions
+            )
+
+        self.assertEqual(
+            results,
+            [
+                {
+                    "platform": "GitHub",
+                    "github_id": "123456",
+                    "github_login": "testuser1",
+                    "email": "",
+                    "contribution_score": Decimal("10.5"),
+                    "is_registered": True,
+                    "user_id": self.user1.id,
+                },
+                {
+                    "platform": "GitLab",
+                    "gitlab_id": "gl-100",
+                    "gitlab_login": "testuser2",
+                    "email": "",
+                    "contribution_score": Decimal("9.5"),
+                    "is_registered": True,
+                    "user_id": self.user2.id,
+                    "details": [("repo-c", 9.5, 202406)],
+                },
+                {
+                    "platform": "GitLab",
+                    "gitlab_id": 987654,
+                    "gitlab_login": "unregistered-numeric-id",
+                    "email": "",
+                    "contribution_score": Decimal("3.0"),
+                    "is_registered": False,
+                    "user_id": None,
+                },
+            ],
+        )
+
+    def test_get_fake_contributions_synthesizes_github_id_without_social_auth(self):
+        """Registered users without GitHub auth should still get deterministic fake IDs."""
+        user_without_social = User.objects.create_user(
+            username="nosocial",
+            email="nosocial@example.com",
+        )
+
+        results = ContributionService._get_fake_contributions(
+            project_identifiers=["repo:github:test"],
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        user_result = next(
+            item for item in results if item["user_id"] == user_without_social.id
+        )
+        self.assertEqual(user_result["github_login"], user_without_social.username)
+        self.assertEqual(user_result["github_id"], str(1000000 + 2))
+        self.assertEqual(user_result["contribution_score"], Decimal("210.5"))
+        self.assertTrue(user_result["is_registered"])
+
+    def test_get_contributions_rejects_missing_date_range(self):
+        """Missing month bounds should fail loudly instead of silently changing behavior."""
+        with self.assertRaises(ValueError):
+            ContributionService.get_contributions(
+                project_identifiers=["repo:github:test"],
+                start_month=None,
+                end_month=None,
+            )

@@ -34,8 +34,13 @@ This guide is for developers who want to run or extend OpenShare locally.
 
 ## Testing & Quality
 - Full suite: `just test` (parallel with coverage).
+- Security regression suite: `just test-security`.
+- Start a local load-test target with `just run_plus`.
+- Load testing against a running local server: `just load-test --base-url http://127.0.0.1:8000`.
+- Mutation testing for curated high-signal modules: `just mutmut`.
 - Targeted tests: `uv run manage.py test points.tests.test_services` (or any dotted path).
 - Lint/format: `just fmt` (Ruff lint+format, djlint for templates). Run before committing.
+- Test ownership and strategy details: `docs/testing-strategy.md`.
 
 ## Database & Migrations
 - After model changes: `uv run manage.py makemigrations` and commit generated migrations.

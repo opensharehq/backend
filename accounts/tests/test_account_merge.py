@@ -268,6 +268,20 @@ class AccountMergeViewTests(CacheClearTestCase):
         assert merge_request.message is not None
         mock_send.assert_called_once()
 
+    def test_merge_request_view_rerenders_when_form_is_invalid(self):
+        """Invalid submissions should stay on the page and expose the form error."""
+        self.client.force_login(self.source)
+
+        response = self.client.post(
+            reverse("accounts:merge_request"),
+            {"target_username": "ghost-user"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "未找到匹配的目标账号")
+        self.assertIn("sent_requests", response.context)
+        self.assertIn("incoming_requests", response.context)
+
     def test_accept_request_moves_assets(self):
         """Target accepting merges orgs, addresses, and deactivates source."""
         # source assets
@@ -584,6 +598,24 @@ class AccountMergeServiceEdgeTests(CacheClearTestCase):
             table_name="organization_memberships"
         ).latest("created_at")
         assert log.conflict_count == 1
+
+    def test_migrate_organization_memberships_keeps_higher_existing_role(self):
+        """Existing higher target roles should not be downgraded by a lower source role."""
+        org = Organization.objects.create(name="Org Keep", slug="org-keep")
+        target_membership = OrganizationMembership.objects.create(
+            user=self.target, organization=org, role=OrganizationMembership.Role.OWNER
+        )
+        source_membership = OrganizationMembership.objects.create(
+            user=self.source, organization=org, role=OrganizationMembership.Role.MEMBER
+        )
+
+        _migrate_organization_memberships(self.merge_request, self.source, self.target)
+
+        target_membership.refresh_from_db()
+        assert target_membership.role == OrganizationMembership.Role.OWNER
+        assert not OrganizationMembership.objects.filter(
+            pk=source_membership.pk
+        ).exists()
 
     def test_migrate_organization_memberships_moves_when_unique(self):
         """Unique memberships should be migrated to target."""

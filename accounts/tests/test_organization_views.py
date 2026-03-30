@@ -1005,6 +1005,28 @@ class OrganizationEdgeCaseCoverageTests(TestCase):
         self.assertNotEqual(self.org.avatar.name, "old.png")
         self.assertIn("new", self.org.avatar.name)
 
+    def test_settings_adds_avatar_without_deleting_when_none_exists(self):
+        """A first avatar upload should not try to delete a non-existent previous file."""
+        with unittest_mock.patch(
+            "django.db.models.fields.files.FieldFile.delete"
+        ) as delete_mock:
+            response = self.client.post(
+                reverse("accounts:organization_settings", args=[self.org.slug]),
+                {
+                    "name": "Edge Org",
+                    "slug": "edge-org",
+                    "description": "",
+                    "website": "",
+                    "location": "",
+                    "avatar": SimpleUploadedFile("first.png", b"first"),
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        delete_mock.assert_not_called()
+        self.org.refresh_from_db()
+        self.assertIn("first", self.org.avatar.name)
+
     def test_members_permission_checks(self):
         """Members view denies access to outsiders."""
         self.client.logout()

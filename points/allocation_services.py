@@ -1,6 +1,7 @@
 """积分分配服务."""
 
 import logging
+import math
 from decimal import Decimal
 
 from django.db import connection, models, transaction
@@ -9,7 +10,13 @@ from django.utils import timezone
 
 from contributions.services import ContributionService
 
-from .models import PendingPointGrant, PointAllocation, PointSource, PointType
+from .models import (
+    AllocationStatus,
+    PendingPointGrant,
+    PointAllocation,
+    PointSource,
+    PointType,
+)
 from .services import (
     InsufficientPointsError,
     get_wallet_or_none,
@@ -71,7 +78,6 @@ class AllocationService:
         return results
 
     @staticmethod
-    @transaction.atomic
     def execute_allocation(allocation: PointAllocation) -> dict:
         """
         执行积分分配.
@@ -88,11 +94,12 @@ class AllocationService:
         AllocationService._mark_allocation_executing(allocation)
 
         try:
-            preview = AllocationService.preview_allocation(allocation)
-            stats = AllocationService._apply_allocation_items(allocation, preview)
-            AllocationService._deduct_source_pool(allocation, stats["total_points"])
-            AllocationService._finalize_allocation(allocation, preview, stats)
-            return stats
+            with transaction.atomic():
+                preview = AllocationService.preview_allocation(allocation)
+                stats = AllocationService._apply_allocation_items(allocation, preview)
+                AllocationService._deduct_source_pool(allocation, stats["total_points"])
+                AllocationService._finalize_allocation(allocation, preview, stats)
+                return stats
         except Exception:
             AllocationService._mark_allocation_failed(allocation)
             raise
@@ -112,9 +119,13 @@ class AllocationService:
             }
 
         """
-        pending_grants = PendingPointGrant.objects.filter(
-            AllocationService._build_pending_claim_query(user)
-        ).select_related("tag")
+        pending_grants = (
+            PendingPointGrant.objects.filter(
+                AllocationService._build_pending_claim_query(user)
+            )
+            .filter(AllocationService._build_unexpired_pending_grant_query())
+            .select_related("tag")
+        )
 
         claimed_count = 0
         total_amount = 0
@@ -141,7 +152,7 @@ class AllocationService:
         """获取用户当前可领取的待领取积分汇总."""
         pending_grants = PendingPointGrant.objects.filter(
             AllocationService._build_pending_claim_query(user)
-        )
+        ).filter(AllocationService._build_unexpired_pending_grant_query())
         summary = pending_grants.aggregate(
             claimable_count=models.Count("id"),
             total_amount=Sum("amount"),
@@ -230,18 +241,50 @@ class AllocationService:
             return
 
         scale = total_amount / total_points
-        for result in results:
-            result["adjusted_points"] = int(result["adjusted_points"] * scale)
+        remainders: list[tuple[float, int]] = []
+        scaled_total = 0
+
+        for index, result in enumerate(results):
+            raw_scaled = result["adjusted_points"] * scale
+            scaled_points = math.floor(raw_scaled)
+            result["adjusted_points"] = scaled_points
+            scaled_total += scaled_points
+            remainders.append((raw_scaled - scaled_points, index))
+
+        remainder = total_amount - scaled_total
+        if remainder < 0:
+            msg = "Scaled allocation exceeded the requested total amount."
+            raise AssertionError(msg)
+
+        remainders.sort(key=lambda item: (-item[0], item[1]))
+        for _, index in remainders[:remainder]:
+            results[index]["adjusted_points"] += 1
+
+        final_total = sum(result["adjusted_points"] for result in results)
+        if final_total != total_amount:
+            msg = "Scaled allocation did not preserve the requested total amount."
+            raise AssertionError(msg)
 
     @staticmethod
     def _mark_allocation_executing(allocation: PointAllocation) -> None:
-        allocation.status = "executing"
-        allocation.save()
+        updated_rows = PointAllocation.objects.filter(
+            id=allocation.id,
+            status=AllocationStatus.DRAFT,
+        ).update(status=AllocationStatus.EXECUTING)
+        if updated_rows == 0:
+            msg = f"Allocation {allocation.id} is not executable"
+            raise RuntimeError(msg)
+
+        allocation.status = AllocationStatus.EXECUTING
 
     @staticmethod
     def _mark_allocation_failed(allocation: PointAllocation) -> None:
-        allocation.status = "failed"
-        allocation.save()
+        updated_rows = PointAllocation.objects.filter(
+            id=allocation.id,
+            status=AllocationStatus.EXECUTING,
+        ).update(status=AllocationStatus.FAILED)
+        if updated_rows:
+            allocation.status = AllocationStatus.FAILED
 
     @staticmethod
     def _apply_allocation_items(
@@ -427,15 +470,24 @@ class AllocationService:
         return models.Q(is_claimed=False) & identifier_query
 
     @staticmethod
+    def _build_unexpired_pending_grant_query() -> models.Q:
+        now = timezone.now()
+        return models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now)
+
+    @staticmethod
     @transaction.atomic
     def _claim_pending_grant(user, grant: PendingPointGrant) -> int:
-        claimed_rows = PendingPointGrant.objects.filter(
-            id=grant.id,
-            is_claimed=False,
-        ).update(
-            is_claimed=True,
-            claimed_by=user,
-            claimed_at=timezone.now(),
+        claimed_rows = (
+            PendingPointGrant.objects.filter(
+                id=grant.id,
+                is_claimed=False,
+            )
+            .filter(AllocationService._build_unexpired_pending_grant_query())
+            .update(
+                is_claimed=True,
+                claimed_by=user,
+                claimed_at=timezone.now(),
+            )
         )
 
         if claimed_rows == 0:

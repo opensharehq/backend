@@ -22,6 +22,10 @@ from .forms import WithdrawalRequestForm
 from .models import PointAllocation, PointSource, PointType, Tag, WithdrawalStatus
 
 
+class _AllocationPayloadValidationError(Exception):
+    """User-facing allocation payload validation error."""
+
+
 def _json_bad_request(message: str) -> JsonResponse:
     return JsonResponse({"error": message}, status=400)
 
@@ -49,6 +53,20 @@ def _parse_date_field(data: dict, field_name: str):
     return datetime.strptime(data[field_name], "%Y-%m-%d").date()
 
 
+def _parse_individual_adjustments(value) -> dict[str, int]:
+    adjustments = _require_mapping(value, "individual_adjustments")
+    normalized_adjustments: dict[str, int] = {}
+
+    for user_key, amount in adjustments.items():
+        if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+            msg = "individual_adjustments 的值必须是大于等于 0 的整数。"
+            raise _AllocationPayloadValidationError(msg)
+
+        normalized_adjustments[str(user_key)] = amount
+
+    return normalized_adjustments
+
+
 def _parse_allocation_payload(data: dict) -> dict:
     return {
         "project_scope": _require_mapping(data["project_scope"], "project_scope"),
@@ -61,11 +79,29 @@ def _parse_allocation_payload(data: dict) -> dict:
         "end_month": _parse_date_field(data, "end_month"),
         "total_amount": data["total_amount"],
         "adjustment_ratio": data.get("adjustment_ratio", 1.0),
-        "individual_adjustments": _require_mapping(
-            data.get("individual_adjustments", {}),
-            "individual_adjustments",
+        "individual_adjustments": _parse_individual_adjustments(
+            data.get("individual_adjustments", {})
         ),
     }
+
+
+def _allocation_execute_error_response(exc: Exception) -> JsonResponse:
+    if isinstance(exc, KeyError):
+        return _json_bad_request(f"缺少必填参数: {exc.args[0]}")
+
+    if isinstance(exc, _AllocationPayloadValidationError):
+        return _json_bad_request(str(exc))
+
+    if isinstance(exc, PointSource.DoesNotExist):
+        return _json_bad_request("积分池不存在。")
+
+    if isinstance(exc, services.InsufficientPointsError):
+        return _json_bad_request(str(exc))
+
+    if isinstance(exc, (JSONDecodeError, TypeError, ValueError)):
+        return _json_bad_request("请求参数格式不正确。")
+
+    return _json_bad_request("积分分配执行失败，请检查请求参数后重试。")
 
 
 @login_required
@@ -579,6 +615,8 @@ class ContributionPreviewAPIView(LoginRequiredMixin, View):
             )
         except KeyError as exc:
             return _json_bad_request(f"缺少必填参数: {exc.args[0]}")
+        except _AllocationPayloadValidationError as exc:
+            return _json_bad_request(str(exc))
         except (JSONDecodeError, TypeError, ValueError):
             return _json_bad_request("请求参数格式不正确。")
         except RuntimeError:
@@ -633,14 +671,17 @@ class AllocationExecuteAPIView(LoginRequiredMixin, View):
             result = AllocationService.execute_allocation(allocation)
 
             return JsonResponse({"allocation_id": allocation.id, **result})
-        except KeyError as exc:
-            return _json_bad_request(f"缺少必填参数: {exc.args[0]}")
-        except PointSource.DoesNotExist:
-            return _json_bad_request("积分池不存在。")
-        except (JSONDecodeError, TypeError, ValueError):
-            return _json_bad_request("请求参数格式不正确。")
-        except RuntimeError:
-            return _json_bad_request("积分分配执行失败，请检查请求参数后重试。")
+        except (
+            KeyError,
+            _AllocationPayloadValidationError,
+            PointSource.DoesNotExist,
+            services.InsufficientPointsError,
+            JSONDecodeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+        ) as exc:
+            return _allocation_execute_error_response(exc)
 
 
 class TagSearchAPIView(LoginRequiredMixin, View):

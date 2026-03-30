@@ -988,6 +988,26 @@ class ContributionPreviewAPIViewErrorTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.json())
 
+    def test_contribution_preview_negative_individual_adjustment_returns_400(self):
+        """Preview should reject negative individual adjustments with a clear error."""
+        response = self.client.post(
+            reverse("points:api_contribution_preview"),
+            data={
+                "project_scope": {"tags": ["tag"]},
+                "start_month": "2024-01-01",
+                "end_month": "2024-01-31",
+                "total_amount": 1000,
+                "individual_adjustments": {"someone": -1},
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"],
+            "individual_adjustments 的值必须是大于等于 0 的整数。",
+        )
+
     def test_contribution_preview_runtime_error_is_sanitized(self):
         """Runtime failures should not leak internal preview details."""
         with patch(
@@ -1035,6 +1055,17 @@ class ContributionPreviewAPIViewErrorTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 403)
+
+
+class AllocationPayloadParsingTests(TestCase):
+    """Tests for allocation payload parsing helpers."""
+
+    def test_parse_individual_adjustments_normalizes_keys(self):
+        """Valid individual adjustments should be normalized to string keys."""
+        self.assertEqual(
+            views._parse_individual_adjustments({123: 5}),
+            {"123": 5},
+        )
 
 
 class AllocationExecuteAPIViewTests(TestCase):
@@ -1204,6 +1235,51 @@ class AllocationExecuteAPIViewTests(TestCase):
             response.json()["error"],
             "积分分配执行失败，请检查请求参数后重试。",
         )
+
+    def test_allocation_execute_insufficient_points_returns_business_error(self):
+        """Business failures should return a client-handleable JSON error."""
+        with patch(
+            "points.views.AllocationService.execute_allocation",
+            side_effect=services.InsufficientPointsError("积分池余额不足。"),
+        ):
+            response = self.client.post(
+                reverse("points:api_allocation_execute"),
+                data={
+                    "pool_id": self.pool.id,
+                    "total_amount": 300,
+                    "project_scope": {"tags": ["test-repo"], "operation": "AND"},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "积分池余额不足。")
+
+    def test_allocation_execute_negative_individual_adjustment_returns_400(self):
+        """Execute should reject negative individual adjustments before creation."""
+        initial_count = PointAllocation.objects.count()
+
+        response = self.client.post(
+            reverse("points:api_allocation_execute"),
+            data={
+                "pool_id": self.pool.id,
+                "total_amount": 300,
+                "project_scope": {"tags": ["test-repo"], "operation": "AND"},
+                "start_month": "2024-01-01",
+                "end_month": "2024-01-31",
+                "individual_adjustments": {"someone": -1},
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"],
+            "individual_adjustments 的值必须是大于等于 0 的整数。",
+        )
+        self.assertEqual(PointAllocation.objects.count(), initial_count)
 
     def test_allocation_execute_rejects_other_users_pool(self):
         """Users should not be able to execute allocations from someone else's pool."""

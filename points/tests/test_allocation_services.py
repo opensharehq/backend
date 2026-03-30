@@ -176,9 +176,9 @@ class AllocationServiceTests(TestCase):
 
         preview = AllocationService.preview_allocation(allocation)
 
-        # 检查总额是否被缩放到不超过限制
+        # 检查总额是否被缩放到精确命中限制
         total_points = sum(item["adjusted_points"] for item in preview)
-        self.assertLessEqual(total_points, allocation.total_amount)
+        self.assertEqual(total_points, allocation.total_amount)
 
     def test_execute_allocation_to_registered_users(self):
         """Test executing allocation to registered users."""
@@ -763,19 +763,55 @@ class AllocationServiceTests(TestCase):
 
         self.assertEqual(preview, [])
 
-    def test_scale_results_to_total_amount_skips_negative_adjustments_for_remainders(
+    def test_scale_results_to_total_amount_preserves_exact_total_for_mixed_signs(
         self,
     ):
-        """Negative adjusted rows should not participate in positive remainder balancing."""
+        """Scaling should still hit the target total when adjusted rows mix signs."""
         results = [
-            {"adjusted_points": 10},
+            {"adjusted_points": -10},
             {"adjusted_points": -3},
+            {"adjusted_points": 20},
         ]
 
-        AllocationService._scale_results_to_total_amount(results, total_amount=5)
+        AllocationService._scale_results_to_total_amount(results, total_amount=2)
 
-        self.assertEqual(results[0]["adjusted_points"], 7)
-        self.assertEqual(results[1]["adjusted_points"], -2)
+        self.assertEqual(
+            [item["adjusted_points"] for item in results],
+            [-3, -1, 6],
+        )
+        self.assertEqual(sum(item["adjusted_points"] for item in results), 2)
+
+    def test_scale_results_to_total_amount_raises_when_scaled_total_exceeds_target(self):
+        """Scaling should assert if floor rounding ever overshoots the target total."""
+        results = [
+            {"adjusted_points": 2},
+            {"adjusted_points": 1},
+        ]
+
+        with (
+            patch("points.allocation_services.math.floor", side_effect=[2, 1]),
+            self.assertRaisesMessage(
+                AssertionError,
+                "Scaled allocation exceeded the requested total amount.",
+            ),
+        ):
+            AllocationService._scale_results_to_total_amount(results, total_amount=2)
+
+    def test_scale_results_to_total_amount_raises_when_final_total_drifts(self):
+        """Scaling should assert if remainder redistribution cannot hit the target."""
+        results = [
+            {"adjusted_points": 3},
+            {"adjusted_points": 3},
+        ]
+
+        with (
+            patch("points.allocation_services.math.floor", side_effect=[0, 0]),
+            self.assertRaisesMessage(
+                AssertionError,
+                "Scaled allocation did not preserve the requested total amount.",
+            ),
+        ):
+            AllocationService._scale_results_to_total_amount(results, total_amount=5)
 
     def test_execute_allocation_marks_failed_when_preview_raises(self):
         """Test execute_allocation marks allocation failed on unexpected errors."""

@@ -1,6 +1,7 @@
 """积分分配服务."""
 
 import logging
+import math
 from decimal import Decimal
 
 from django.db import connection, models, transaction
@@ -245,19 +246,24 @@ class AllocationService:
 
         for index, result in enumerate(results):
             raw_scaled = result["adjusted_points"] * scale
-            scaled_points = int(raw_scaled)
+            scaled_points = math.floor(raw_scaled)
             result["adjusted_points"] = scaled_points
             scaled_total += scaled_points
-            if result["adjusted_points"] >= 0:
-                remainders.append((raw_scaled - scaled_points, index))
+            remainders.append((raw_scaled - scaled_points, index))
 
         remainder = total_amount - scaled_total
-        if remainder <= 0:
-            return
+        if remainder < 0:
+            msg = "Scaled allocation exceeded the requested total amount."
+            raise AssertionError(msg)
 
         remainders.sort(key=lambda item: (-item[0], item[1]))
         for _, index in remainders[:remainder]:
             results[index]["adjusted_points"] += 1
+
+        final_total = sum(result["adjusted_points"] for result in results)
+        if final_total != total_amount:
+            msg = "Scaled allocation did not preserve the requested total amount."
+            raise AssertionError(msg)
 
     @staticmethod
     def _mark_allocation_executing(allocation: PointAllocation) -> None:

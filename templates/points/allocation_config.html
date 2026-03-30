@@ -673,7 +673,10 @@
                 },
 
                 updateIndividualAdjustment(contrib, value) {
-                    const amount = parseInt(value) || 0;
+                    const parsedAmount = Number.parseInt(value, 10);
+                    const amount = Number.isNaN(parsedAmount)
+                        ? 0
+                        : Math.max(parsedAmount, 0);
                     contrib.adjusted_points = amount;
                     this.config.individualAdjustments[contrib.github_login] = amount;
                 },

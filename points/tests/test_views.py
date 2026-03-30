@@ -924,6 +924,17 @@ class ContributionPreviewAPIViewErrorTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.json())
 
+    def test_contribution_preview_non_object_json_body_returns_400(self):
+        """JSON arrays should be rejected before field-level validation."""
+        response = self.client.post(
+            reverse("points:api_contribution_preview"),
+            data='["not", "an", "object"]',
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "请求参数格式不正确。")
+
     def test_contribution_preview_get_is_not_allowed(self):
         """Preview endpoint should reject GET requests."""
         response = self.client.get(reverse("points:api_contribution_preview"))
@@ -976,6 +987,29 @@ class ContributionPreviewAPIViewErrorTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.json())
+
+    def test_contribution_preview_runtime_error_is_sanitized(self):
+        """Runtime failures should not leak internal preview details."""
+        with patch(
+            "points.views.AllocationService.preview_allocation",
+            side_effect=RuntimeError("SELECT * FROM dangerous_table"),
+        ):
+            response = self.client.post(
+                reverse("points:api_contribution_preview"),
+                data={
+                    "project_scope": {"tags": ["tag"]},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                    "total_amount": 1000,
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"],
+            "无法生成贡献预览，请检查请求参数后重试。",
+        )
 
     def test_contribution_preview_requires_csrf(self):
         """Session-authenticated preview POSTs should still enforce CSRF."""
@@ -1112,6 +1146,64 @@ class AllocationExecuteAPIViewTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.json())
+
+    def test_allocation_execute_non_dict_project_scope_returns_400(self):
+        """Execute payload should reject non-object project scopes."""
+        response = self.client.post(
+            reverse("points:api_allocation_execute"),
+            data={
+                "pool_id": self.pool.id,
+                "total_amount": 300,
+                "project_scope": ["test-repo"],
+                "start_month": "2024-01-01",
+                "end_month": "2024-01-31",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+
+    def test_allocation_execute_missing_pool_returns_sanitized_message(self):
+        """Missing pools should return a safe client-facing message."""
+        response = self.client.post(
+            reverse("points:api_allocation_execute"),
+            data={
+                "pool_id": self.pool.id + 9999,
+                "total_amount": 300,
+                "project_scope": {"tags": ["test-repo"], "operation": "AND"},
+                "start_month": "2024-01-01",
+                "end_month": "2024-01-31",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "积分池不存在。")
+
+    def test_allocation_execute_runtime_error_is_sanitized(self):
+        """Runtime failures should not expose internal allocation details."""
+        with patch(
+            "points.views.AllocationService.execute_allocation",
+            side_effect=RuntimeError("syntax error at or near users"),
+        ):
+            response = self.client.post(
+                reverse("points:api_allocation_execute"),
+                data={
+                    "pool_id": self.pool.id,
+                    "total_amount": 300,
+                    "project_scope": {"tags": ["test-repo"], "operation": "AND"},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"],
+            "积分分配执行失败，请检查请求参数后重试。",
+        )
 
     def test_allocation_execute_rejects_other_users_pool(self):
         """Users should not be able to execute allocations from someone else's pool."""

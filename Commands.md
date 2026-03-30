@@ -68,7 +68,7 @@
 ### `just test`
 - 用途：以覆盖率模式并行运行测试（与 CI 对齐）
 - 依次执行：
-  - `uv run playwright install chromium`
+  - `uv run python -m playwright install chromium`
   - `uv run coverage erase`
   - `DJANGO_LOG_LEVEL=ERROR uv run coverage run --concurrency=multiprocessing --parallel-mode manage.py test --exclude-tag=e2e --parallel --timing --durations 10`
   - `DJANGO_LOG_LEVEL=ERROR uv run coverage run --parallel-mode manage.py test config.tests.test_asgi config.tests.test_wsgi config.tests.test_coverage_gate --timing`

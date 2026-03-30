@@ -14,6 +14,7 @@ from social_django.models import UserSocialAuth
 from accounts.models import User
 from points.allocation_services import AllocationService
 from points.models import (
+    AllocationStatus,
     PendingPointGrant,
     PointAllocation,
     PointSource,
@@ -899,6 +900,23 @@ class AllocationServiceTests(TestCase):
             AllocationService.execute_allocation(allocation)
             with self.assertRaises(RuntimeError):
                 AllocationService.execute_allocation(allocation)
+
+    def test_mark_allocation_failed_only_transitions_from_executing(self):
+        """Failed marking should not overwrite non-executing allocation states."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        AllocationService._mark_allocation_failed(allocation)
+
+        allocation.refresh_from_db()
+        self.assertEqual(allocation.status, AllocationStatus.DRAFT)
 
     def test_process_preview_item_skips_non_positive_amounts(self):
         """Test preview items with zero adjusted points are ignored."""

@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime
+from json import JSONDecodeError
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -19,6 +20,52 @@ from . import services
 from .allocation_services import AllocationService
 from .forms import WithdrawalRequestForm
 from .models import PointAllocation, PointSource, PointType, Tag, WithdrawalStatus
+
+
+def _json_bad_request(message: str) -> JsonResponse:
+    return JsonResponse({"error": message}, status=400)
+
+
+def _load_json_payload(request) -> dict:
+    data = json.loads(request.body)
+    if not isinstance(data, dict):
+        msg = "JSON body must be an object."
+        raise TypeError(msg)
+    return data
+
+
+def _require_mapping(value, field_name: str, *, required: bool = True):
+    if value is None and not required:
+        return None
+
+    if not isinstance(value, dict):
+        msg = f"{field_name} must be an object."
+        raise TypeError(msg)
+
+    return value
+
+
+def _parse_date_field(data: dict, field_name: str):
+    return datetime.strptime(data[field_name], "%Y-%m-%d").date()
+
+
+def _parse_allocation_payload(data: dict) -> dict:
+    return {
+        "project_scope": _require_mapping(data["project_scope"], "project_scope"),
+        "user_scope": _require_mapping(
+            data.get("user_scope"),
+            "user_scope",
+            required=False,
+        ),
+        "start_month": _parse_date_field(data, "start_month"),
+        "end_month": _parse_date_field(data, "end_month"),
+        "total_amount": data["total_amount"],
+        "adjustment_ratio": data.get("adjustment_ratio", 1.0),
+        "individual_adjustments": _require_mapping(
+            data.get("individual_adjustments", {}),
+            "individual_adjustments",
+        ),
+    }
 
 
 @login_required
@@ -502,18 +549,11 @@ class ContributionPreviewAPIView(LoginRequiredMixin, View):
         try:
             from chdb import services as chdb_services
 
-            data = json.loads(request.body)
+            data = _load_json_payload(request)
+            allocation_payload = _parse_allocation_payload(data)
 
             # 创建临时的 PointAllocation 对象
-            allocation = PointAllocation(
-                project_scope=data["project_scope"],
-                user_scope=data.get("user_scope"),
-                start_month=datetime.strptime(data["start_month"], "%Y-%m-%d").date(),
-                end_month=datetime.strptime(data["end_month"], "%Y-%m-%d").date(),
-                total_amount=data["total_amount"],
-                adjustment_ratio=data.get("adjustment_ratio", 1.0),
-                individual_adjustments=data.get("individual_adjustments", {}),
-            )
+            allocation = PointAllocation(**allocation_payload)
 
             # 预览
             preview = AllocationService.preview_allocation(allocation)
@@ -525,7 +565,7 @@ class ContributionPreviewAPIView(LoginRequiredMixin, View):
 
             # 查询标签平台信息（如果有项目标签）
             label_platforms_info = {}
-            project_tags = data.get("project_scope", {}).get("tags", [])
+            project_tags = allocation_payload["project_scope"].get("tags", [])
             if project_tags:
                 label_platforms_info = chdb_services.get_label_users(project_tags)
 
@@ -537,8 +577,12 @@ class ContributionPreviewAPIView(LoginRequiredMixin, View):
                     "total_recipients": len(preview),
                 }
             )
-        except Exception as e:
-            return JsonResponse({"error": str(e)}, status=400)
+        except KeyError as exc:
+            return _json_bad_request(f"缺少必填参数: {exc.args[0]}")
+        except (JSONDecodeError, TypeError, ValueError):
+            return _json_bad_request("请求参数格式不正确。")
+        except RuntimeError:
+            return _json_bad_request("无法生成贡献预览，请检查请求参数后重试。")
 
 
 class AllocationExecuteAPIView(LoginRequiredMixin, View):
@@ -566,7 +610,8 @@ class AllocationExecuteAPIView(LoginRequiredMixin, View):
     def post(self, request):
         """Execute allocation."""
         try:
-            data = json.loads(request.body)
+            data = _load_json_payload(request)
+            allocation_payload = _parse_allocation_payload(data)
             source_pool = PointSource.objects.select_related(
                 "wallet__content_type",
                 "tag",
@@ -581,21 +626,21 @@ class AllocationExecuteAPIView(LoginRequiredMixin, View):
                 initiator_type=user_content_type,
                 initiator_id=request.user.id,
                 source_pool=source_pool,
-                total_amount=data["total_amount"],
-                project_scope=data["project_scope"],
-                user_scope=data.get("user_scope"),
-                start_month=datetime.strptime(data["start_month"], "%Y-%m-%d").date(),
-                end_month=datetime.strptime(data["end_month"], "%Y-%m-%d").date(),
-                adjustment_ratio=data.get("adjustment_ratio", 1.0),
-                individual_adjustments=data.get("individual_adjustments", {}),
+                **allocation_payload,
             )
 
             # 执行
             result = AllocationService.execute_allocation(allocation)
 
             return JsonResponse({"allocation_id": allocation.id, **result})
-        except Exception as e:
-            return JsonResponse({"error": str(e)}, status=400)
+        except KeyError as exc:
+            return _json_bad_request(f"缺少必填参数: {exc.args[0]}")
+        except PointSource.DoesNotExist:
+            return _json_bad_request("积分池不存在。")
+        except (JSONDecodeError, TypeError, ValueError):
+            return _json_bad_request("请求参数格式不正确。")
+        except RuntimeError:
+            return _json_bad_request("积分分配执行失败，请检查请求参数后重试。")
 
 
 class TagSearchAPIView(LoginRequiredMixin, View):

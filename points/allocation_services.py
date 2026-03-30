@@ -273,10 +273,12 @@ class AllocationService:
 
     @staticmethod
     def _mark_allocation_failed(allocation: PointAllocation) -> None:
-        PointAllocation.objects.filter(id=allocation.id).update(
-            status=AllocationStatus.FAILED
-        )
-        allocation.status = AllocationStatus.FAILED
+        updated_rows = PointAllocation.objects.filter(
+            id=allocation.id,
+            status=AllocationStatus.EXECUTING,
+        ).update(status=AllocationStatus.FAILED)
+        if updated_rows:
+            allocation.status = AllocationStatus.FAILED
 
     @staticmethod
     def _apply_allocation_items(

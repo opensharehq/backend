@@ -117,6 +117,14 @@ def user_search(request):
     )
     cached_context = cache.get(cache_key)
     if cached_context is not None:
+        cached_exact_match_username = cached_context.get("exact_match_username")
+        if cached_exact_match_username:
+            return redirect("public_profile", username=cached_exact_match_username)
+        if "exact_match_username" not in cached_context:
+            User = get_user_model()
+            exact_match = User.objects.filter(username__iexact=query).first()
+            if exact_match:
+                return redirect("public_profile", username=exact_match.username)
         return render(request, "homepage/search_results.html", cached_context)
 
     User = get_user_model()
@@ -161,6 +169,7 @@ def user_search(request):
         "available_locations": available_locations,
         "available_companies": available_companies,
         "page_size": PAGE_SIZE,
+        "exact_match_username": None,
     }
 
     cache.set(cache_key, context, SEARCH_RESULTS_CACHE_TIMEOUT)

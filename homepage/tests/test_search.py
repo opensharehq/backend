@@ -266,6 +266,7 @@ class HomepageUserSearchTests(TestCase):
                 "available_locations": [],
                 "available_companies": [],
                 "page_size": homepage_views.PAGE_SIZE,
+                "exact_match_username": None,
             },
             homepage_views.SEARCH_RESULTS_CACHE_TIMEOUT,
         )
@@ -284,6 +285,7 @@ class HomepageUserSearchTests(TestCase):
             "results": [],
             "results_count": 0,
             "filters": {},
+            "exact_match_username": None,
         }
         request = self.factory.get(self.search_url, {"q": "example"})
 
@@ -304,6 +306,94 @@ class HomepageUserSearchTests(TestCase):
             cached_context,
         )
         self.assertEqual(response, mock_render.return_value)
+
+    def test_exact_match_redirect_takes_precedence_over_cached_context(self):
+        """Exact username hits should redirect even when a stale cache entry exists."""
+        cache.set(
+            homepage_views._build_search_cache_key(
+                query="alice",
+                filters=homepage_views.SearchFilters(),
+            ),
+            {
+                "query": "alice",
+                "results": [{"username": "cached-user"}],
+                "results_count": 1,
+                "max_results": homepage_views.MAX_SEARCH_RESULTS,
+                "filters": {
+                    "location": "",
+                    "company": "",
+                    "sort": homepage_views.SearchFilters.DEFAULT_SORT,
+                },
+                "available_locations": [],
+                "available_companies": [],
+                "page_size": homepage_views.PAGE_SIZE,
+            },
+            homepage_views.SEARCH_RESULTS_CACHE_TIMEOUT,
+        )
+
+        response = self.client.get(self.search_url, {"q": "alice"})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("public_profile", args=["alice"]))
+
+    def test_cached_search_redirects_when_cache_records_exact_match_username(self):
+        """Cache entries that already know the exact match should redirect immediately."""
+        cache.set(
+            homepage_views._build_search_cache_key(
+                query="alice",
+                filters=homepage_views.SearchFilters(),
+            ),
+            {
+                "query": "alice",
+                "results": [],
+                "results_count": 0,
+                "max_results": homepage_views.MAX_SEARCH_RESULTS,
+                "filters": {
+                    "location": "",
+                    "company": "",
+                    "sort": homepage_views.SearchFilters.DEFAULT_SORT,
+                },
+                "available_locations": [],
+                "available_companies": [],
+                "page_size": homepage_views.PAGE_SIZE,
+                "exact_match_username": "alice",
+            },
+            homepage_views.SEARCH_RESULTS_CACHE_TIMEOUT,
+        )
+
+        response = self.client.get(self.search_url, {"q": "alice"})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("public_profile", args=["alice"]))
+
+    def test_legacy_cached_search_without_marker_renders_when_no_exact_match(self):
+        """Legacy cache entries should still render when no exact-match user exists."""
+        cache.set(
+            homepage_views._build_search_cache_key(
+                query="ghost",
+                filters=homepage_views.SearchFilters(),
+            ),
+            {
+                "query": "ghost",
+                "results": [{"username": "ghost-result"}],
+                "results_count": 1,
+                "max_results": homepage_views.MAX_SEARCH_RESULTS,
+                "filters": {
+                    "location": "",
+                    "company": "",
+                    "sort": homepage_views.SearchFilters.DEFAULT_SORT,
+                },
+                "available_locations": [],
+                "available_companies": [],
+                "page_size": homepage_views.PAGE_SIZE,
+            },
+            homepage_views.SEARCH_RESULTS_CACHE_TIMEOUT,
+        )
+
+        response = self.client.get(self.search_url, {"q": "ghost"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "ghost-result")
 
     def test_exact_match_redirect_survives_warm_partial_search_cache(self):
         """User cache invalidation should prevent stale partial pages blocking redirects."""

@@ -3,18 +3,25 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
-from ninja import Router
+from ninja import Router, Schema
 
 from accounts.api_serializers import (
     serialize_education,
-    serialize_profile,
     serialize_work_experience,
 )
-from accounts.models import UserProfile
-from config.api_common import ApiError, build_paginated_response, paginate_queryset
+from config.api_common import (
+    ApiError,
+    ErrorResponseSchema,
+    PaginationSchema,
+    build_paginated_response,
+    paginate_queryset,
+)
 
 from .views import (
     MAX_SEARCH_RESULTS,
@@ -27,12 +34,87 @@ from .views import (
 router = Router(tags=["public"])
 
 
-def _get_or_create_profile(user):
-    profile, _ = UserProfile.objects.get_or_create(user=user)
-    return profile
+class PublicUserSearchItemSchema(Schema):
+    """Serialized search result item."""
+
+    username: str
+    display_name: str
+    bio: str
+    company: str
+    location: str
+    profile_url: str
+    avatar_url: str
 
 
-@router.get("/users/search")
+class PublicProfileSchema(Schema):
+    """Publicly visible profile fields."""
+
+    bio: str
+    github_url: str
+    homepage_url: str
+    blog_url: str
+    twitter_url: str
+    linkedin_url: str
+    company: str
+    location: str
+
+
+class PublicUserSchema(Schema):
+    """Public user identity payload."""
+
+    id: int
+    username: str
+    display_name: str
+
+
+class PublicUserSearchResponseSchema(Schema):
+    """Paginated public user search response."""
+
+    items: list[PublicUserSearchItemSchema]
+    pagination: PaginationSchema
+    query: str
+    filters: dict[str, str]
+    total_matches: int
+    max_results: int
+    exact_match_username: str | None = None
+    available_locations: list[str]
+    available_companies: list[str]
+
+
+class PublicUserProfileResponseSchema(Schema):
+    """Public profile detail response."""
+
+    user: PublicUserSchema
+    profile: PublicProfileSchema
+    work_experiences: list[dict[str, Any]]
+    educations: list[dict[str, Any]]
+
+
+def _profile_or_none(user):
+    try:
+        return user.profile
+    except ObjectDoesNotExist:  # pragma: no cover - OneToOne descriptor specific path
+        return None
+
+
+def _public_profile_payload(user) -> PublicProfileSchema:
+    profile = _profile_or_none(user)
+    return PublicProfileSchema(
+        bio=getattr(profile, "bio", "") or "",
+        github_url=getattr(profile, "github_url", "") or "",
+        homepage_url=getattr(profile, "homepage_url", "") or "",
+        blog_url=getattr(profile, "blog_url", "") or "",
+        twitter_url=getattr(profile, "twitter_url", "") or "",
+        linkedin_url=getattr(profile, "linkedin_url", "") or "",
+        company=getattr(profile, "company", "") or "",
+        location=getattr(profile, "location", "") or "",
+    )
+
+
+@router.get(
+    "/users/search",
+    response={200: PublicUserSearchResponseSchema, 422: ErrorResponseSchema},
+)
 def public_user_search_endpoint(
     request,
     q: str,
@@ -59,13 +141,13 @@ def public_user_search_endpoint(
         filters.sort = SearchFilters.DEFAULT_SORT
 
     UserModel = get_user_model()
-    exact_match = UserModel.objects.filter(username__iexact=query).first()
+    visible_users = UserModel.objects.filter(is_active=True, merged_into__isnull=True)
+    exact_match = visible_users.filter(username__iexact=query).first()
     users_qs = (
-        UserModel.objects.filter(
+        visible_users.filter(
             Q(username__icontains=query)
             | Q(first_name__icontains=query)
             | Q(last_name__icontains=query)
-            | Q(email__icontains=query)
             | Q(profile__company__icontains=query)
             | Q(profile__location__icontains=query)
         )
@@ -98,22 +180,34 @@ def public_user_search_endpoint(
     return response
 
 
-@router.get("/users/{username}")
+@router.get(
+    "/users/{username}",
+    response={200: PublicUserProfileResponseSchema, 404: ErrorResponseSchema},
+)
 def public_user_profile_endpoint(request, username: str):
     """Return a public user profile."""
     UserModel = get_user_model()
-    user = get_object_or_404(UserModel, username=username)
-    profile = _get_or_create_profile(user)
+    user = get_object_or_404(
+        UserModel.objects.select_related("profile").filter(
+            is_active=True,
+            merged_into__isnull=True,
+        ),
+        username=username,
+    )
+    profile = _profile_or_none(user)
     return {
         "user": {
             "id": user.id,
             "username": user.username,
             "display_name": user.get_full_name() or user.username,
-            "email": user.email,
         },
-        "profile": serialize_profile(profile),
+        "profile": _public_profile_payload(user),
         "work_experiences": [
-            serialize_work_experience(item) for item in profile.work_experiences.all()
+            serialize_work_experience(item)
+            for item in (profile.work_experiences.all() if profile else [])
         ],
-        "educations": [serialize_education(item) for item in profile.educations.all()],
+        "educations": [
+            serialize_education(item)
+            for item in (profile.educations.all() if profile else [])
+        ],
     }

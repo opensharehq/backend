@@ -8,6 +8,7 @@ import jwt
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
+from django.core.cache.backends.redis import RedisCache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.utils.encoding import force_bytes
@@ -16,6 +17,42 @@ from social_django.models import UserSocialAuth
 
 from accounts.services.jwt_tokens import create_access_token
 from accounts.services.social_exchange import SocialExchangeUnavailableError
+
+
+class _RedisClientWithoutEval:
+    """Redis client missing the atomic consume primitive."""
+
+    def set(self, key, value, ex=None):
+        """Accept writes to mimic partial backend support."""
+        del key, value, ex
+        return True
+
+    def delete(self, key):
+        """Accept deletes to mimic partial backend support."""
+        del key
+        return 0
+
+
+class _RedisInnerCacheWithoutEval:
+    """Inner cache exposing a degraded Redis client."""
+
+    def get_client(self, key, *, write=False):
+        """Return a client that cannot perform atomic consume."""
+        del key, write
+        return _RedisClientWithoutEval()
+
+
+class _RedisCacheBackendWithoutEval(RedisCache):
+    """Redis cache backend lacking the eval capability used by exchange consume."""
+
+    def __init__(self):
+        """Initialize the Redis-shaped cache backend for tests."""
+        super().__init__("redis://cache.test/1", {})
+        self._cache = _RedisInnerCacheWithoutEval()
+
+    def make_and_validate_key(self, key):
+        """Return a deterministic Redis key for tests."""
+        return f"test-prefix:{key}"
 
 
 class ApiV1AuthTests(TestCase):
@@ -589,12 +626,12 @@ class ApiV1AuthTests(TestCase):
         self.assertEqual(second_response.json()["code"], "invalid_exchange_code")
 
     @patch(
-        "accounts.api_v1.consume_exchange_code",
-        side_effect=SocialExchangeUnavailableError("redis required"),
+        "accounts.services.social_exchange_store._default_cache",
+        return_value=_RedisCacheBackendWithoutEval(),
     )
     def test_social_exchange_returns_503_when_exchange_storage_unavailable(
         self,
-        _consume_mock,
+        _cache_mock,
     ):
         """The exchange endpoint should fail closed when Redis support is missing."""
         response = self.client.post(

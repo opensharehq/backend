@@ -33,7 +33,7 @@ class CanonicalHostRedirectMiddleware:
 
 
 class ApiCorsMiddleware:
-    """Apply a minimal CORS policy for versioned API endpoints."""
+    """Apply a Bearer-token-only CORS policy for versioned API endpoints."""
 
     exposed_prefixes = ("/api/",)
     allowed_methods = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
@@ -73,8 +73,10 @@ class ApiCorsMiddleware:
         return any(request.path.startswith(prefix) for prefix in self.exposed_prefixes)
 
     def _apply_headers(self, response, origin: str) -> None:
+        """Attach CORS headers without advertising credential-mode support."""
         response["Access-Control-Allow-Origin"] = origin
         response["Access-Control-Allow-Methods"] = self.allowed_methods
         response["Access-Control-Allow-Headers"] = self.allowed_headers
         response["Access-Control-Max-Age"] = "86400"
+        response.headers.pop("Access-Control-Allow-Credentials", None)
         patch_vary_headers(response, ["Origin"])

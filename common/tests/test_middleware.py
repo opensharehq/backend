@@ -57,6 +57,7 @@ class ApiCorsMiddlewareTests(SimpleTestCase):
         self.assertEqual(
             response["Access-Control-Allow-Headers"], middleware.allowed_headers
         )
+        self.assertNotIn("Access-Control-Allow-Credentials", response.headers)
         self.assertIn("Origin", response["Vary"])
 
     def test_existing_vary_header_keeps_origin(self):
@@ -79,3 +80,21 @@ class ApiCorsMiddlewareTests(SimpleTestCase):
             {value.strip() for value in response["Vary"].split(",")},
             {"Accept-Encoding", "Origin"},
         )
+
+    def test_bearer_only_policy_strips_credentials_header(self):
+        """Cross-origin API responses should not advertise credential mode."""
+
+        def get_response(_request):
+            response = HttpResponse("ok")
+            response["Access-Control-Allow-Credentials"] = "true"
+            return response
+
+        middleware = ApiCorsMiddleware(get_response)
+        request = self.factory.get(
+            "/api/v1/auth/verify",
+            HTTP_ORIGIN="https://app.example.com",
+        )
+
+        response = middleware(request)
+
+        self.assertNotIn("Access-Control-Allow-Credentials", response.headers)

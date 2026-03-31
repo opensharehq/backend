@@ -9,6 +9,7 @@ from typing import Any
 import jwt
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.utils import timezone
 
 from accounts.models import RefreshToken
@@ -132,6 +133,14 @@ def get_user_from_access_token(token: str) -> Any | None:
     return user
 
 
+def _get_refresh_token_user_id(payload: dict[str, Any]) -> int | None:
+    """Return the user id embedded in a refresh token payload."""
+    try:
+        return int(payload["sub"])
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
 def _get_refresh_record(payload: dict[str, Any]) -> RefreshToken | None:
     try:
         jti = uuid.UUID(str(payload["jti"]))
@@ -141,26 +150,49 @@ def _get_refresh_record(payload: dict[str, Any]) -> RefreshToken | None:
     return RefreshToken.objects.select_related("user").filter(jti=jti).first()
 
 
+def _get_refresh_record_user(
+    payload: dict[str, Any],
+) -> tuple[Any, RefreshToken] | None:
+    """Resolve the refresh token owner while validating the bound subject."""
+    record = _get_refresh_record(payload)
+    if record is None:
+        return None
+
+    payload_user_id = _get_refresh_token_user_id(payload)
+    user = record.user
+    if payload_user_id is None or payload_user_id != user.pk:
+        return None
+
+    if not user.is_active or user.merged_into_id:
+        return None
+
+    return user, record
+
+
+def _revoke_refresh_record_if_active(jti: uuid.UUID, now) -> bool:
+    """Revoke a refresh token only if it is still active."""
+    return (
+        RefreshToken.objects.filter(
+            jti=jti,
+            revoked_at__isnull=True,
+            expires_at__gt=now,
+        ).update(revoked_at=now)
+        == 1
+    )
+
+
 def get_user_from_refresh_token(token: str) -> Any | None:
     """Resolve an active, non-merged user from a refresh token."""
     payload = decode_refresh_token(token)
     if not payload:
         return None
 
-    record = _get_refresh_record(payload)
-    if record is None or not record.is_active:
+    refresh_record_user = _get_refresh_record_user(payload)
+    if refresh_record_user is None:
         return None
 
-    user = record.user
-    if not user.is_active or user.merged_into_id:
-        return None
-
-    try:
-        payload_user_id = int(payload["sub"])
-    except (TypeError, ValueError):
-        return None
-
-    if payload_user_id != user.pk:
+    user, record = refresh_record_user
+    if not record.is_active:
         return None
 
     return user
@@ -172,13 +204,12 @@ def revoke_refresh_token(token: str) -> bool:
     if not payload:
         return False
 
-    record = _get_refresh_record(payload)
-    if record is None or not record.is_active:
+    refresh_record_user = _get_refresh_record_user(payload)
+    if refresh_record_user is None:
         return False
 
-    record.revoked_at = timezone.now()
-    record.save(update_fields=["revoked_at"])
-    return True
+    _user, record = refresh_record_user
+    return _revoke_refresh_record_if_active(record.jti, timezone.now())
 
 
 def revoke_all_refresh_tokens_for_user(user: Any) -> int:
@@ -191,20 +222,21 @@ def revoke_all_refresh_tokens_for_user(user: Any) -> int:
     ).update(revoked_at=now)
 
 
-def rotate_refresh_token(token: str) -> dict[str, Any] | None:
+def rotate_refresh_token(token: str) -> tuple[Any, dict[str, Any]] | None:
     """Revoke the current refresh token and return a fresh token pair."""
     payload = decode_refresh_token(token)
     if not payload:
         return None
 
-    record = _get_refresh_record(payload)
-    if record is None or not record.is_active:
+    refresh_record_user = _get_refresh_record_user(payload)
+    if refresh_record_user is None:
         return None
 
-    user = get_user_from_refresh_token(token)
-    if user is None:
-        return None
+    user, record = refresh_record_user
+    now = timezone.now()
 
-    record.revoked_at = timezone.now()
-    record.save(update_fields=["revoked_at"])
-    return issue_token_pair(user)
+    with transaction.atomic():
+        if not _revoke_refresh_record_if_active(record.jti, now):
+            return None
+
+        return user, issue_token_pair(user)

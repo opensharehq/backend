@@ -78,12 +78,8 @@ def authenticate_by_login_id(
     candidate_user = username_match or email_user
 
     if not user:
-        if (
-            username_match
-            and username_match.merged_into_id
-            and login_id == username_match.username
-        ):
-            target = username_match.merged_into
+        if candidate_user and candidate_user.merged_into_id:
+            target = candidate_user.merged_into
             target_label = target.email or target.username
             raise AccountMergedError(target_label)
         if candidate_user and not candidate_user.is_active:

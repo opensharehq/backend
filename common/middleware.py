@@ -4,6 +4,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from django.conf import settings
 from django.http import HttpResponse, HttpResponsePermanentRedirect
+from django.utils.cache import patch_vary_headers
 
 
 class CanonicalHostRedirectMiddleware:
@@ -76,4 +77,4 @@ class ApiCorsMiddleware:
         response["Access-Control-Allow-Methods"] = self.allowed_methods
         response["Access-Control-Allow-Headers"] = self.allowed_headers
         response["Access-Control-Max-Age"] = "86400"
-        response.setdefault("Vary", "Origin")
+        patch_vary_headers(response, ["Origin"])

@@ -39,7 +39,6 @@ from .forms import (
 from .services.authentication import PasswordLoginError, authenticate_by_login_id
 from .services.jwt_tokens import (
     get_user_from_access_token,
-    get_user_from_refresh_token,
     issue_token_pair,
     revoke_all_refresh_tokens_for_user,
     revoke_refresh_token,
@@ -399,14 +398,14 @@ def register_endpoint(request: HttpRequest, payload: RegisterRequestSchema):
 )
 def refresh_endpoint(request: HttpRequest, payload: RefreshRequestSchema):
     """Rotate a refresh token and return a fresh token pair."""
-    user = get_user_from_refresh_token(payload.refresh_token)
-    token_pair = rotate_refresh_token(payload.refresh_token)
-    if user is None or token_pair is None:
+    rotation_result = rotate_refresh_token(payload.refresh_token)
+    if rotation_result is None:
         return 401, ErrorResponseSchema(
             code="invalid_token",
             message="The token is invalid or has expired.",
         )
 
+    user, token_pair = rotation_result
     return TokenResponseSchema(user=_serialize_user(user), **token_pair)
 
 

@@ -119,6 +119,32 @@ class ApiV1AuthTests(TestCase):
         self.assertEqual(response.json()["code"], "account_merged")
         self.assertIn("destination account", response.json()["message"])
 
+    def test_login_with_email_for_merged_account_returns_merge_hint(self):
+        """Merged source accounts should return the same hint for email login."""
+        target = self.User.objects.create_user(
+            username="merged_target_api_email",
+            email="merged_target_api_email@example.com",
+            password=self.password,
+        )
+        source = self.User.objects.create_user(
+            username="merged_source_api_email",
+            email="merged_source_api_email@example.com",
+            password=self.password,
+            is_active=False,
+        )
+        source.merged_into = target
+        source.save(update_fields=["merged_into", "is_active"])
+
+        response = self.client.post(
+            self.login_url,
+            {"account": source.email, "password": self.password},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "account_merged")
+        self.assertIn("destination account", response.json()["message"])
+
     def test_login_request_validation_error_uses_api_shape(self):
         """Invalid request payloads should return the shared validation shape."""
         response = self.client.post(
@@ -216,6 +242,30 @@ class ApiV1AuthTests(TestCase):
         payload = response.json()
         self.assertNotEqual(payload["refresh_token"], refresh_token)
         self.assertEqual(payload["user"]["id"], self.user.id)
+
+    def test_refresh_rejects_token_after_successful_rotation(self):
+        """A refresh token should become unusable after a successful rotation."""
+        login_response = self.client.post(
+            self.login_url,
+            {"account": self.user.username, "password": self.password},
+            content_type="application/json",
+        )
+        refresh_token = login_response.json()["refresh_token"]
+
+        first_response = self.client.post(
+            "/api/v1/auth/refresh",
+            {"refresh_token": refresh_token},
+            content_type="application/json",
+        )
+        second_response = self.client.post(
+            "/api/v1/auth/refresh",
+            {"refresh_token": refresh_token},
+            content_type="application/json",
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 401)
+        self.assertEqual(second_response.json()["code"], "invalid_token")
 
     def test_logout_revokes_refresh_token(self):
         """Logging out should revoke the provided refresh token."""

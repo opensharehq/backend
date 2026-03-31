@@ -4,16 +4,26 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
 
 from accounts.models import Organization, OrganizationMembership
 from accounts.services.jwt_tokens import create_access_token
-from points.models import PointAllocation, PointType, WithdrawalStatus
+from contributions.services import ContributionDataUnavailableError
+from points.models import PointAllocation, PointType, PointWallet, WithdrawalStatus
 from points.services import grant_points
 
 
 class PointsApiV1Tests(TestCase):
     """Validate wallet, withdrawal, and allocation APIs."""
+
+    @staticmethod
+    def _wallet_exists(owner) -> bool:
+        content_type = ContentType.objects.get_for_model(owner)
+        return PointWallet.objects.filter(
+            content_type=content_type,
+            object_id=owner.id,
+        ).exists()
 
     def setUp(self):
         """Create reusable points fixtures."""
@@ -26,6 +36,11 @@ class PointsApiV1Tests(TestCase):
         self.other_user = User.objects.create_user(
             username="points_peer",
             email="points_peer@example.com",
+            password="StrongPass123!",
+        )
+        self.no_wallet_user = User.objects.create_user(
+            username="points_nowallet",
+            email="points_nowallet@example.com",
             password="StrongPass123!",
         )
         self.organization = Organization.objects.create(
@@ -82,7 +97,7 @@ class PointsApiV1Tests(TestCase):
             content_type="application/json",
             **self.headers,
         )
-        self.assertEqual(create_response.status_code, 200)
+        self.assertEqual(create_response.status_code, 201)
         withdrawal_id = create_response.json()["id"]
         self.assertEqual(create_response.json()["status"], WithdrawalStatus.PENDING)
 
@@ -160,7 +175,7 @@ class PointsApiV1Tests(TestCase):
                 content_type="application/json",
                 **self.headers,
             )
-        self.assertEqual(execute_response.status_code, 200)
+        self.assertEqual(execute_response.status_code, 201)
         allocation_id = execute_response.json()["allocation"]["id"]
 
         allocation = PointAllocation.objects.get(id=allocation_id)
@@ -175,6 +190,20 @@ class PointsApiV1Tests(TestCase):
             detail_response.json()["source_selector"], user_gift_pool["source_selector"]
         )
 
+    def test_wallet_read_does_not_create_wallet_for_zero_balance_user(self):
+        """Wallet reads should stay side-effect free when no wallet exists yet."""
+        headers = {
+            "HTTP_AUTHORIZATION": f"Bearer {create_access_token(self.no_wallet_user)}"
+        }
+        self.assertFalse(self._wallet_exists(self.no_wallet_user))
+
+        response = self.client.get("/api/v1/points/me/wallet", **headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["wallet_id"], None)
+        self.assertEqual(response.json()["balance"]["total"], 0)
+        self.assertFalse(self._wallet_exists(self.no_wallet_user))
+
     def test_organization_wallet_endpoint_is_available_to_members(self):
         """Organization members should be able to view wallet summaries."""
         response = self.client.get(
@@ -187,3 +216,154 @@ class PointsApiV1Tests(TestCase):
             response.json()["organization"]["slug"], self.organization.slug
         )
         self.assertEqual(response.json()["balance"]["cash"], 900)
+
+    def test_organization_wallet_read_does_not_create_wallet_for_zero_balance_org(self):
+        """Organization wallet reads should stay side-effect free for empty orgs."""
+        empty_org = Organization.objects.create(name="Empty Org", slug="empty-org")
+        OrganizationMembership.objects.create(
+            user=self.user,
+            organization=empty_org,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        self.assertFalse(self._wallet_exists(empty_org))
+
+        response = self.client.get(
+            f"/api/v1/points/organizations/{empty_org.slug}/wallet",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["wallet_id"], None)
+        self.assertEqual(response.json()["balance"]["total"], 0)
+        self.assertFalse(self._wallet_exists(empty_org))
+
+    @patch(
+        "points.allocation_services.ContributionService.get_contributions",
+        side_effect=ContributionDataUnavailableError(
+            "Contribution data is currently unavailable."
+        ),
+    )
+    def test_allocation_preview_rejects_unavailable_contribution_data(self, _mocked):
+        """Allocation preview should return a stable 503 when contribution data is unavailable."""
+        payload = {
+            "source_selector": {
+                "owner_type": "user",
+                "point_type": PointType.GIFT,
+                "tag_slug": None,
+            },
+            "project_scope": {"tags": ["repo:test/example"], "operation": "AND"},
+            "start_month": "2025-01-01",
+            "end_month": "2025-01-01",
+            "total_amount": 300,
+            "adjustment_ratio": 1.0,
+            "individual_adjustments": {},
+        }
+
+        response = self.client.post(
+            "/api/v1/points/allocations/preview",
+            payload,
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "contribution_data_unavailable")
+        self.assertEqual(
+            response.json()["message"],
+            "Contribution data is currently unavailable.",
+        )
+        self.assertIsNone(response.json()["detail"])
+
+    @patch(
+        "points.allocation_services.ContributionService.get_contributions",
+        side_effect=ContributionDataUnavailableError(
+            "Contribution data is currently unavailable."
+        ),
+    )
+    def test_allocation_execute_rejects_unavailable_contribution_data(self, _mocked):
+        """Allocation execution should return the same stable 503 contract."""
+        payload = {
+            "source_selector": {
+                "owner_type": "user",
+                "point_type": PointType.GIFT,
+                "tag_slug": None,
+            },
+            "project_scope": {"tags": ["repo:test/example"], "operation": "AND"},
+            "start_month": "2025-01-01",
+            "end_month": "2025-01-01",
+            "total_amount": 300,
+            "adjustment_ratio": 1.0,
+            "individual_adjustments": {},
+        }
+
+        response = self.client.post(
+            "/api/v1/points/allocations",
+            payload,
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "contribution_data_unavailable")
+        self.assertEqual(
+            response.json()["message"],
+            "Contribution data is currently unavailable.",
+        )
+        self.assertEqual(PointAllocation.objects.count(), 0)
+
+    def test_allocation_rejects_invalid_date_range(self):
+        """Allocation date ranges must be chronological."""
+        payload = {
+            "source_selector": {
+                "owner_type": "user",
+                "point_type": PointType.GIFT,
+                "tag_slug": None,
+            },
+            "project_scope": {"tags": ["repo:test/example"], "operation": "AND"},
+            "start_month": "2025-02-01",
+            "end_month": "2025-01-01",
+            "total_amount": 300,
+            "adjustment_ratio": 1.0,
+            "individual_adjustments": {},
+        }
+
+        response = self.client.post(
+            "/api/v1/points/allocations/preview",
+            payload,
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["code"], "validation_error")
+
+    def test_organization_cancel_requires_withdrawal_to_match_slug(self):
+        """Organization withdrawal cancellation should enforce the slug-resource binding."""
+        create_response = self.client.post(
+            f"/api/v1/points/organizations/{self.organization.slug}/withdrawals",
+            {
+                "amount": 100,
+                "real_name": "Org Owner",
+                "phone": "13800138000",
+                "id_card": "11010519491231002X",
+                "bank_name": "Bank of Test",
+                "bank_account": "6222021234567890123",
+            },
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(create_response.status_code, 201)
+        withdrawal_id = create_response.json()["id"]
+
+        other_org = Organization.objects.create(name="Other Org", slug="other-org")
+        OrganizationMembership.objects.create(
+            user=self.user,
+            organization=other_org,
+            role=OrganizationMembership.Role.OWNER,
+        )
+
+        mismatch_response = self.client.post(
+            f"/api/v1/points/organizations/{other_org.slug}/withdrawals/{withdrawal_id}/cancel",
+            **self.headers,
+        )
+        self.assertEqual(mismatch_response.status_code, 404)

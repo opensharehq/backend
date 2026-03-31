@@ -18,11 +18,13 @@ from accounts.api_v1 import jwt_bearer_auth
 from accounts.models import Organization, OrganizationMembership, User
 from config.api_common import (
     ApiError,
+    ErrorResponseSchema,
     build_paginated_response,
     form_error_detail,
     paginate_queryset,
     validate_form,
 )
+from contributions.services import ContributionDataUnavailableError
 
 from . import services
 from .allocation_services import AllocationService
@@ -324,7 +326,13 @@ def _resolve_source_pool(
         )
         owner = organization
 
-    wallet = services.get_or_create_wallet(owner)
+    wallet = services.get_wallet_or_none(owner)
+    if wallet is None:
+        raise ApiError(
+            "not_found",
+            404,
+            "The requested point pool was not found.",
+        )
     sources = PointSource.objects.filter(
         wallet=wallet,
         point_type=selector.point_type,
@@ -401,6 +409,16 @@ def _validate_allocation_request(payload: AllocationPreviewRequestSchema) -> Non
             _validation_detail(
                 "adjustment_ratio",
                 "adjustment_ratio must be greater than zero.",
+            ),
+        )
+    if payload.start_month > payload.end_month:
+        raise ApiError(
+            "validation_error",
+            422,
+            "Request validation failed.",
+            _validation_detail(
+                "end_month",
+                "end_month must be greater than or equal to start_month.",
             ),
         )
     invalid_adjustments = [
@@ -510,20 +528,26 @@ def _raise_points_service_error(message: str) -> None:
 
 
 def _wallet_response(owner) -> dict:
-    wallet = services.get_or_create_wallet(owner)
-    recent_transactions = wallet.transactions.select_related(
-        "tag", "created_by"
-    ).order_by("-created_at")[:10]
+    wallet = services.get_wallet_or_none(owner)
+    recent_transactions = []
+    wallet_id = None
+    if wallet is not None:
+        wallet_id = wallet.id
+        recent_transactions = list(
+            wallet.transactions.select_related("tag", "created_by").order_by(
+                "-created_at"
+            )[:10]
+        )
     return {
-        "balance": services.get_detailed_balance(owner),
-        "wallet_id": wallet.id,
+        "balance": services.get_detailed_balance_or_zero(owner),
+        "wallet_id": wallet_id,
         "recent_transactions": [
             _serialize_transaction(txn) for txn in recent_transactions
         ],
     }
 
 
-@router.get("/me/wallet")
+@router.get("/me/wallet", response={200: dict, 401: ErrorResponseSchema})
 def current_user_wallet_endpoint(request):
     """Return the current user's wallet summary."""
     return _wallet_response(request.auth)
@@ -538,10 +562,12 @@ def current_user_transactions_endpoint(
     page_size: int = 20,
 ):
     """List the current user's points transactions."""
-    wallet = services.get_or_create_wallet(request.auth)
-    transactions = wallet.transactions.select_related("tag", "created_by").order_by(
-        "-created_at"
-    )
+    wallet = services.get_wallet_or_none(request.auth)
+    transactions = PointTransaction.objects.none()
+    if wallet is not None:
+        transactions = wallet.transactions.select_related("tag", "created_by").order_by(
+            "-created_at"
+        )
     if point_type:
         transactions = transactions.filter(point_type=point_type)
     if transaction_type:
@@ -563,8 +589,12 @@ def current_user_transactions_endpoint(
 @router.get("/me/withdrawals")
 def current_user_withdrawals_endpoint(request, page: int = 1, page_size: int = 20):
     """List the current user's withdrawal requests."""
-    wallet = services.get_or_create_wallet(request.auth)
-    withdrawals = wallet.withdrawals.order_by("-created_at")
+    wallet = services.get_wallet_or_none(request.auth)
+    withdrawals = (
+        wallet.withdrawals.order_by("-created_at")
+        if wallet is not None
+        else WithdrawalRequest.objects.none()
+    )
     page_obj = paginate_queryset(
         withdrawals, page=page, page_size=page_size, max_page_size=100
     )
@@ -574,7 +604,15 @@ def current_user_withdrawals_endpoint(request, page: int = 1, page_size: int = 2
     )
 
 
-@router.post("/me/withdrawals")
+@router.post(
+    "/me/withdrawals",
+    response={
+        201: dict,
+        401: ErrorResponseSchema,
+        409: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def current_user_withdrawal_create_endpoint(request):
     """Create a withdrawal request for the current user."""
     data, invoice_file = _parse_request_data(request)
@@ -600,7 +638,7 @@ def current_user_withdrawal_create_endpoint(request):
     except (services.InsufficientPointsError, services.WithdrawalError) as exc:
         _raise_points_service_error(str(exc))
         raise AssertionError("unreachable")
-    return _serialize_withdrawal(withdrawal)
+    return 201, _serialize_withdrawal(withdrawal)
 
 
 @router.post("/me/withdrawals/{withdrawal_id}/cancel")
@@ -614,7 +652,15 @@ def current_user_withdrawal_cancel_endpoint(request, withdrawal_id: int):
     return _serialize_withdrawal(withdrawal)
 
 
-@router.get("/organizations/{slug}/wallet")
+@router.get(
+    "/organizations/{slug}/wallet",
+    response={
+        200: dict,
+        401: ErrorResponseSchema,
+        403: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+    },
+)
 def organization_wallet_endpoint(request, slug: str):
     """Return wallet summary for an organization the current user belongs to."""
     organization, membership = _get_org_member_or_error(request.auth, slug)
@@ -643,10 +689,12 @@ def organization_transactions_endpoint(
 ):
     """List organization transactions for current members."""
     organization, membership = _get_org_member_or_error(request.auth, slug)
-    wallet = services.get_or_create_wallet(organization)
-    transactions = wallet.transactions.select_related("tag", "created_by").order_by(
-        "-created_at"
-    )
+    wallet = services.get_wallet_or_none(organization)
+    transactions = PointTransaction.objects.none()
+    if wallet is not None:
+        transactions = wallet.transactions.select_related("tag", "created_by").order_by(
+            "-created_at"
+        )
     if point_type:
         transactions = transactions.filter(point_type=point_type)
     if transaction_type:
@@ -677,9 +725,11 @@ def organization_withdrawals_endpoint(
 ):
     """List withdrawal requests for an organization."""
     organization, membership = _get_org_admin_or_error(request.auth, slug)
-    wallet = services.get_or_create_wallet(organization)
+    wallet = services.get_wallet_or_none(organization)
     page_obj = paginate_queryset(
-        wallet.withdrawals.order_by("-created_at"),
+        wallet.withdrawals.order_by("-created_at")
+        if wallet is not None
+        else WithdrawalRequest.objects.none(),
         page=page,
         page_size=page_size,
         max_page_size=100,
@@ -697,7 +747,17 @@ def organization_withdrawals_endpoint(
     return response
 
 
-@router.post("/organizations/{slug}/withdrawals")
+@router.post(
+    "/organizations/{slug}/withdrawals",
+    response={
+        201: dict,
+        401: ErrorResponseSchema,
+        403: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+        409: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def organization_withdrawal_create_endpoint(request, slug: str):
     """Create a withdrawal request for an organization."""
     organization, _membership = _get_org_admin_or_error(request.auth, slug)
@@ -724,13 +784,22 @@ def organization_withdrawal_create_endpoint(request, slug: str):
     except (services.InsufficientPointsError, services.WithdrawalError) as exc:
         _raise_points_service_error(str(exc))
         raise AssertionError("unreachable")
-    return _serialize_withdrawal(withdrawal)
+    return 201, _serialize_withdrawal(withdrawal)
 
 
 @router.post("/organizations/{slug}/withdrawals/{withdrawal_id}/cancel")
 def organization_withdrawal_cancel_endpoint(request, slug: str, withdrawal_id: int):
     """Cancel a pending organization withdrawal request."""
-    _organization, _membership = _get_org_admin_or_error(request.auth, slug)
+    organization, _membership = _get_org_admin_or_error(request.auth, slug)
+    wallet = services.get_wallet_or_none(organization)
+    if (
+        wallet is None
+        or not WithdrawalRequest.objects.filter(
+            id=withdrawal_id,
+            wallet=wallet,
+        ).exists()
+    ):
+        raise ApiError("not_found", 404, "The requested withdrawal was not found.")
     try:
         withdrawal = services.cancel_withdrawal(withdrawal_id, request.auth)
     except services.WithdrawalError as exc:
@@ -816,11 +885,20 @@ def point_tag_search_endpoint(request, q: str = ""):
             "tag_search_unavailable",
             503,
             "Tag search is currently unavailable.",
-            {"reason": str(exc)},
         ) from exc
 
 
-@router.post("/allocations/preview")
+@router.post(
+    "/allocations/preview",
+    response={
+        200: dict,
+        401: ErrorResponseSchema,
+        403: ErrorResponseSchema,
+        409: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+        503: ErrorResponseSchema,
+    },
+)
 def allocation_preview_endpoint(request, payload: AllocationPreviewRequestSchema):
     """Preview a points allocation run without executing it."""
     _validate_allocation_request(payload)
@@ -836,7 +914,16 @@ def allocation_preview_endpoint(request, payload: AllocationPreviewRequestSchema
         )
 
     allocation = _build_unsaved_allocation(payload, source_pool)
-    preview = _normalize_preview_items(AllocationService.preview_allocation(allocation))
+    try:
+        preview = _normalize_preview_items(
+            AllocationService.preview_allocation(allocation)
+        )
+    except ContributionDataUnavailableError as exc:
+        raise ApiError(
+            "contribution_data_unavailable",
+            503,
+            "Contribution data is currently unavailable.",
+        ) from exc
     return {
         "source_selector": payload.source_selector.model_dump(),
         "available_balance": available_balance,
@@ -846,7 +933,17 @@ def allocation_preview_endpoint(request, payload: AllocationPreviewRequestSchema
     }
 
 
-@router.post("/allocations")
+@router.post(
+    "/allocations",
+    response={
+        201: dict,
+        401: ErrorResponseSchema,
+        403: ErrorResponseSchema,
+        409: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+        503: ErrorResponseSchema,
+    },
+)
 def allocation_execute_endpoint(request, payload: AllocationPreviewRequestSchema):
     """Create and execute a points allocation."""
     _validate_allocation_request(payload)
@@ -876,16 +973,22 @@ def allocation_execute_endpoint(request, payload: AllocationPreviewRequestSchema
     )
     try:
         result = AllocationService.execute_allocation(allocation)
+    except ContributionDataUnavailableError as exc:
+        allocation.delete()
+        raise ApiError(
+            "contribution_data_unavailable",
+            503,
+            "Contribution data is currently unavailable.",
+        ) from exc
     except (services.InsufficientPointsError, RuntimeError, ValueError) as exc:
         raise ApiError(
             "allocation_failed",
             409,
             "The allocation could not be executed.",
-            {"reason": str(exc)},
         ) from exc
 
     allocation.refresh_from_db()
-    return {"result": result, "allocation": _serialize_allocation(allocation)}
+    return 201, {"result": result, "allocation": _serialize_allocation(allocation)}
 
 
 def _user_can_access_allocation(user, allocation: PointAllocation) -> bool:

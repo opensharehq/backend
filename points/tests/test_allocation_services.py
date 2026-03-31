@@ -12,6 +12,7 @@ from django.utils import timezone
 from social_django.models import UserSocialAuth
 
 from accounts.models import User
+from contributions.services import ContributionDataUnavailableError
 from points.allocation_services import AllocationService
 from points.models import (
     AllocationStatus,
@@ -41,17 +42,36 @@ class AllocationServiceTests(TestCase):
         )
         self.tag_operation_patcher.start()
         self.addCleanup(self.tag_operation_patcher.stop)
-        self.contribution_patcher = patch(
-            "contributions.services.ContributionService.query_from_clickhouse",
-            side_effect=Exception("ClickHouse unavailable"),
-        )
-        self.contribution_patcher.start()
-        self.addCleanup(self.contribution_patcher.stop)
 
         # 创建测试用户
         self.user = User.objects.create_user(
             username="testuser", email="test@example.com"
         )
+
+        self.mock_contributions = [
+            {
+                "github_id": "123456",
+                "github_login": self.user.username,
+                "email": self.user.email,
+                "contribution_score": Decimal("100.0"),
+                "is_registered": True,
+                "user_id": self.user.id,
+            },
+            {
+                "github_id": "654321",
+                "github_login": "external-contributor",
+                "email": "external@example.com",
+                "contribution_score": Decimal("50.0"),
+                "is_registered": False,
+                "user_id": None,
+            },
+        ]
+        self.contribution_patcher = patch(
+            "points.allocation_services.ContributionService.get_contributions",
+            return_value=self.mock_contributions,
+        )
+        self.contribution_patcher.start()
+        self.addCleanup(self.contribution_patcher.stop)
 
         # 创建钱包
         self.wallet = PointWallet.objects.create(
@@ -110,6 +130,29 @@ class AllocationServiceTests(TestCase):
             self.assertIn("calculated_points", item)
             self.assertIn("adjusted_points", item)
             self.assertIn("is_registered", item)
+
+    def test_preview_allocation_raises_when_contribution_data_is_unavailable(self):
+        """Test contribution backend failures propagate as structured availability errors."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        with (
+            patch(
+                "points.allocation_services.ContributionService.get_contributions",
+                side_effect=ContributionDataUnavailableError(
+                    "Contribution data is currently unavailable."
+                ),
+            ),
+            self.assertRaises(ContributionDataUnavailableError),
+        ):
+            AllocationService.preview_allocation(allocation)
 
     def test_preview_allocation_with_adjustment_ratio(self):
         """Test allocation preview with global adjustment ratio."""
@@ -781,7 +824,9 @@ class AllocationServiceTests(TestCase):
         )
         self.assertEqual(sum(item["adjusted_points"] for item in results), 2)
 
-    def test_scale_results_to_total_amount_raises_when_scaled_total_exceeds_target(self):
+    def test_scale_results_to_total_amount_raises_when_scaled_total_exceeds_target(
+        self,
+    ):
         """Scaling should assert if floor rounding ever overshoots the target total."""
         results = [
             {"adjusted_points": 2},

@@ -8,7 +8,7 @@ from django.test import TestCase
 from social_django.models import UserSocialAuth
 
 from accounts.models import User
-from contributions.services import ContributionService
+from contributions.services import ContributionDataUnavailableError, ContributionService
 
 
 class ContributionServiceTests(TestCase):
@@ -31,60 +31,14 @@ class ContributionServiceTests(TestCase):
         "chdb.services.query_contributions",
         side_effect=Exception("ClickHouse connection failed"),
     )
-    def test_get_contributions_falls_back_to_exact_fake_payload(self, _mock_query):
-        """ClickHouse failures should fall back to the synthetic payload shape we expose."""
-        results = ContributionService.get_contributions(
-            project_identifiers=["repo:github:test"],
-            start_month=date(2024, 1, 1),
-            end_month=date(2024, 12, 1),
-        )
-
-        self.assertEqual(len(results), 5)
-
-        by_login = {item["github_login"]: item for item in results}
-        self.assertEqual(
-            set(by_login),
-            {
-                "testuser1",
-                "testuser2",
-                "bob_unregistered",
-                "charlie_dev",
-                "diana_contributor",
-            },
-        )
-        self.assertEqual(
-            by_login["testuser1"],
-            {
-                "github_id": "123456",
-                "github_login": "testuser1",
-                "email": "test1@example.com",
-                "contribution_score": Decimal("250.5"),
-                "is_registered": True,
-                "user_id": self.user1.id,
-            },
-        )
-        self.assertEqual(
-            by_login["testuser2"],
-            {
-                "github_id": "789012",
-                "github_login": "testuser2",
-                "email": "test2@example.com",
-                "contribution_score": Decimal("230.5"),
-                "is_registered": True,
-                "user_id": self.user2.id,
-            },
-        )
-        self.assertEqual(
-            by_login["bob_unregistered"],
-            {
-                "github_id": "2345678",
-                "github_login": "bob_unregistered",
-                "email": "bob@example.com",
-                "contribution_score": Decimal("180.3"),
-                "is_registered": False,
-                "user_id": None,
-            },
-        )
+    def test_get_contributions_raises_when_clickhouse_is_unavailable(self, _mock_query):
+        """ClickHouse failures should fail explicitly instead of falling back to fake data."""
+        with self.assertRaises(ContributionDataUnavailableError):
+            ContributionService.get_contributions(
+                project_identifiers=["repo:github:test"],
+                start_month=date(2024, 1, 1),
+                end_month=date(2024, 12, 1),
+            )
 
     @patch("chdb.services.query_contributions", return_value=[])
     def test_get_contributions_preserves_empty_success_result(self, _mock_query):

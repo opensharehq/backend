@@ -11,7 +11,13 @@ from ninja import Router, Schema
 from accounts.api_serializers import serialize_shipping_address
 from accounts.api_v1 import jwt_bearer_auth
 from accounts.models import ShippingAddress
-from config.api_common import ApiError, build_paginated_response, paginate_queryset
+from config.api_common import (
+    ApiError,
+    ErrorResponseSchema,
+    PaginationSchema,
+    build_paginated_response,
+    paginate_queryset,
+)
 from points import services as points_services
 
 from .models import Redemption, ShopItem
@@ -23,6 +29,71 @@ router = Router(tags=["shop"], auth=jwt_bearer_auth)
 class RedemptionCreateSchema(Schema):
     item_id: int
     shipping_address_id: int | None = None
+
+
+class ShopItemAllowedTagSchema(Schema):
+    slug: str
+    name: str
+    tag_type: str
+
+
+class ShippingAddressSchema(Schema):
+    id: int
+    receiver_name: str
+    phone: str
+    province: str
+    city: str
+    district: str
+    address: str
+    is_default: bool
+    created_at: str
+    updated_at: str
+
+
+class DetailedBalanceSchema(Schema):
+    total: int
+    cash: int
+    gift: int
+    gift_no_tag: int
+    by_tag: dict[str, int]
+
+
+class ShopItemSchema(Schema):
+    id: int
+    name: str
+    description: str
+    cost: int
+    stock: int | None = None
+    is_active: bool
+    image_url: str | None = None
+    requires_shipping: bool
+    allowed_tags: list[ShopItemAllowedTagSchema]
+    created_at: str
+    updated_at: str
+
+
+class ShopItemDetailSchema(ShopItemSchema):
+    shipping_addresses: list[ShippingAddressSchema] | None = None
+
+
+class ShopItemListResponseSchema(Schema):
+    items: list[ShopItemSchema]
+    pagination: PaginationSchema
+    balance: DetailedBalanceSchema
+
+
+class RedemptionSchema(Schema):
+    id: int
+    status: str
+    points_cost: int
+    created_at: str
+    item: ShopItemSchema
+    shipping_address: ShippingAddressSchema | None = None
+
+
+class RedemptionListResponseSchema(Schema):
+    items: list[RedemptionSchema]
+    pagination: PaginationSchema
 
 
 def _serialize_shop_item(item: ShopItem) -> dict:
@@ -108,7 +179,10 @@ def _raise_redemption_api_error(message: str) -> None:
     raise ApiError("redemption_failed", 409, "The item could not be redeemed.")
 
 
-@router.get("/items")
+@router.get(
+    "/items",
+    response={200: ShopItemListResponseSchema, 401: ErrorResponseSchema},
+)
 def shop_item_list_endpoint(request, page: int = 1, page_size: int = 20):
     """List active shop items."""
     items_qs = (
@@ -123,11 +197,18 @@ def shop_item_list_endpoint(request, page: int = 1, page_size: int = 20):
         page_obj,
         [_serialize_shop_item(item) for item in page_obj.object_list],
     )
-    response["balance"] = points_services.get_detailed_balance(request.auth)
+    response["balance"] = points_services.get_detailed_balance_or_zero(request.auth)
     return response
 
 
-@router.get("/items/{item_id}")
+@router.get(
+    "/items/{item_id}",
+    response={
+        200: ShopItemDetailSchema,
+        401: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+    },
+)
 def shop_item_detail_endpoint(request, item_id: int):
     """Return a single active shop item."""
     item = get_object_or_404(
@@ -142,7 +223,10 @@ def shop_item_detail_endpoint(request, item_id: int):
     return payload
 
 
-@router.get("/redemptions")
+@router.get(
+    "/redemptions",
+    response={200: RedemptionListResponseSchema, 401: ErrorResponseSchema},
+)
 def redemption_list_endpoint(request, page: int = 1, page_size: int = 20):
     """List the current user's redemption history."""
     redemptions = (
@@ -162,7 +246,14 @@ def redemption_list_endpoint(request, page: int = 1, page_size: int = 20):
     )
 
 
-@router.get("/redemptions/{redemption_id}")
+@router.get(
+    "/redemptions/{redemption_id}",
+    response={
+        200: RedemptionSchema,
+        401: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+    },
+)
 def redemption_detail_endpoint(request, redemption_id: int):
     """Return a single redemption record owned by the current user."""
     redemption = get_object_or_404(
@@ -175,7 +266,16 @@ def redemption_detail_endpoint(request, redemption_id: int):
     return _serialize_redemption(redemption)
 
 
-@router.post("/redemptions")
+@router.post(
+    "/redemptions",
+    response={
+        201: RedemptionSchema,
+        401: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+        409: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def redemption_create_endpoint(request, payload: RedemptionCreateSchema):
     """Redeem a shop item."""
     try:
@@ -193,4 +293,4 @@ def redemption_create_endpoint(request, payload: RedemptionCreateSchema):
         .prefetch_related("item__allowed_tags")
         .get(id=redemption.id)
     )
-    return _serialize_redemption(redemption)
+    return 201, _serialize_redemption(redemption)

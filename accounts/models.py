@@ -40,6 +40,42 @@ class User(AbstractUser):
         return wallet
 
 
+class RefreshToken(models.Model):
+    """Server-side lifecycle record for JWT refresh tokens."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="refresh_tokens",
+        verbose_name="用户",
+    )
+    jti = models.UUIDField(default=uuid.uuid4, unique=True, verbose_name="令牌ID")
+    expires_at = models.DateTimeField(verbose_name="过期时间", db_index=True)
+    revoked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="吊销时间",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        """Meta configuration for RefreshToken."""
+
+        verbose_name = "刷新令牌"
+        verbose_name_plural = verbose_name
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "created_at"]),
+        ]
+
+    @property
+    def is_active(self) -> bool:
+        """Return whether the token record is still usable."""
+        from django.utils import timezone
+
+        return self.revoked_at is None and self.expires_at > timezone.now()
+
+
 class UserProfile(models.Model):
     """User profile model with bio and social links."""
 

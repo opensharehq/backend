@@ -79,6 +79,12 @@ env = environ.Env(
     JWT_SECRET_KEY=(str, ""),
     JWT_ALGORITHM=(str, "HS256"),
     JWT_ACCESS_TTL_SECONDS=(int, 86400),
+    JWT_REFRESH_TTL_SECONDS=(int, 2592000),
+    SOCIAL_AUTH_EXCHANGE_CODE_TTL_SECONDS=(int, 300),
+    FRONTEND_APP_URL=(str, ""),
+    FRONTEND_SOCIAL_CALLBACK_PATH=(str, "/auth/social/callback"),
+    FRONTEND_PASSWORD_RESET_PATH=(str, "/auth/password-reset"),
+    CORS_ALLOWED_ORIGINS=(list, []),
 )
 
 TESTING = "test" in sys.argv or "PYTEST_VERSION" in os.environ
@@ -93,6 +99,12 @@ USE_TZ = env("USE_TZ")
 JWT_SECRET_KEY = env("JWT_SECRET_KEY") or SECRET_KEY
 JWT_ALGORITHM = env("JWT_ALGORITHM")
 JWT_ACCESS_TTL_SECONDS = env("JWT_ACCESS_TTL_SECONDS")
+JWT_REFRESH_TTL_SECONDS = env("JWT_REFRESH_TTL_SECONDS")
+SOCIAL_AUTH_EXCHANGE_CODE_TTL_SECONDS = env("SOCIAL_AUTH_EXCHANGE_CODE_TTL_SECONDS")
+FRONTEND_APP_URL = env("FRONTEND_APP_URL")
+FRONTEND_SOCIAL_CALLBACK_PATH = env("FRONTEND_SOCIAL_CALLBACK_PATH")
+FRONTEND_PASSWORD_RESET_PATH = env("FRONTEND_PASSWORD_RESET_PATH")
+CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS")
 AWS_S3_ACCESS_KEY_ID = env("AWS_S3_ACCESS_KEY_ID")
 AWS_S3_SECRET_ACCESS_KEY = env("AWS_S3_SECRET_ACCESS_KEY")
 AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME")
@@ -148,6 +160,7 @@ _BASE_MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.http.ConditionalGetMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "common.middleware.ApiCorsMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",

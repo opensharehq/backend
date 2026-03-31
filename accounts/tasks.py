@@ -1,6 +1,7 @@
 """Background tasks for accounts app."""
 
 import logging
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
@@ -11,6 +12,21 @@ from django.utils.http import urlsafe_base64_encode
 from django_tasks import task
 
 logger = logging.getLogger(__name__)
+
+
+def _build_password_reset_url(
+    domain: str, use_https: bool, uid: str, token: str
+) -> str:
+    """Build the password-reset URL for either the frontend or Django pages."""
+    if settings.FRONTEND_APP_URL:
+        query = urlencode({"uid": uid, "token": token})
+        return (
+            f"{settings.FRONTEND_APP_URL.rstrip('/')}"
+            f"{settings.FRONTEND_PASSWORD_RESET_PATH}?{query}"
+        )
+
+    protocol = "https" if use_https else "http"
+    return f"{protocol}://{domain}/accounts/password-reset-confirm/{uid}/{token}/"
 
 
 @task()
@@ -30,8 +46,7 @@ def send_password_reset_email(user_id, domain, use_https=False):
     uid = urlsafe_base64_encode(force_bytes(user.pk))
 
     # 构建重置链接
-    protocol = "https" if use_https else "http"
-    reset_url = f"{protocol}://{domain}/accounts/password-reset-confirm/{uid}/{token}/"
+    reset_url = _build_password_reset_url(domain, use_https, uid, token)
 
     # 渲染邮件内容
     context = {

@@ -63,9 +63,10 @@ class ApiV1AuthTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "invalid_credentials")
         self.assertEqual(
-            response.json(),
-            {"code": "invalid_credentials", "message": "用户名或密码错误，请重试"},
+            response.json()["message"],
+            "Invalid username, email, or password.",
         )
 
     def test_login_for_inactive_user_returns_disabled_error(self):
@@ -84,10 +85,8 @@ class ApiV1AuthTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(
-            response.json(),
-            {"code": "account_disabled", "message": "账号已被停用，请联系管理员"},
-        )
+        self.assertEqual(response.json()["code"], "account_disabled")
+        self.assertEqual(response.json()["message"], "This account is disabled.")
 
     def test_login_for_merged_account_returns_merge_hint(self):
         """Merged source accounts should return the target account hint."""
@@ -113,7 +112,7 @@ class ApiV1AuthTests(TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["code"], "account_merged")
-        self.assertIn(target.email, response.json()["message"])
+        self.assertIn("destination account", response.json()["message"])
 
     def test_login_request_validation_error_uses_api_shape(self):
         """Invalid request payloads should return the shared validation shape."""
@@ -125,7 +124,7 @@ class ApiV1AuthTests(TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["code"], "validation_error")
-        self.assertEqual(response.json()["message"], "请求参数校验失败")
+        self.assertEqual(response.json()["message"], "Request validation failed.")
         self.assertTrue(response.json()["detail"])
 
     def test_verify_returns_current_user_for_valid_token(self):
@@ -158,7 +157,10 @@ class ApiV1AuthTests(TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(
             response.json(),
-            {"code": "invalid_token", "message": "Token 无效或已过期"},
+            {
+                "code": "invalid_token",
+                "message": "The token is invalid or has expired.",
+            },
         )
 
     def test_verify_rejects_wrong_authorization_scheme(self):
@@ -170,6 +172,70 @@ class ApiV1AuthTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["code"], "invalid_token")
+
+    def test_register_returns_token_pair(self):
+        """Registering through the API should issue JWT tokens."""
+        response = self.client.post(
+            "/api/v1/auth/register",
+            {
+                "username": "new_api_user",
+                "email": "new_api_user@example.com",
+                "password1": "StrongPass123!",
+                "password2": "StrongPass123!",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["user"]["username"], "new_api_user")
+        self.assertTrue(payload["access_token"])
+        self.assertTrue(payload["refresh_token"])
+
+    def test_refresh_rotates_refresh_token(self):
+        """Refreshing should return a new token pair."""
+        login_response = self.client.post(
+            self.login_url,
+            {"account": self.user.username, "password": self.password},
+            content_type="application/json",
+        )
+        refresh_token = login_response.json()["refresh_token"]
+
+        response = self.client.post(
+            "/api/v1/auth/refresh",
+            {"refresh_token": refresh_token},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertNotEqual(payload["refresh_token"], refresh_token)
+        self.assertEqual(payload["user"]["id"], self.user.id)
+
+    def test_logout_revokes_refresh_token(self):
+        """Logging out should revoke the provided refresh token."""
+        login_response = self.client.post(
+            self.login_url,
+            {"account": self.user.username, "password": self.password},
+            content_type="application/json",
+        )
+        refresh_token = login_response.json()["refresh_token"]
+
+        response = self.client.post(
+            "/api/v1/auth/logout",
+            {"refresh_token": refresh_token},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"revoked": True})
+
+        second_response = self.client.post(
+            "/api/v1/auth/refresh",
+            {"refresh_token": refresh_token},
+            content_type="application/json",
+        )
+        self.assertEqual(second_response.status_code, 401)
 
     def test_verify_rejects_forged_token(self):
         """Tokens signed with the wrong secret should be rejected."""

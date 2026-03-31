@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
 
@@ -57,6 +57,24 @@ def _merge_validation_details(*details: dict) -> dict:
         for field, errors in detail.items():
             merged.setdefault(field, []).extend(errors)
     return merged
+
+
+def _slug_conflict_error() -> ApiError:
+    message = "The organization slug is already in use."
+    return ApiError(
+        "slug_conflict",
+        409,
+        message,
+        _validation_detail("slug", message, code="conflict"),
+    )
+
+
+def _member_exists_error() -> ApiError:
+    return ApiError(
+        "member_exists",
+        409,
+        "The specified user is already a member of this organization.",
+    )
 
 
 def _get_membership_or_error(
@@ -214,12 +232,17 @@ def organization_list_endpoint(request):
     }
 
 
-@router.post("", response={201: dict, 422: ErrorResponseSchema})
+@router.post(
+    "", response={201: dict, 409: ErrorResponseSchema, 422: ErrorResponseSchema}
+)
 def organization_create_endpoint(request, payload: OrganizationCreateSchema):
     """Create a new organization and add the current user as owner."""
     validated = _validate_organization_payload(payload)
     with transaction.atomic():
-        organization = Organization.objects.create(**validated)
+        try:
+            organization = Organization.objects.create(**validated)
+        except IntegrityError as exc:
+            raise _slug_conflict_error() from exc
         membership = OrganizationMembership.objects.create(
             user=request.auth,
             organization=organization,
@@ -415,17 +438,16 @@ def organization_member_add_endpoint(
         user=user_to_add,
         organization=organization,
     ).exists():
-        raise ApiError(
-            "member_exists",
-            409,
-            "The specified user is already a member of this organization.",
-        )
+        raise _member_exists_error()
 
-    membership = OrganizationMembership.objects.create(
-        user=user_to_add,
-        organization=organization,
-        role=payload.role,
-    )
+    try:
+        membership = OrganizationMembership.objects.create(
+            user=user_to_add,
+            organization=organization,
+            role=payload.role,
+        )
+    except IntegrityError as exc:
+        raise _member_exists_error() from exc
     return 201, serialize_membership(membership)
 
 

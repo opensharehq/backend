@@ -1,9 +1,11 @@
 """Tests for organization API endpoints."""
 
 import tempfile
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError
 from django.test import TestCase, override_settings
 
 from accounts.models import Organization, OrganizationMembership
@@ -235,6 +237,54 @@ class ApiV1OrganizationTests(TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["code"], "validation_error")
+
+    def test_create_organization_returns_conflict_on_slug_integrity_error(self):
+        """Slug uniqueness races should surface as a conflict instead of a 500."""
+        with mock.patch(
+            "accounts.api_orgs_v1.Organization.objects.create",
+            side_effect=IntegrityError,
+        ):
+            response = self.client.post(
+                "/api/v1/organizations/",
+                {
+                    "name": "New Org",
+                    "slug": "racy-slug",
+                    "description": "Race condition",
+                    "website": "https://example.com",
+                    "location": "Shanghai",
+                },
+                content_type="application/json",
+                **self.headers,
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "slug_conflict")
+
+    def test_member_add_returns_conflict_on_membership_integrity_error(self):
+        """Membership uniqueness races should surface as member_exists."""
+        organization = Organization.objects.create(name="Org", slug="org-race")
+        OrganizationMembership.objects.create(
+            user=self.owner,
+            organization=organization,
+            role=OrganizationMembership.Role.OWNER,
+        )
+
+        with mock.patch(
+            "accounts.api_orgs_v1.OrganizationMembership.objects.create",
+            side_effect=IntegrityError,
+        ):
+            response = self.client.post(
+                f"/api/v1/organizations/{organization.slug}/members",
+                {
+                    "username": self.member.username,
+                    "role": OrganizationMembership.Role.MEMBER,
+                },
+                content_type="application/json",
+                **self.headers,
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "member_exists")
 
     def test_organization_detail_includes_membership(self):
         """Organization detail payload should include membership for the current user."""

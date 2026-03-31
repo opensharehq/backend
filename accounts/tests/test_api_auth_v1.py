@@ -1,7 +1,7 @@
 """Tests for API v1 JWT authentication flows."""
 
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlparse
 
 import jwt
@@ -447,24 +447,17 @@ class ApiV1AuthTests(TestCase):
     ):
         """Duplicate emails should pick a usable-password account without crashing."""
         duplicate_email = "duplicate-reset@example.com"
-        social_user = self.User.objects.create_user(
-            username="duplicate_social_only",
-            email=duplicate_email,
-            password=None,
-        )
-        social_user.set_unusable_password()
-        social_user.save(update_fields=["password"])
-        password_user = self.User.objects.create_user(
-            username="duplicate_password_user",
-            email=duplicate_email,
-            password="AnotherStrongPass123!",
-        )
-
-        response = self.client.post(
-            "/api/v1/auth/password/reset/request",
-            {"email": duplicate_email},
-            content_type="application/json",
-        )
+        social_user = Mock(pk=101, id=101)
+        password_user = Mock(pk=102, id=102)
+        with patch(
+            "accounts.api_v1.select_password_reset_user",
+            return_value=(password_user, [social_user, password_user]),
+        ):
+            response = self.client.post(
+                "/api/v1/auth/password/reset/request",
+                {"email": duplicate_email},
+                content_type="application/json",
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(

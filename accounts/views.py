@@ -1,5 +1,6 @@
 """Views for user authentication and profile management."""
 
+import logging
 import secrets
 from datetime import timedelta
 
@@ -29,6 +30,7 @@ from messages.models import Message as InboxMessage
 from shop.models import Redemption, ShopItem
 from shop.services import RedemptionError, redeem_item
 
+from .email_addresses import select_password_reset_user
 from .forms import (
     AccountMergeRequestForm,
     ChangeEmailForm,
@@ -57,6 +59,8 @@ from .services.authentication import (
     authenticate_by_login_id,
 )
 from .tasks import send_password_reset_email
+
+logger = logging.getLogger(__name__)
 
 
 def accounts_index(request):
@@ -105,10 +109,18 @@ def sign_up_view(request):
     if request.method == "POST":
         form = SignUpForm(request.POST)
         if form.is_valid():
-            user = form.save()
-            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-            messages.success(request, "注册成功！欢迎加入 Open Share")
-            return redirect("homepage:index")
+            try:
+                user = form.save()
+            except IntegrityError:
+                form.add_error("email", "该邮箱已被注册")
+            else:
+                login(
+                    request,
+                    user,
+                    backend="django.contrib.auth.backends.ModelBackend",
+                )
+                messages.success(request, "注册成功！欢迎加入 Open Share")
+                return redirect("homepage:index")
     else:
         form = SignUpForm()
 
@@ -427,9 +439,13 @@ def change_email_view(request):
         if form.is_valid():
             new_email = form.cleaned_data["email"]
             request.user.email = new_email
-            request.user.save()
-            messages.success(request, "邮箱修改成功")
-            return redirect("accounts:profile")
+            try:
+                request.user.save(update_fields=["email"])
+            except IntegrityError:
+                form.add_error("email", "该邮箱已被其他用户使用")
+            else:
+                messages.success(request, "邮箱修改成功")
+                return redirect("accounts:profile")
     else:
         form = ChangeEmailForm(user=request.user)
 
@@ -686,48 +702,47 @@ def password_reset_request_view(request):
         form = PasswordResetRequestForm(request.POST)
         if form.is_valid():
             email = form.cleaned_data["email"]
-            User = get_user_model()
-
-            try:
-                user = User.objects.get(email=email)
-
-                # 检查用户是否有可用密码（即是否通过邮箱/用户名注册的）
-                if not user.has_usable_password():
-                    # 用户没有设置密码，检查是否有社交账号绑定
-                    social_auths = UserSocialAuth.objects.filter(user=user)
-                    if social_auths.exists():
-                        providers = ", ".join(
-                            auth.provider for auth in social_auths[:3]
-                        )
-                        messages.warning(
-                            request,
-                            f"该账号未设置密码，请使用社交账号登录（{providers}）",
-                        )
-                    else:
-                        messages.error(
-                            request,
-                            "该账号未设置密码且没有绑定社交账号，请联系管理员",
-                        )
-                    return redirect("accounts:password_reset_request")
-
-                # 发送密码重置邮件（异步任务）
-                domain = request.get_host()
-                use_https = request.is_secure()
-                send_password_reset_email.enqueue(user.id, domain, use_https)
-
-                messages.success(
-                    request,
-                    "密码重置链接已发送到您的邮箱，请检查收件箱（包括垃圾邮件文件夹）",
-                )
-                return redirect("accounts:password_reset_done")
-
-            except User.DoesNotExist:
+            user, matching_users = select_password_reset_user(email)
+            if not matching_users:
                 # 为了安全，不透露邮箱是否存在
                 messages.success(
                     request,
                     "如果该邮箱已注册，密码重置链接将发送到您的邮箱",
                 )
                 return redirect("accounts:password_reset_done")
+
+            if len(matching_users) > 1:
+                logger.warning(
+                    "Password reset requested for duplicate email %s across user ids %s",
+                    email,
+                    ",".join(str(candidate.pk) for candidate in matching_users),
+                )
+
+            if user is None:
+                social_user = matching_users[0]
+                social_auths = UserSocialAuth.objects.filter(user=social_user)
+                if social_auths.exists():
+                    providers = ", ".join(auth.provider for auth in social_auths[:3])
+                    messages.warning(
+                        request,
+                        f"该账号未设置密码，请使用社交账号登录（{providers}）",
+                    )
+                else:
+                    messages.error(
+                        request,
+                        "该账号未设置密码且没有绑定社交账号，请联系管理员",
+                    )
+                return redirect("accounts:password_reset_request")
+
+            domain = request.get_host()
+            use_https = request.is_secure()
+            send_password_reset_email.enqueue(user.id, domain, use_https)
+
+            messages.success(
+                request,
+                "密码重置链接已发送到您的邮箱，请检查收件箱（包括垃圾邮件文件夹）",
+            )
+            return redirect("accounts:password_reset_done")
     else:
         form = PasswordResetRequestForm()
 

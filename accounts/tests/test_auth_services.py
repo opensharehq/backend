@@ -1,7 +1,7 @@
 """Focused tests for account authentication service helpers."""
 
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import jwt
 from django.conf import settings
@@ -9,7 +9,14 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
-from accounts.services.authentication import PasswordLoginError
+from accounts.email_addresses import (
+    get_email_login_candidates,
+    select_password_reset_user,
+)
+from accounts.services.authentication import (
+    PasswordLoginError,
+    authenticate_by_login_id,
+)
 from accounts.services.jwt_tokens import (
     create_refresh_token,
     decode_access_token,
@@ -30,6 +37,57 @@ class PasswordLoginErrorTests(SimpleTestCase):
         )
 
         self.assertEqual(str(error), error.message)
+
+    @patch("accounts.services.authentication.get_email_login_candidates")
+    @patch("accounts.services.authentication.authenticate")
+    def test_authenticate_by_login_id_tries_all_matching_email_candidates(
+        self,
+        authenticate_mock,
+        get_candidates_mock,
+    ):
+        """Email login should iterate through candidates until one authenticates."""
+        first_candidate = Mock(username="first")
+        second_candidate = Mock(username="second")
+        matched_user = Mock(is_active=True, merged_into_id=None)
+        get_candidates_mock.return_value = [first_candidate, second_candidate]
+        authenticate_mock.side_effect = [None, None, matched_user]
+
+        user = authenticate_by_login_id("shared@example.com", "Secret123!")
+
+        self.assertIs(user, matched_user)
+        self.assertEqual(
+            authenticate_mock.call_args_list[1].kwargs["username"], "first"
+        )
+        self.assertEqual(
+            authenticate_mock.call_args_list[2].kwargs["username"], "second"
+        )
+
+    @patch("accounts.email_addresses.matching_email_users")
+    def test_select_password_reset_user_prefers_active_unmerged_password_account(
+        self,
+        matching_users_mock,
+    ):
+        """Password reset should choose the best usable account among matches."""
+        merged_user = Mock(pk=30, merged_into_id=100, is_active=False)
+        merged_user.has_usable_password.return_value = True
+        active_password_user = Mock(pk=20, merged_into_id=None, is_active=True)
+        active_password_user.has_usable_password.return_value = True
+        active_social_user = Mock(pk=10, merged_into_id=None, is_active=True)
+        active_social_user.has_usable_password.return_value = False
+        matching_users_mock.return_value = [
+            merged_user,
+            active_social_user,
+            active_password_user,
+        ]
+
+        user, candidates = select_password_reset_user("shared@example.com")
+
+        self.assertIs(user, active_password_user)
+        self.assertEqual(
+            get_email_login_candidates("shared@example.com"),
+            [active_password_user, active_social_user, merged_user],
+        )
+        self.assertEqual(candidates[0], active_password_user)
 
 
 class JwtTokenServiceTests(SimpleTestCase):

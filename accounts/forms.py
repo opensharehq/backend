@@ -9,6 +9,7 @@ from django.contrib.auth.forms import (
 )
 from django.utils import timezone
 
+from .email_addresses import email_in_use, normalize_email_address
 from .models import (
     AccountMergeRequest,
     Education,
@@ -35,8 +36,8 @@ class SignUpForm(UserCreationForm):
 
     def clean_email(self):
         """Validate email is unique."""
-        email = self.cleaned_data.get("email")
-        if get_user_model().objects.filter(email=email).exists():
+        email = normalize_email_address(self.cleaned_data.get("email"))
+        if email_in_use(email):
             msg = "该邮箱已被注册"
             raise forms.ValidationError(msg)
         return email
@@ -259,13 +260,13 @@ class ChangeEmailForm(forms.Form):
 
     def clean_email(self):
         """Validate email is unique and different from current."""
-        email = self.cleaned_data.get("email")
+        email = normalize_email_address(self.cleaned_data.get("email"))
 
-        if email == self.user.email:
+        if email == normalize_email_address(self.user.email):
             msg = "新邮箱不能与当前邮箱相同"
             raise forms.ValidationError(msg)
 
-        if get_user_model().objects.filter(email=email).exists():
+        if email_in_use(email, exclude_user=self.user):
             msg = "该邮箱已被其他用户使用"
             raise forms.ValidationError(msg)
 
@@ -296,6 +297,10 @@ class PasswordResetRequestForm(forms.Form):
         ),
         help_text="我们将向此邮箱发送密码重置链接",
     )
+
+    def clean_email(self):
+        """Normalize the entered email before downstream lookups."""
+        return normalize_email_address(self.cleaned_data.get("email"))
 
 
 class PasswordResetConfirmForm(SetPasswordForm):
@@ -398,7 +403,8 @@ class AccountMergeRequestForm(forms.Form):
         """Validate target user existence and business constraints."""
         cleaned = super().clean()
         username = cleaned.get("target_username")
-        email = cleaned.get("target_email")
+        email = normalize_email_address(cleaned.get("target_email"))
+        cleaned["target_email"] = email
 
         now = timezone.now()
         # expire stale pending requests globally to avoid blocking new submissions
@@ -417,11 +423,11 @@ class AccountMergeRequestForm(forms.Form):
         UserModel = get_user_model()
         qs = UserModel.objects.filter(is_active=True)
         if username and email:
-            qs = qs.filter(username=username, email=email)
+            qs = qs.filter(username=username, email__iexact=email)
         elif username:
             qs = qs.filter(username=username)
         else:
-            qs = qs.filter(email=email)
+            qs = qs.filter(email__iexact=email)
 
         try:
             target = qs.get()

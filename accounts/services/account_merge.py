@@ -33,8 +33,15 @@ class AccountMergeError(Exception):
     """Raised when merge cannot be performed."""
 
 
-def _log(request: AccountMergeRequest, table: str, counts=None, notes: str = ""):
+def _log(
+    request: AccountMergeRequest | None,
+    table: str,
+    counts=None,
+    notes: str = "",
+):
     """Persist a single merge log entry with aggregated counts."""
+    if request is None:
+        return
     counts = counts or {}
     AccountMergeLog.objects.create(
         request=request,
@@ -209,6 +216,38 @@ def _deactivate_source(source, target):
     source.save(update_fields=["is_active", "merged_into"])
 
 
+def merge_users(
+    source,
+    target,
+    *,
+    merge_request: AccountMergeRequest | None = None,
+    allow_inactive_source: bool = False,
+):
+    """Move source-account assets into the target and deactivate the source."""
+    if source.pk == target.pk:
+        msg = "不能合并到自己的账号"
+        raise AccountMergeError(msg)
+    if source.is_staff or source.is_superuser:
+        msg = "不允许合并管理员账号"
+        raise AccountMergeError(msg)
+    if not allow_inactive_source and not source.is_active:
+        msg = "源账号已停用，无法继续合并"
+        raise AccountMergeError(msg)
+    if not target.is_active:
+        msg = "目标账号已停用，无法继续合并"
+        raise AccountMergeError(msg)
+    if target.is_staff or target.is_superuser:
+        msg = "不允许合并到管理员账号"
+        raise AccountMergeError(msg)
+
+    _migrate_social_accounts(merge_request, source, target)
+    _migrate_redemptions(merge_request, source, target)
+    _migrate_shipping_addresses(merge_request, source, target)
+    _migrate_organization_memberships(merge_request, source, target)
+    _merge_profiles(merge_request, source, target)
+    _deactivate_source(source, target)
+
+
 @transaction.atomic
 def perform_merge(request_obj: AccountMergeRequest) -> AccountMergeRequest:
     """Execute merge steps inside a single transaction."""
@@ -247,22 +286,7 @@ def perform_merge(request_obj: AccountMergeRequest) -> AccountMergeRequest:
         .get(pk=merge_request.target_user_id)
     )
 
-    if not source.is_active:
-        msg = "源账号已停用，无法继续合并"
-        raise AccountMergeError(msg)
-    if not target.is_active:
-        msg = "目标账号已停用，无法继续合并"
-        raise AccountMergeError(msg)
-    if target.is_staff or target.is_superuser:
-        msg = "不允许合并到管理员账号"
-        raise AccountMergeError(msg)
-
-    _migrate_social_accounts(merge_request, source, target)
-    _migrate_redemptions(merge_request, source, target)
-    _migrate_shipping_addresses(merge_request, source, target)
-    _migrate_organization_memberships(merge_request, source, target)
-    _merge_profiles(merge_request, source, target)
-    _deactivate_source(source, target)
+    merge_users(source, target, merge_request=merge_request)
 
     # finalize request
     merge_request.status = AccountMergeRequest.Status.ACCEPTED

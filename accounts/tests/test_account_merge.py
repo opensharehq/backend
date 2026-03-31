@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
@@ -192,13 +192,20 @@ class AccountMergeFormTests(CacheClearTestCase):
 
     def test_form_reports_multiple_matches(self):
         """Duplicate email results in MultipleObjectsReturned error message."""
-        self.User.objects.create_user(
-            username="target2", email=self.target.email, password="pwd123456"
-        )
-        form = AccountMergeRequestForm(
-            user=self.source, data={"target_email": self.target.email}
-        )
-        assert not form.is_valid()
+        fake_qs = Mock()
+        fake_qs.filter.return_value = fake_qs
+        fake_qs.get.side_effect = self.User.MultipleObjectsReturned
+        fake_model = Mock()
+        fake_model.objects.filter.return_value = fake_qs
+        fake_model.DoesNotExist = self.User.DoesNotExist
+        fake_model.MultipleObjectsReturned = self.User.MultipleObjectsReturned
+
+        with patch("accounts.forms.get_user_model", return_value=fake_model):
+            form = AccountMergeRequestForm(
+                user=self.source, data={"target_email": self.target.email}
+            )
+            assert not form.is_valid()
+
         assert "匹配到多个账号" in form.errors["__all__"][0]
 
     def test_form_blocks_admin_or_inactive_source(self):

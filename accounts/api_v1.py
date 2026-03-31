@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.contrib.auth import get_user_model, logout
 from django.contrib.auth.tokens import default_token_generator
+from django.db import IntegrityError
 from django.http import HttpRequest, HttpResponseRedirect
 from django.urls import reverse
 from django.utils.encoding import force_str
@@ -25,6 +26,7 @@ from config.api_common import (
     validate_form,
 )
 
+from .email_addresses import select_password_reset_user
 from .forms import (
     ChangeEmailForm as ChangeEmailDjangoForm,
 )
@@ -48,6 +50,13 @@ from .services.social_exchange import (
     SocialExchangeUnavailableError,
     consume_exchange_code,
     create_exchange_code,
+)
+from .social_auth import (
+    FrontendSocialCallbackNotConfigured,
+    social_api_callback_path,
+)
+from .social_auth import (
+    build_frontend_social_callback_url as build_social_callback_url,
 )
 from .tasks import send_password_reset_email
 
@@ -309,23 +318,19 @@ def _get_provider_or_error(provider: str) -> dict[str, str]:
 
 def _social_callback_url(provider: str) -> str:
     """Return the API callback path used after social auth completes."""
-    return f"/api/v1/auth/social/{provider}/callback"
+    return social_api_callback_path(provider)
 
 
 def _build_frontend_social_callback_url(provider: str, **params: str) -> str:
     """Return the SPA callback URL for social-login handoff."""
-    if not settings.FRONTEND_APP_URL:
+    try:
+        return build_social_callback_url(provider, **params)
+    except FrontendSocialCallbackNotConfigured as exc:
         raise ApiError(
             "frontend_handoff_not_configured",
             503,
             "The frontend callback URL is not configured.",
-        )
-
-    query = urlencode({"provider": provider, **params})
-    return (
-        f"{settings.FRONTEND_APP_URL.rstrip('/')}"
-        f"{settings.FRONTEND_SOCIAL_CALLBACK_PATH}?{query}"
-    )
+        ) from exc
 
 
 class JWTBearerAuth(HttpBearer):
@@ -382,7 +387,16 @@ def register_endpoint(request: HttpRequest, payload: RegisterRequestSchema):
             form_error_detail(form),
         )
 
-    user = form.save()
+    try:
+        user = form.save()
+    except IntegrityError:
+        form.add_error("email", "该邮箱已被注册")
+        raise ApiError(
+            "validation_error",
+            422,
+            "Request validation failed.",
+            form_error_detail(form),
+        ) from None
     return 201, _build_token_response(user)
 
 
@@ -484,7 +498,16 @@ def change_email_endpoint(request: HttpRequest, payload: EmailChangeRequestSchem
         )
 
     request.auth.email = form.cleaned_data["email"]
-    request.auth.save(update_fields=["email"])
+    try:
+        request.auth.save(update_fields=["email"])
+    except IntegrityError:
+        form.add_error("email", "该邮箱已被其他用户使用")
+        raise ApiError(
+            "validation_error",
+            422,
+            "Request validation failed.",
+            form_error_detail(form),
+        ) from None
     return _serialize_user(request.auth)
 
 
@@ -506,12 +529,11 @@ def password_reset_request_endpoint(
             form_error_detail(form),
         )
 
-    UserModel = get_user_model()
     email = form.cleaned_data["email"]
     generic_response = StatusResponseSchema(
         message="If the email is registered, a reset link will be sent."
     )
-    matching_users = list(UserModel.objects.filter(email=email).order_by("pk"))
+    user, matching_users = select_password_reset_user(email)
     if not matching_users:
         return generic_response
 
@@ -522,10 +544,6 @@ def password_reset_request_endpoint(
             ",".join(str(user.pk) for user in matching_users),
         )
 
-    user = next(
-        (candidate for candidate in matching_users if candidate.has_usable_password()),
-        None,
-    )
     if user is None:
         social_user = matching_users[0]
         providers = list(

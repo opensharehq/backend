@@ -140,18 +140,12 @@ class SignUpFormEdgeCaseTests(TestCase):
         assert "username" in form.errors
 
     def test_signup_form_case_insensitive_email_duplicate(self):
-        """
-        Test email check behavior with different case.
-
-        Note: Our form does exact match, so different case emails
-        are allowed. This is Django's default behavior.
-        """
+        """Different email casing should still be rejected as a duplicate."""
         get_user_model().objects.create_user(
             username="user1",
             email="Test@Example.COM",
             password="pass123",
         )
-        # Try to register with same email in different case
         form = SignUpForm(
             data={
                 "username": "user2",
@@ -160,10 +154,8 @@ class SignUpFormEdgeCaseTests(TestCase):
                 "password2": "testpass123",
             },
         )
-        # This will be valid since our form does case-sensitive check
-        # In production, email servers treat emails as case-insensitive,
-        # but this is an application-level decision
-        assert form.is_valid()
+        assert not form.is_valid()
+        assert "email" in form.errors
 
 
 class ProfileFormEdgeCaseTests(TestCase):
@@ -613,14 +605,8 @@ class ChangeEmailFormEdgeCaseTests(TestCase):
         if form.is_valid():
             assert form.cleaned_data["email"] == "new@example.com"
 
-    def test_change_email_form_case_sensitivity(self):
-        """
-        Test email comparison with different cases.
-
-        Note: The form does case-sensitive comparison, so different
-        case versions of the same email are treated as different emails.
-        This is Django's default behavior.
-        """
+    def test_change_email_form_case_insensitive_same_email(self):
+        """Changing only the email casing should still count as the same email."""
         user = get_user_model().objects.create_user(
             username="testuser",
             email="Old@Example.COM",
@@ -633,9 +619,8 @@ class ChangeEmailFormEdgeCaseTests(TestCase):
                 "password": "testpass123",
             },
         )
-        # Form will be valid as case-sensitive comparison treats these as different
-        # In production, you may want to add iexact lookup for case-insensitive check
-        assert form.is_valid()
+        assert not form.is_valid()
+        assert "email" in form.errors
 
     def test_change_email_form_widget_attributes(self):
         """Test that form widgets have correct CSS classes."""

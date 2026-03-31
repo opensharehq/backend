@@ -3,8 +3,10 @@
 from dataclasses import dataclass
 from typing import Any
 
-from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth import authenticate
 from django.http import HttpRequest
+
+from accounts.email_addresses import get_email_login_candidates, normalize_email_address
 
 
 @dataclass(slots=True)
@@ -63,15 +65,15 @@ def authenticate_by_login_id(
     request: HttpRequest | None = None,
 ) -> Any:
     """Authenticate a user with username or email and password."""
-    UserModel = get_user_model()
+    login_id = (login_id or "").strip()
     user = authenticate(request, username=login_id, password=password)
     if not user and "@" in login_id:
-        email_qs = UserModel.objects.filter(email=login_id).order_by("pk")
-        email_user = email_qs.filter(is_active=True).first() or email_qs.first()
-        if email_user:
+        for email_user in get_email_login_candidates(normalize_email_address(login_id)):
             user = authenticate(
                 request, username=email_user.username, password=password
             )
+            if user:
+                break
 
     if not user or not user.is_active or user.merged_into_id:
         raise InvalidCredentialsError()

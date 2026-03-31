@@ -2,15 +2,17 @@
 
 from datetime import timedelta
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import CommandError, call_command
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from accounts.models import AccountMergeRequest
 from accounts.services import AccountMergeError
+from accounts.services.email_deduplication import EmailDedupeAction, EmailDedupePlan
 
 
 class SetAdminCommandTests(TestCase):
@@ -179,3 +181,79 @@ class MergeAccountsCommandTests(TestCase):
 
         with self.assertRaisesMessage(CommandError, "service failed"):
             call_command("merge_accounts", request_id=str(merge_request.id))
+
+
+class DedupeUserEmailsCommandTests(SimpleTestCase):
+    """Exercise dry-run and apply branches of the dedupe-user-emails command."""
+
+    def _build_plan(self, *, blocked: bool = False):
+        """Create a lightweight duplicate-email plan for command tests."""
+        primary = SimpleNamespace(username="primary", pk=1)
+        source = SimpleNamespace(username="source", pk=2)
+        return EmailDedupePlan(
+            normalized_email="duplicate@example.com",
+            primary=primary,
+            actions=[
+                EmailDedupeAction(
+                    source=source,
+                    primary=primary,
+                    archive_only=False,
+                )
+            ],
+            blocking_reason="group contains an admin account" if blocked else None,
+        )
+
+    @patch(
+        "accounts.management.commands.dedupe_user_emails.build_duplicate_email_plans"
+    )
+    @patch(
+        "accounts.management.commands.dedupe_user_emails.apply_duplicate_email_plans"
+    )
+    def test_dry_run_reports_plan_without_applying(
+        self,
+        apply_mock,
+        build_plans_mock,
+    ):
+        """Dry-run mode should print the plan and skip execution."""
+        build_plans_mock.return_value = [self._build_plan()]
+        output = StringIO()
+
+        call_command("dedupe_user_emails", stdout=output)
+
+        self.assertIn("DRY-RUN", output.getvalue())
+        self.assertIn("Dry-run only", output.getvalue())
+        apply_mock.assert_not_called()
+
+    @patch(
+        "accounts.management.commands.dedupe_user_emails.build_duplicate_email_plans"
+    )
+    def test_apply_rejects_blocked_groups(self, build_plans_mock):
+        """Blocked groups should abort the apply path before making changes."""
+        build_plans_mock.return_value = [self._build_plan(blocked=True)]
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "Blocked duplicate-email groups remain. Resolve them before applying.",
+        ):
+            call_command("dedupe_user_emails", apply=True)
+
+    @patch(
+        "accounts.management.commands.dedupe_user_emails.build_duplicate_email_plans"
+    )
+    @patch(
+        "accounts.management.commands.dedupe_user_emails.apply_duplicate_email_plans"
+    )
+    def test_apply_executes_safe_plans(
+        self,
+        apply_mock,
+        build_plans_mock,
+    ):
+        """Safe groups should be passed through to the execution helper."""
+        plan = self._build_plan()
+        build_plans_mock.return_value = [plan]
+        output = StringIO()
+
+        call_command("dedupe_user_emails", apply=True, stdout=output)
+
+        apply_mock.assert_called_once_with([plan])
+        self.assertIn("cleanup completed", output.getvalue().lower())

@@ -10,7 +10,7 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
 
-from config.api_common import ApiError
+from config.api_common import ApiError, ErrorResponseSchema
 from points import services as points_services
 
 from .api_serializers import serialize_membership, serialize_organization
@@ -92,6 +92,35 @@ def _get_admin_membership_or_error(
     return membership
 
 
+def _get_owner_membership_or_error(
+    user, organization: Organization
+) -> OrganizationMembership:
+    membership = _get_membership_or_error(user, organization)
+    if membership.role != OrganizationMembership.Role.OWNER:
+        raise ApiError(
+            "forbidden",
+            403,
+            "Only organization owners can perform this action.",
+        )
+    return membership
+
+
+def _ensure_owner_role_management_allowed(
+    actor_membership: OrganizationMembership,
+    *,
+    current_role: str | None = None,
+    target_role: str | None = None,
+) -> None:
+    owner_role = OrganizationMembership.Role.OWNER
+    if owner_role in {current_role, target_role}:
+        if actor_membership.role != owner_role:
+            raise ApiError(
+                "forbidden",
+                403,
+                "Only organization owners can manage owner roles.",
+            )
+
+
 def _validate_role(role: str) -> None:
     valid_roles = {choice[0] for choice in OrganizationMembership.Role.choices}
     if role not in valid_roles:
@@ -169,7 +198,7 @@ def _serialize_organization_summary(organization: Organization, membership) -> d
     return payload
 
 
-@router.get("")
+@router.get("", response=dict)
 def organization_list_endpoint(request):
     """List organizations the current user belongs to."""
     memberships = (
@@ -185,7 +214,7 @@ def organization_list_endpoint(request):
     }
 
 
-@router.post("")
+@router.post("", response={201: dict, 422: ErrorResponseSchema})
 def organization_create_endpoint(request, payload: OrganizationCreateSchema):
     """Create a new organization and add the current user as owner."""
     validated = _validate_organization_payload(payload)
@@ -196,18 +225,20 @@ def organization_create_endpoint(request, payload: OrganizationCreateSchema):
             organization=organization,
             role=OrganizationMembership.Role.OWNER,
         )
-    return {
+    return 201, {
         **serialize_organization(organization, membership),
         "member_count": 1,
     }
 
 
-@router.get("/{slug}")
+@router.get(
+    "/{slug}", response={200: dict, 403: ErrorResponseSchema, 404: ErrorResponseSchema}
+)
 def organization_detail_endpoint(request, slug: str):
     """Return organization details for a current member."""
     organization = _get_organization_or_404(slug)
     membership = _get_membership_or_error(request.auth, organization)
-    balance = points_services.get_detailed_balance(organization)
+    balance = points_services.get_detailed_balance_or_zero(organization)
     return {
         "organization": serialize_organization(organization, membership),
         "membership": serialize_membership(membership),
@@ -217,7 +248,15 @@ def organization_detail_endpoint(request, slug: str):
     }
 
 
-@router.patch("/{slug}")
+@router.patch(
+    "/{slug}",
+    response={
+        200: dict,
+        403: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def organization_update_endpoint(request, slug: str, payload: OrganizationUpdateSchema):
     """Update organization settings."""
     organization = _get_organization_or_404(slug)
@@ -245,7 +284,15 @@ def organization_update_endpoint(request, slug: str, payload: OrganizationUpdate
     return {"organization": serialize_organization(organization, membership)}
 
 
-@router.post("/{slug}/avatar")
+@router.post(
+    "/{slug}/avatar",
+    response={
+        200: dict,
+        403: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def organization_avatar_upload_endpoint(request, slug: str):
     """Upload or replace an organization avatar."""
     organization = _get_organization_or_404(slug)
@@ -267,7 +314,10 @@ def organization_avatar_upload_endpoint(request, slug: str):
     return {"organization": serialize_organization(organization, membership)}
 
 
-@router.delete("/{slug}/avatar")
+@router.delete(
+    "/{slug}/avatar",
+    response={204: None, 403: ErrorResponseSchema, 404: ErrorResponseSchema},
+)
 def organization_avatar_delete_endpoint(request, slug: str):
     """Remove an organization avatar."""
     organization = _get_organization_or_404(slug)
@@ -276,15 +326,22 @@ def organization_avatar_delete_endpoint(request, slug: str):
         organization.avatar.delete(save=False)
         organization.avatar = None
         organization.save(update_fields=["avatar", "updated_at"])
-    membership = _get_membership_or_error(request.auth, organization)
-    return {"organization": serialize_organization(organization, membership)}
+    return 204, None
 
 
-@router.delete("/{slug}")
+@router.delete(
+    "/{slug}",
+    response={
+        204: None,
+        403: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def organization_delete_endpoint(request, slug: str, confirm_slug: str):
     """Delete an organization after confirming its slug."""
     organization = _get_organization_or_404(slug)
-    _get_admin_membership_or_error(request.auth, organization)
+    _get_owner_membership_or_error(request.auth, organization)
     if confirm_slug.strip() != organization.slug:
         raise ApiError(
             "validation_error",
@@ -301,10 +358,13 @@ def organization_delete_endpoint(request, slug: str, confirm_slug: str):
         organization.delete()
         if avatar:
             transaction.on_commit(lambda f=avatar: f.delete(save=False))
-    return {"deleted": True}
+    return 204, None
 
 
-@router.get("/{slug}/members")
+@router.get(
+    "/{slug}/members",
+    response={200: dict, 403: ErrorResponseSchema, 404: ErrorResponseSchema},
+)
 def organization_members_endpoint(request, slug: str):
     """List organization members."""
     organization = _get_organization_or_404(slug)
@@ -322,7 +382,16 @@ def organization_members_endpoint(request, slug: str):
     }
 
 
-@router.post("/{slug}/members")
+@router.post(
+    "/{slug}/members",
+    response={
+        201: dict,
+        403: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+        409: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def organization_member_add_endpoint(
     request,
     slug: str,
@@ -330,8 +399,12 @@ def organization_member_add_endpoint(
 ):
     """Add a member to an organization by username."""
     organization = _get_organization_or_404(slug)
-    _get_admin_membership_or_error(request.auth, organization)
+    actor_membership = _get_admin_membership_or_error(request.auth, organization)
     _validate_role(payload.role)
+    _ensure_owner_role_management_allowed(
+        actor_membership,
+        target_role=payload.role,
+    )
 
     UserModel = get_user_model()
     user_to_add = UserModel.objects.filter(username=payload.username.strip()).first()
@@ -353,10 +426,19 @@ def organization_member_add_endpoint(
         organization=organization,
         role=payload.role,
     )
-    return serialize_membership(membership)
+    return 201, serialize_membership(membership)
 
 
-@router.patch("/{slug}/members/{member_id}")
+@router.patch(
+    "/{slug}/members/{member_id}",
+    response={
+        200: dict,
+        403: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+        409: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def organization_member_update_endpoint(
     request,
     slug: str,
@@ -365,9 +447,14 @@ def organization_member_update_endpoint(
 ):
     """Update a member's organization role."""
     organization = _get_organization_or_404(slug)
-    _get_admin_membership_or_error(request.auth, organization)
+    actor_membership = _get_admin_membership_or_error(request.auth, organization)
     _validate_role(payload.role)
     member = _get_member_or_404(organization, member_id)
+    _ensure_owner_role_management_allowed(
+        actor_membership,
+        current_role=member.role,
+        target_role=payload.role,
+    )
 
     if (
         member.role == OrganizationMembership.Role.OWNER
@@ -390,12 +477,24 @@ def organization_member_update_endpoint(
     return serialize_membership(member)
 
 
-@router.delete("/{slug}/members/{member_id}")
+@router.delete(
+    "/{slug}/members/{member_id}",
+    response={
+        204: None,
+        403: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+        409: ErrorResponseSchema,
+    },
+)
 def organization_member_remove_endpoint(request, slug: str, member_id: int):
     """Remove a member from the organization."""
     organization = _get_organization_or_404(slug)
-    _get_admin_membership_or_error(request.auth, organization)
+    actor_membership = _get_admin_membership_or_error(request.auth, organization)
     member = _get_member_or_404(organization, member_id)
+    _ensure_owner_role_management_allowed(
+        actor_membership,
+        current_role=member.role,
+    )
 
     if member.role == OrganizationMembership.Role.OWNER:
         owner_count = OrganizationMembership.objects.filter(
@@ -410,4 +509,4 @@ def organization_member_remove_endpoint(request, slug: str, member_id: int):
             )
 
     member.delete()
-    return {"deleted": True}
+    return 204, None

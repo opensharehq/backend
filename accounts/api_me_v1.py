@@ -10,7 +10,12 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from ninja import Router, Schema
 
-from config.api_common import ApiError, form_error_detail, validate_form
+from config.api_common import (
+    ApiError,
+    ErrorResponseSchema,
+    form_error_detail,
+    validate_form,
+)
 from points import services as points_services
 
 from .api_serializers import (
@@ -169,37 +174,51 @@ def _get_profile(user):
     return UserProfile.objects.get_or_create(user=user)[0]
 
 
+def _get_profile_or_none(user):
+    return UserProfile.objects.filter(user=user).first()
+
+
+def _profile_payload(profile):
+    if profile is None:
+        return {
+            "bio": "",
+            "birth_date": None,
+            "github_url": "",
+            "homepage_url": "",
+            "blog_url": "",
+            "twitter_url": "",
+            "linkedin_url": "",
+            "company": "",
+            "location": "",
+        }
+    return serialize_profile(profile)
+
+
 def _get_reviewable_merge_request(user, token: str) -> AccountMergeRequest:
-    merge_request = get_object_or_404(
+    return get_object_or_404(
         AccountMergeRequest.objects.select_related("source_user", "target_user"),
         approve_token=token,
+        target_user=user,
     )
-    if merge_request.target_user_id != user.id:
-        raise ApiError(
-            "forbidden",
-            403,
-            "You are not allowed to review this merge request.",
-        )
-    return merge_request
 
 
-@router.get("/profile")
+@router.get("/profile", response=dict)
 def current_profile_endpoint(request):
     """Return the authenticated user's profile summary."""
-    profile = _get_profile(request.auth)
-    balance = points_services.get_detailed_balance(request.auth)
+    profile = _get_profile_or_none(request.auth)
+    balance = points_services.get_detailed_balance_or_zero(request.auth)
     return {
         "user": {
             "id": request.auth.id,
             "username": request.auth.username,
             "email": request.auth.email,
         },
-        "profile": serialize_profile(profile),
+        "profile": _profile_payload(profile),
         "balance": balance,
     }
 
 
-@router.patch("/profile")
+@router.patch("/profile", response={200: dict, 422: ErrorResponseSchema})
 def update_profile_endpoint(request, payload: ProfileUpdateSchema):
     """Patch the authenticated user's profile."""
     profile = _get_profile(request.auth)
@@ -220,18 +239,22 @@ def update_profile_endpoint(request, payload: ProfileUpdateSchema):
     return {"profile": serialize_profile(profile)}
 
 
-@router.get("/work-experiences")
+@router.get("/work-experiences", response=dict)
 def work_experience_list_endpoint(request):
     """List the authenticated user's work experiences."""
-    profile = _get_profile(request.auth)
+    profile = _get_profile_or_none(request.auth)
     return {
         "items": [
-            serialize_work_experience(item) for item in profile.work_experiences.all()
+            serialize_work_experience(item)
+            for item in (profile.work_experiences.all() if profile else [])
         ]
     }
 
 
-@router.post("/work-experiences")
+@router.post(
+    "/work-experiences",
+    response={201: dict, 422: ErrorResponseSchema},
+)
 def work_experience_create_endpoint(request, payload: WorkExperienceCreateSchema):
     """Create a work experience row."""
     profile = _get_profile(request.auth)
@@ -247,10 +270,13 @@ def work_experience_create_endpoint(request, payload: WorkExperienceCreateSchema
     experience = form.save(commit=False)
     experience.profile = profile
     experience.save()
-    return serialize_work_experience(experience)
+    return 201, serialize_work_experience(experience)
 
 
-@router.patch("/work-experiences/{experience_id}")
+@router.patch(
+    "/work-experiences/{experience_id}",
+    response={200: dict, 404: ErrorResponseSchema, 422: ErrorResponseSchema},
+)
 def work_experience_update_endpoint(
     request,
     experience_id: int,
@@ -277,23 +303,34 @@ def work_experience_update_endpoint(
     return serialize_work_experience(experience)
 
 
-@router.delete("/work-experiences/{experience_id}")
+@router.delete(
+    "/work-experiences/{experience_id}",
+    response={204: None, 404: ErrorResponseSchema},
+)
 def work_experience_delete_endpoint(request, experience_id: int):
     """Delete a work experience row."""
     profile = _get_profile(request.auth)
     experience = get_object_or_404(WorkExperience, id=experience_id, profile=profile)
     experience.delete()
-    return {"deleted": True}
+    return 204, None
 
 
-@router.get("/educations")
+@router.get("/educations", response=dict)
 def education_list_endpoint(request):
     """List the authenticated user's education rows."""
-    profile = _get_profile(request.auth)
-    return {"items": [serialize_education(item) for item in profile.educations.all()]}
+    profile = _get_profile_or_none(request.auth)
+    return {
+        "items": [
+            serialize_education(item)
+            for item in (profile.educations.all() if profile else [])
+        ]
+    }
 
 
-@router.post("/educations")
+@router.post(
+    "/educations",
+    response={201: dict, 422: ErrorResponseSchema},
+)
 def education_create_endpoint(request, payload: EducationCreateSchema):
     """Create an education row."""
     profile = _get_profile(request.auth)
@@ -309,10 +346,13 @@ def education_create_endpoint(request, payload: EducationCreateSchema):
     education = form.save(commit=False)
     education.profile = profile
     education.save()
-    return serialize_education(education)
+    return 201, serialize_education(education)
 
 
-@router.patch("/educations/{education_id}")
+@router.patch(
+    "/educations/{education_id}",
+    response={200: dict, 404: ErrorResponseSchema, 422: ErrorResponseSchema},
+)
 def education_update_endpoint(
     request, education_id: int, payload: EducationUpdateSchema
 ):
@@ -337,16 +377,19 @@ def education_update_endpoint(
     return serialize_education(education)
 
 
-@router.delete("/educations/{education_id}")
+@router.delete(
+    "/educations/{education_id}",
+    response={204: None, 404: ErrorResponseSchema},
+)
 def education_delete_endpoint(request, education_id: int):
     """Delete an education row."""
     profile = _get_profile(request.auth)
     education = get_object_or_404(Education, id=education_id, profile=profile)
     education.delete()
-    return {"deleted": True}
+    return 204, None
 
 
-@router.get("/shipping-addresses")
+@router.get("/shipping-addresses", response=dict)
 def shipping_address_list_endpoint(request):
     """List the authenticated user's shipping addresses."""
     return {
@@ -357,7 +400,10 @@ def shipping_address_list_endpoint(request):
     }
 
 
-@router.post("/shipping-addresses")
+@router.post(
+    "/shipping-addresses",
+    response={201: dict, 422: ErrorResponseSchema},
+)
 def shipping_address_create_endpoint(request, payload: ShippingAddressCreateSchema):
     """Create a shipping address."""
     form = ShippingAddressForm(payload.model_dump())
@@ -372,10 +418,13 @@ def shipping_address_create_endpoint(request, payload: ShippingAddressCreateSche
     address = form.save(commit=False)
     address.user = request.auth
     address.save()
-    return serialize_shipping_address(address)
+    return 201, serialize_shipping_address(address)
 
 
-@router.patch("/shipping-addresses/{address_id}")
+@router.patch(
+    "/shipping-addresses/{address_id}",
+    response={200: dict, 404: ErrorResponseSchema, 422: ErrorResponseSchema},
+)
 def shipping_address_update_endpoint(
     request,
     address_id: int,
@@ -401,15 +450,21 @@ def shipping_address_update_endpoint(
     return serialize_shipping_address(address)
 
 
-@router.delete("/shipping-addresses/{address_id}")
+@router.delete(
+    "/shipping-addresses/{address_id}",
+    response={204: None, 404: ErrorResponseSchema},
+)
 def shipping_address_delete_endpoint(request, address_id: int):
     """Delete a shipping address."""
     address = get_object_or_404(ShippingAddress, id=address_id, user=request.auth)
     address.delete()
-    return {"deleted": True}
+    return 204, None
 
 
-@router.post("/shipping-addresses/{address_id}/set-default")
+@router.post(
+    "/shipping-addresses/{address_id}/set-default",
+    response={200: dict, 404: ErrorResponseSchema},
+)
 def shipping_address_set_default_endpoint(request, address_id: int):
     """Set a shipping address as the default address."""
     address = get_object_or_404(ShippingAddress, id=address_id, user=request.auth)
@@ -419,7 +474,7 @@ def shipping_address_set_default_endpoint(request, address_id: int):
     return serialize_shipping_address(address)
 
 
-@router.get("/account-merges")
+@router.get("/account-merges", response=dict)
 def account_merge_list_endpoint(request):
     """Return sent and received account merge requests."""
     sent_requests = AccountMergeRequest.objects.filter(
@@ -439,7 +494,10 @@ def account_merge_list_endpoint(request):
     }
 
 
-@router.post("/account-merges")
+@router.post(
+    "/account-merges",
+    response={201: dict, 409: ErrorResponseSchema, 422: ErrorResponseSchema},
+)
 def account_merge_create_endpoint(request, payload: AccountMergeCreateSchema):
     """Create an account merge request."""
     form = AccountMergeRequestForm(user=request.auth, data=payload.model_dump())
@@ -471,10 +529,13 @@ def account_merge_create_endpoint(request, payload: AccountMergeCreateSchema):
 
     _send_merge_request_message(merge_request, request)
     merge_request.refresh_from_db()
-    return serialize_account_merge_request(merge_request)
+    return 201, serialize_account_merge_request(merge_request)
 
 
-@router.get("/account-merges/review/{token}")
+@router.get(
+    "/account-merges/review/{token}",
+    response={200: dict, 404: ErrorResponseSchema},
+)
 def account_merge_review_endpoint(request, token: str):
     """Return a merge request for review by the target account."""
     merge_request = _get_reviewable_merge_request(request.auth, token)
@@ -487,7 +548,10 @@ def account_merge_review_endpoint(request, token: str):
     }
 
 
-@router.post("/account-merges/review/{token}/accept")
+@router.post(
+    "/account-merges/review/{token}/accept",
+    response={200: dict, 404: ErrorResponseSchema, 409: ErrorResponseSchema},
+)
 def account_merge_accept_endpoint(request, token: str):
     """Accept a merge request as the target account."""
     merge_request = _get_reviewable_merge_request(request.auth, token)
@@ -521,7 +585,10 @@ def account_merge_accept_endpoint(request, token: str):
     return serialize_account_merge_request(merge_request, include_logs=True)
 
 
-@router.post("/account-merges/review/{token}/reject")
+@router.post(
+    "/account-merges/review/{token}/reject",
+    response={200: dict, 404: ErrorResponseSchema, 409: ErrorResponseSchema},
+)
 def account_merge_reject_endpoint(request, token: str):
     """Reject a merge request as the target account."""
     merge_request = _get_reviewable_merge_request(request.auth, token)

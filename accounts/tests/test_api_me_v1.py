@@ -32,9 +32,13 @@ class ApiV1MeTests(TestCase):
 
     def test_profile_get_and_patch(self):
         """The profile endpoints should read and update the current profile."""
+        self.assertFalse(UserProfile.objects.filter(user=self.user).exists())
+
         response = self.client.get("/api/v1/me/profile", **self.headers)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["user"]["username"], self.user.username)
+        self.assertEqual(response.json()["balance"]["total"], 0)
+        self.assertFalse(UserProfile.objects.filter(user=self.user).exists())
 
         patch_response = self.client.patch(
             "/api/v1/me/profile",
@@ -61,7 +65,7 @@ class ApiV1MeTests(TestCase):
             **self._json_headers(),
         )
 
-        self.assertEqual(create_response.status_code, 200)
+        self.assertEqual(create_response.status_code, 201)
         experience_id = create_response.json()["id"]
 
         patch_response = self.client.patch(
@@ -76,8 +80,42 @@ class ApiV1MeTests(TestCase):
             f"/api/v1/me/work-experiences/{experience_id}",
             **self.headers,
         )
-        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_response.status_code, 204)
         self.assertFalse(WorkExperience.objects.filter(id=experience_id).exists())
+
+    def test_education_crud(self):
+        """Education endpoints should support create, update, and delete."""
+        create_response = self.client.post(
+            "/api/v1/me/educations",
+            {
+                "institution_name": "Tsinghua",
+                "degree": "Master",
+                "field_of_study": "Computer Science",
+                "start_date": "2018-09-01",
+                "end_date": "2020-07-01",
+            },
+            **self._json_headers(),
+        )
+        self.assertEqual(create_response.status_code, 201)
+        education_id = create_response.json()["id"]
+
+        patch_response = self.client.patch(
+            f"/api/v1/me/educations/{education_id}",
+            {"degree": "PhD"},
+            **self._json_headers(),
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patch_response.json()["degree"], "PhD")
+
+        list_response = self.client.get("/api/v1/me/educations", **self.headers)
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.json()["items"][0]["id"], education_id)
+
+        delete_response = self.client.delete(
+            f"/api/v1/me/educations/{education_id}",
+            **self.headers,
+        )
+        self.assertEqual(delete_response.status_code, 204)
 
     def test_shipping_address_crud_and_set_default(self):
         """Shipping address endpoints should manage addresses for the current user."""
@@ -95,7 +133,7 @@ class ApiV1MeTests(TestCase):
             **self._json_headers(),
         )
 
-        self.assertEqual(create_response.status_code, 200)
+        self.assertEqual(create_response.status_code, 201)
         address_id = create_response.json()["id"]
 
         update_response = self.client.patch(
@@ -116,7 +154,7 @@ class ApiV1MeTests(TestCase):
             f"/api/v1/me/shipping-addresses/{address_id}",
             **self.headers,
         )
-        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_response.status_code, 204)
         self.assertFalse(ShippingAddress.objects.filter(id=address_id).exists())
 
         list_response = self.client.get("/api/v1/me/shipping-addresses", **self.headers)
@@ -167,7 +205,7 @@ class ApiV1MeTests(TestCase):
             **self.headers,
         )
 
-        self.assertEqual(create_response.status_code, 200)
+        self.assertEqual(create_response.status_code, 201)
         payload = create_response.json()
         merge_request = AccountMergeRequest.objects.get(id=payload["id"])
 
@@ -215,3 +253,38 @@ class ApiV1MeTests(TestCase):
             **target_headers,
         )
         self.assertEqual(second_accept.status_code, 409)
+
+    def test_account_merge_review_token_returns_not_found_for_other_users(self):
+        """Review tokens should not reveal their existence to non-target users."""
+        target = self.User.objects.create_user(
+            username="merge_visibility_target",
+            email="merge_visibility_target@example.com",
+            password="StrongPass123!",
+        )
+        outsider = self.User.objects.create_user(
+            username="merge_visibility_outsider",
+            email="merge_visibility_outsider@example.com",
+            password="StrongPass123!",
+        )
+        outsider_headers = {
+            "HTTP_AUTHORIZATION": f"Bearer {create_access_token(outsider)}"
+        }
+
+        create_response = self.client.post(
+            "/api/v1/me/account-merges",
+            {"target_username": target.username},
+            **self._json_headers(),
+        )
+        merge_request = AccountMergeRequest.objects.get(id=create_response.json()["id"])
+
+        review_response = self.client.get(
+            f"/api/v1/me/account-merges/review/{merge_request.approve_token}",
+            **outsider_headers,
+        )
+        self.assertEqual(review_response.status_code, 404)
+
+        reject_response = self.client.post(
+            f"/api/v1/me/account-merges/review/{merge_request.approve_token}/reject",
+            **outsider_headers,
+        )
+        self.assertEqual(reject_response.status_code, 404)

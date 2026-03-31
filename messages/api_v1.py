@@ -3,18 +3,27 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
 
 from accounts.api_v1 import jwt_bearer_auth
-from config.api_common import ApiError, build_paginated_response, paginate_queryset
+from config.api_common import (
+    ApiError,
+    ErrorResponseSchema,
+    PaginationSchema,
+    build_paginated_response,
+    paginate_queryset,
+)
 
-from .models import UserMessage
+from .models import Message, UserMessage
 from .services import (
     delete_messages,
     get_message_stats,
     get_unread_count,
     get_user_messages,
+    mark_all_as_read,
     mark_as_read,
     mark_as_unread,
 )
@@ -22,20 +31,83 @@ from .services import (
 router = Router(tags=["messages"], auth=jwt_bearer_auth)
 
 VALID_MESSAGE_STATUSES = {"all", "read", "unread"}
+VALID_MESSAGE_TYPES = {choice[0] for choice in Message.MessageType.choices}
 
 
 class MessageActionSchema(Schema):
     message_ids: list[int] | None = None
 
 
-def _serialize_message_item(user_message: UserMessage) -> dict:
+class MessageItemSchema(Schema):
+    id: int
+    user_message_id: int
+    title: str
+    message_type: str
+    sender: dict[str, Any] | None = None
+    is_broadcast: bool
+    is_read: bool
+    read_at: str | None = None
+    received_at: str
+    created_at: str
+    updated_at: str
+    content_preview: str
+
+
+class MessageDetailSchema(MessageItemSchema):
+    content: str
+
+
+class MessageStatsSchema(Schema):
+    total: int
+    unread: int
+    read: int
+    type_counts: dict[str, int]
+
+
+class MessageListResponseSchema(Schema):
+    items: list[MessageItemSchema]
+    pagination: PaginationSchema
+    stats: MessageStatsSchema
+    filters: dict[str, str | None]
+
+
+class CountResponseSchema(Schema):
+    count: int
+
+
+class UpdateCountResponseSchema(Schema):
+    updated: int
+
+
+class DeleteCountResponseSchema(Schema):
+    deleted: int
+
+
+def _validation_error(field: str, message: str, code: str = "invalid") -> ApiError:
+    return ApiError(
+        "validation_error",
+        422,
+        "Request validation failed.",
+        {field: [{"message": message, "code": code}]},
+    )
+
+
+def _validate_message_type(message_type: str | None) -> None:
+    if message_type and message_type not in VALID_MESSAGE_TYPES:
+        raise _validation_error(
+            "message_type",
+            "The specified message type is invalid.",
+        )
+
+
+def _serialize_message_item(user_message: UserMessage) -> MessageItemSchema:
     message = user_message.message
-    return {
-        "id": message.id,
-        "user_message_id": user_message.id,
-        "title": message.title,
-        "message_type": message.message_type,
-        "sender": (
+    return MessageItemSchema(
+        id=message.id,
+        user_message_id=user_message.id,
+        title=message.title,
+        message_type=message.message_type,
+        sender=(
             {
                 "id": message.sender_id,
                 "username": message.sender.username,
@@ -43,23 +115,30 @@ def _serialize_message_item(user_message: UserMessage) -> dict:
             if message.sender
             else None
         ),
-        "is_broadcast": message.is_broadcast,
-        "is_read": user_message.is_read,
-        "read_at": user_message.read_at.isoformat() if user_message.read_at else None,
-        "received_at": user_message.created_at.isoformat(),
-        "created_at": message.created_at.isoformat(),
-        "updated_at": message.updated_at.isoformat(),
-        "content_preview": message.content[:200],
-    }
+        is_broadcast=message.is_broadcast,
+        is_read=user_message.is_read,
+        read_at=user_message.read_at.isoformat() if user_message.read_at else None,
+        received_at=user_message.created_at.isoformat(),
+        created_at=message.created_at.isoformat(),
+        updated_at=message.updated_at.isoformat(),
+        content_preview=message.content[:200],
+    )
 
 
-def _serialize_message_detail(user_message: UserMessage) -> dict:
-    payload = _serialize_message_item(user_message)
+def _serialize_message_detail(user_message: UserMessage) -> MessageDetailSchema:
+    payload = _serialize_message_item(user_message).model_dump()
     payload["content"] = user_message.message.content
-    return payload
+    return MessageDetailSchema(**payload)
 
 
-@router.get("")
+@router.get(
+    "",
+    response={
+        200: MessageListResponseSchema,
+        401: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def message_list_endpoint(
     request,
     message_type: str | None = None,
@@ -68,19 +147,11 @@ def message_list_endpoint(
     page_size: int = 20,
 ):
     """List inbox messages for the current user."""
+    _validate_message_type(message_type)
     if status not in VALID_MESSAGE_STATUSES:
-        raise ApiError(
-            "validation_error",
-            422,
-            "Request validation failed.",
-            {
-                "status": [
-                    {
-                        "message": 'Status must be one of "all", "read", or "unread".',
-                        "code": "invalid",
-                    }
-                ]
-            },
+        raise _validation_error(
+            "status",
+            'Status must be one of "all", "read", or "unread".',
         )
 
     messages_qs = get_user_messages(request.auth, include_deleted=False)
@@ -103,77 +174,125 @@ def message_list_endpoint(
     return response
 
 
-@router.get("/stats")
+@router.get(
+    "/stats",
+    response={200: MessageStatsSchema, 401: ErrorResponseSchema},
+)
 def message_stats_endpoint(request):
     """Return inbox summary counts."""
     return get_message_stats(request.auth)
 
 
-@router.get("/unread-count")
+@router.get(
+    "/unread-count",
+    response={
+        200: CountResponseSchema,
+        401: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def message_unread_count_endpoint(request, message_type: str | None = None):
     """Return unread message counts."""
+    _validate_message_type(message_type)
     return {"count": get_unread_count(request.auth, message_type=message_type)}
 
 
-@router.post("/mark-read")
+@router.post(
+    "/mark-read",
+    response={
+        200: UpdateCountResponseSchema,
+        401: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def message_mark_read_endpoint(request, payload: MessageActionSchema):
-    """Mark messages as read. Empty message_ids marks all unread messages."""
+    """Mark specific messages as read."""
+    if not payload.message_ids:
+        raise _validation_error(
+            "message_ids",
+            "Provide at least one message id.",
+            code="required",
+        )
     count = mark_as_read(request.auth, payload.message_ids)
     return {"updated": count}
 
 
-@router.post("/mark-unread")
+@router.post(
+    "/mark-all-read",
+    response={200: UpdateCountResponseSchema, 401: ErrorResponseSchema},
+)
+def message_mark_all_read_endpoint(request):
+    """Mark all unread messages as read."""
+    return {"updated": mark_all_as_read(request.auth)}
+
+
+@router.post(
+    "/mark-unread",
+    response={
+        200: UpdateCountResponseSchema,
+        401: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def message_mark_unread_endpoint(request, payload: MessageActionSchema):
     """Mark specific messages as unread."""
     if not payload.message_ids:
-        raise ApiError(
-            "validation_error",
-            422,
-            "Request validation failed.",
-            {
-                "message_ids": [
-                    {
-                        "message": "Provide at least one message id.",
-                        "code": "required",
-                    }
-                ]
-            },
+        raise _validation_error(
+            "message_ids",
+            "Provide at least one message id.",
+            code="required",
         )
     count = mark_as_unread(request.auth, payload.message_ids)
     return {"updated": count}
 
 
-@router.post("/delete")
+@router.post(
+    "/delete",
+    response={
+        200: DeleteCountResponseSchema,
+        401: ErrorResponseSchema,
+        422: ErrorResponseSchema,
+    },
+)
 def message_delete_endpoint(request, payload: MessageActionSchema):
     """Soft-delete specific messages from the current user's inbox."""
     if not payload.message_ids:
-        raise ApiError(
-            "validation_error",
-            422,
-            "Request validation failed.",
-            {
-                "message_ids": [
-                    {
-                        "message": "Provide at least one message id.",
-                        "code": "required",
-                    }
-                ]
-            },
+        raise _validation_error(
+            "message_ids",
+            "Provide at least one message id.",
+            code="required",
         )
     count = delete_messages(request.auth, payload.message_ids)
     return {"deleted": count}
 
 
-@router.get("/{message_id}")
+@router.get(
+    "/{message_id}",
+    response={
+        200: MessageDetailSchema,
+        401: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+    },
+)
 def message_detail_endpoint(request, message_id: int):
-    """Return a single inbox message and mark it as read."""
+    """Return a single inbox message without mutating read state."""
     user_message = get_object_or_404(
         UserMessage.objects.select_related("message", "message__sender"),
         message_id=message_id,
         user=request.auth,
         is_deleted=False,
     )
-    if not user_message.is_read:
-        user_message.mark_as_read()
-        user_message.refresh_from_db()
     return _serialize_message_detail(user_message)
+
+
+@router.post(
+    "/{message_id}/mark-read",
+    response={
+        200: UpdateCountResponseSchema,
+        401: ErrorResponseSchema,
+    },
+)
+def message_detail_mark_read_endpoint(request, message_id: int):
+    """Mark a single message as read."""
+    updated = mark_as_read(request.auth, [message_id])
+    return {"updated": updated}

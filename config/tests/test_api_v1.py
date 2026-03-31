@@ -48,6 +48,44 @@ class ConfigApiV1Tests(SimpleTestCase):
         self.assertIn("/api/v1/auth/login", payload["paths"])
         self.assertIn("/api/v1/auth/verify", payload["paths"])
 
+    def test_openapi_schema_exposes_response_contracts_for_key_non_auth_endpoints(self):
+        """Representative non-auth routes should publish concrete response contracts."""
+        response = self.client.get("/api/v1/openapi.json")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        public_profile = payload["paths"]["/api/v1/public/users/{username}"]["get"]
+        self.assertIn("200", public_profile["responses"])
+        self.assertIn("404", public_profile["responses"])
+        self.assertIn(
+            "schema",
+            public_profile["responses"]["200"]["content"]["application/json"],
+        )
+
+        message_mark_read = payload["paths"]["/api/v1/messages/mark-read"]["post"]
+        self.assertIn("422", message_mark_read["responses"])
+        self.assertIn(
+            "schema",
+            message_mark_read["responses"]["200"]["content"]["application/json"],
+        )
+
+        wallet_detail = payload["paths"]["/api/v1/points/me/wallet"]["get"]
+        self.assertIn("200", wallet_detail["responses"])
+        self.assertIn("401", wallet_detail["responses"])
+        self.assertIn(
+            "schema",
+            wallet_detail["responses"]["200"]["content"]["application/json"],
+        )
+
+        redemption_create = payload["paths"]["/api/v1/shop/redemptions"]["post"]
+        self.assertIn("201", redemption_create["responses"])
+        self.assertIn("409", redemption_create["responses"])
+        self.assertIn(
+            "schema",
+            redemption_create["responses"]["201"]["content"]["application/json"],
+        )
+
     def test_jwt_settings_fall_back_to_defaults(self):
         """JWT settings should use the documented defaults when unset."""
         reloaded = self.reload_settings(

@@ -1,12 +1,17 @@
 """Tests for API v1 JWT authentication flows."""
 
 from datetime import timedelta
+from unittest.mock import patch
 
 import jwt
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
 from django.test import TestCase
 from django.utils import timezone
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
+from social_django.models import UserSocialAuth
 
 from accounts.services.jwt_tokens import create_access_token
 
@@ -236,6 +241,142 @@ class ApiV1AuthTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(second_response.status_code, 401)
+
+    def test_password_change_revokes_existing_refresh_tokens(self):
+        """Changing a password should invalidate previously issued refresh tokens."""
+        login_response = self.client.post(
+            self.login_url,
+            {"account": self.user.username, "password": self.password},
+            content_type="application/json",
+        )
+        refresh_token = login_response.json()["refresh_token"]
+        access_token = login_response.json()["access_token"]
+
+        response = self.client.post(
+            "/api/v1/auth/password/change",
+            {
+                "old_password": self.password,
+                "new_password1": "NewStrongPass123!",
+                "new_password2": "NewStrongPass123!",
+            },
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["message"],
+            "Your password has been changed successfully.",
+        )
+
+        refresh_response = self.client.post(
+            "/api/v1/auth/refresh",
+            {"refresh_token": refresh_token},
+            content_type="application/json",
+        )
+        self.assertEqual(refresh_response.status_code, 401)
+
+    @patch("accounts.api_v1.send_password_reset_email")
+    def test_password_reset_request_uses_generic_response_for_unknown_email(
+        self, enqueue_mock
+    ):
+        """Unknown emails should receive the same generic reset-request response."""
+        response = self.client.post(
+            "/api/v1/auth/password/reset/request",
+            {"email": "missing@example.com"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["message"],
+            "If the email is registered, a reset link will be sent.",
+        )
+        enqueue_mock.enqueue.assert_not_called()
+
+    @patch("accounts.api_v1.send_password_reset_email")
+    def test_password_reset_request_uses_generic_response_for_social_only_account(
+        self, enqueue_mock
+    ):
+        """Passwordless social accounts should not leak account state."""
+        social_user = self.User.objects.create_user(
+            username="social_only_user",
+            email="social_only@example.com",
+            password=None,
+        )
+        social_user.set_unusable_password()
+        social_user.save(update_fields=["password"])
+        UserSocialAuth.objects.create(
+            user=social_user,
+            provider="github",
+            uid="12345",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/password/reset/request",
+            {"email": social_user.email},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["message"],
+            "If the email is registered, a reset link will be sent.",
+        )
+        enqueue_mock.enqueue.assert_not_called()
+
+    @patch("accounts.api_v1.send_password_reset_email")
+    def test_password_reset_request_queues_email_for_password_account(
+        self, enqueue_mock
+    ):
+        """Normal password accounts still queue a reset email behind the generic response."""
+        response = self.client.post(
+            "/api/v1/auth/password/reset/request",
+            {"email": self.user.email},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["message"],
+            "If the email is registered, a reset link will be sent.",
+        )
+        enqueue_mock.enqueue.assert_called_once_with(self.user.id, "testserver", False)
+
+    def test_password_reset_confirm_revokes_existing_refresh_tokens(self):
+        """Completing a password reset should invalidate previously issued refresh tokens."""
+        login_response = self.client.post(
+            self.login_url,
+            {"account": self.user.username, "password": self.password},
+            content_type="application/json",
+        )
+        refresh_token = login_response.json()["refresh_token"]
+        uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
+        token = default_token_generator.make_token(self.user)
+
+        response = self.client.post(
+            "/api/v1/auth/password/reset/confirm",
+            {
+                "uidb64": uidb64,
+                "token": token,
+                "new_password1": "ResetStrongPass123!",
+                "new_password2": "ResetStrongPass123!",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["message"],
+            "Your password has been reset successfully.",
+        )
+
+        refresh_response = self.client.post(
+            "/api/v1/auth/refresh",
+            {"refresh_token": refresh_token},
+            content_type="application/json",
+        )
+        self.assertEqual(refresh_response.status_code, 401)
 
     def test_verify_rejects_forged_token(self):
         """Tokens signed with the wrong secret should be rejected."""

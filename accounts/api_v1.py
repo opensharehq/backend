@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from urllib.parse import urlencode
 
@@ -40,6 +41,7 @@ from .services.jwt_tokens import (
     get_user_from_access_token,
     get_user_from_refresh_token,
     issue_token_pair,
+    revoke_all_refresh_tokens_for_user,
     revoke_refresh_token,
     rotate_refresh_token,
 )
@@ -47,6 +49,7 @@ from .services.social_exchange import consume_exchange_code, create_exchange_cod
 from .tasks import send_password_reset_email
 
 router = Router(tags=["auth"])
+logger = logging.getLogger(__name__)
 
 SOCIAL_PROVIDERS = {
     "github": {
@@ -467,6 +470,7 @@ def change_password_endpoint(
         )
 
     form.save()
+    revoke_all_refresh_tokens_for_user(request.auth)
     return StatusResponseSchema(message="Your password has been changed successfully.")
 
 
@@ -493,11 +497,7 @@ def change_email_endpoint(request: HttpRequest, payload: EmailChangeRequestSchem
 
 @router.post(
     "/password/reset/request",
-    response={
-        200: StatusResponseSchema,
-        409: ErrorResponseSchema,
-        422: ErrorResponseSchema,
-    },
+    response={200: StatusResponseSchema, 422: ErrorResponseSchema},
 )
 def password_reset_request_endpoint(
     request: HttpRequest,
@@ -514,13 +514,14 @@ def password_reset_request_endpoint(
         )
 
     UserModel = get_user_model()
+    generic_response = StatusResponseSchema(
+        message="If the email is registered, a reset link will be sent."
+    )
 
     try:
         user = UserModel.objects.get(email=form.cleaned_data["email"])
     except UserModel.DoesNotExist:
-        return StatusResponseSchema(
-            message="If the email is registered, a reset link will be sent."
-        )
+        return generic_response
 
     if not user.has_usable_password():
         providers = list(
@@ -529,26 +530,15 @@ def password_reset_request_endpoint(
             ]
         )
         if providers:
-            return 409, ErrorResponseSchema(
-                code="password_reset_unavailable",
-                message=(
-                    "This account does not have a password set. "
-                    f"Please sign in with a social account ({', '.join(providers)})."
-                ),
+            logger.warning(
+                "Password reset requested for passwordless social account: %s (%s)",
+                user.pk,
+                ",".join(providers),
             )
-
-        return 409, ErrorResponseSchema(
-            code="password_reset_unavailable",
-            message=(
-                "This account does not have a password set and no social account "
-                "is connected. Please contact an administrator."
-            ),
-        )
+        return generic_response
 
     send_password_reset_email.enqueue(user.id, request.get_host(), request.is_secure())
-    return StatusResponseSchema(
-        message="A password reset link has been sent to your email inbox."
-    )
+    return generic_response
 
 
 @router.post(
@@ -594,6 +584,7 @@ def password_reset_confirm_endpoint(
         )
 
     form.save()
+    revoke_all_refresh_tokens_for_user(user)
     return StatusResponseSchema(message="Your password has been reset successfully.")
 
 

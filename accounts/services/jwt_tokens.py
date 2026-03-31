@@ -181,6 +181,16 @@ def revoke_refresh_token(token: str) -> bool:
     return True
 
 
+def revoke_all_refresh_tokens_for_user(user: Any) -> int:
+    """Revoke every active refresh token issued to the provided user."""
+    now = timezone.now()
+    return RefreshToken.objects.filter(
+        user=user,
+        revoked_at__isnull=True,
+        expires_at__gt=now,
+    ).update(revoked_at=now)
+
+
 def rotate_refresh_token(token: str) -> dict[str, Any] | None:
     """Revoke the current refresh token and return a fresh token pair."""
     payload = decode_refresh_token(token)

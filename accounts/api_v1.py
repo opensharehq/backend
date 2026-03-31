@@ -44,7 +44,11 @@ from .services.jwt_tokens import (
     revoke_refresh_token,
     rotate_refresh_token,
 )
-from .services.social_exchange import consume_exchange_code, create_exchange_code
+from .services.social_exchange import (
+    SocialExchangeUnavailableError,
+    consume_exchange_code,
+    create_exchange_code,
+)
 from .tasks import send_password_reset_email
 
 router = Router(tags=["auth"])
@@ -269,15 +273,7 @@ def _build_token_response(user: Any) -> TokenResponseSchema:
 
 def _auth_error_message(exc: PasswordLoginError) -> str:
     """Map shared auth service errors to API-facing English messages."""
-    messages = {
-        "invalid_credentials": "Invalid username, email, or password.",
-        "account_disabled": "This account is disabled.",
-        "account_merged": (
-            "This account was merged into another account. "
-            "Please sign in with the destination account."
-        ),
-    }
-    return messages.get(exc.code, "Authentication failed.")
+    return "Invalid username, email, or password."
 
 
 def _configured_providers() -> list[tuple[str, dict[str, str]]]:
@@ -354,8 +350,6 @@ jwt_bearer_auth = JWTBearerAuth()
     response={
         200: TokenResponseSchema,
         401: ErrorResponseSchema,
-        403: ErrorResponseSchema,
-        409: ErrorResponseSchema,
     },
 )
 def login_endpoint(request: HttpRequest, payload: LoginRequestSchema):
@@ -365,8 +359,8 @@ def login_endpoint(request: HttpRequest, payload: LoginRequestSchema):
             payload.account, payload.password, request=request
         )
     except PasswordLoginError as exc:
-        return exc.status_code, ErrorResponseSchema(
-            code=exc.code,
+        return 401, ErrorResponseSchema(
+            code="invalid_credentials",
             message=_auth_error_message(exc),
         )
 
@@ -513,25 +507,36 @@ def password_reset_request_endpoint(
         )
 
     UserModel = get_user_model()
+    email = form.cleaned_data["email"]
     generic_response = StatusResponseSchema(
         message="If the email is registered, a reset link will be sent."
     )
-
-    try:
-        user = UserModel.objects.get(email=form.cleaned_data["email"])
-    except UserModel.DoesNotExist:
+    matching_users = list(UserModel.objects.filter(email=email).order_by("pk"))
+    if not matching_users:
         return generic_response
 
-    if not user.has_usable_password():
+    if len(matching_users) > 1:
+        logger.warning(
+            "Password reset requested for duplicate email %s across user ids %s",
+            email,
+            ",".join(str(user.pk) for user in matching_users),
+        )
+
+    user = next(
+        (candidate for candidate in matching_users if candidate.has_usable_password()),
+        None,
+    )
+    if user is None:
+        social_user = matching_users[0]
         providers = list(
-            UserSocialAuth.objects.filter(user=user).values_list("provider", flat=True)[
-                :3
-            ]
+            UserSocialAuth.objects.filter(user=social_user).values_list(
+                "provider", flat=True
+            )[:3]
         )
         if providers:
             logger.warning(
                 "Password reset requested for passwordless social account: %s (%s)",
-                user.pk,
+                social_user.pk,
                 ",".join(providers),
             )
         return generic_response
@@ -713,7 +718,20 @@ def social_callback_endpoint(request: HttpRequest, provider: str):
             )
         )
 
-    exchange_code = create_exchange_code(request.user, provider)
+    try:
+        exchange_code = create_exchange_code(request.user, provider)
+    except SocialExchangeUnavailableError:
+        logger.warning(
+            "Unable to create social exchange code for user %s via %s",
+            request.user.pk,
+            provider,
+        )
+        return HttpResponseRedirect(
+            _build_frontend_social_callback_url(
+                provider,
+                error="authentication_failed",
+            )
+        )
     logout(request)
     return HttpResponseRedirect(
         _build_frontend_social_callback_url(
@@ -725,14 +743,25 @@ def social_callback_endpoint(request: HttpRequest, provider: str):
 
 @router.post(
     "/social/exchange",
-    response={200: TokenResponseSchema, 401: ErrorResponseSchema},
+    response={
+        200: TokenResponseSchema,
+        401: ErrorResponseSchema,
+        503: ErrorResponseSchema,
+    },
 )
 def social_exchange_endpoint(
     request: HttpRequest,
     payload: SocialExchangeRequestSchema,
 ):
     """Exchange a one-time social-login code for a JWT token pair."""
-    exchange_payload = consume_exchange_code(payload.exchange_code)
+    try:
+        exchange_payload = consume_exchange_code(payload.exchange_code)
+    except SocialExchangeUnavailableError:
+        logger.warning("Social exchange attempted without Redis-backed cache")
+        return 503, ErrorResponseSchema(
+            code="social_exchange_unavailable",
+            message="Social login is temporarily unavailable.",
+        )
     if exchange_payload is None:
         return 401, ErrorResponseSchema(
             code="invalid_exchange_code",

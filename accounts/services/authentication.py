@@ -64,29 +64,16 @@ def authenticate_by_login_id(
 ) -> Any:
     """Authenticate a user with username or email and password."""
     UserModel = get_user_model()
-    username_match = UserModel.objects.filter(username=login_id).first()
-    email_user = None
-
-    if "@" in login_id:
-        email_qs = UserModel.objects.filter(email=login_id)
-        email_user = email_qs.filter(is_active=True).first() or email_qs.first()
-
     user = authenticate(request, username=login_id, password=password)
-    if not user and email_user:
-        user = authenticate(request, username=email_user.username, password=password)
+    if not user and "@" in login_id:
+        email_qs = UserModel.objects.filter(email=login_id).order_by("pk")
+        email_user = email_qs.filter(is_active=True).first() or email_qs.first()
+        if email_user:
+            user = authenticate(
+                request, username=email_user.username, password=password
+            )
 
-    candidate_user = username_match or email_user
-
-    if not user:
-        if candidate_user and candidate_user.merged_into_id:
-            target = candidate_user.merged_into
-            target_label = target.email or target.username
-            raise AccountMergedError(target_label)
-        if candidate_user and not candidate_user.is_active:
-            raise AccountDisabledError()
+    if not user or not user.is_active or user.merged_into_id:
         raise InvalidCredentialsError()
-
-    if not user.is_active:
-        raise AccountDisabledError()
 
     return user

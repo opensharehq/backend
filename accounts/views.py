@@ -51,7 +51,11 @@ from .models import (
     WorkExperience,
 )
 from .services import AccountMergeError, perform_merge
-from .services.authentication import PasswordLoginError, authenticate_by_login_id
+from .services.authentication import (
+    InvalidCredentialsError,
+    PasswordLoginError,
+    authenticate_by_login_id,
+)
 from .tasks import send_password_reset_email
 
 
@@ -74,8 +78,8 @@ def sign_in_view(request):
 
         try:
             user = authenticate_by_login_id(login_id, password, request=request)
-        except PasswordLoginError as exc:
-            error_message = exc.message
+        except PasswordLoginError:
+            error_message = InvalidCredentialsError().message
             messages.error(request, error_message)
         else:
             login(request, user, backend="django.contrib.auth.backends.ModelBackend")

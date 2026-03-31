@@ -2,18 +2,20 @@
 
 from datetime import timedelta
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 import jwt
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from social_django.models import UserSocialAuth
 
 from accounts.services.jwt_tokens import create_access_token
+from accounts.services.social_exchange import SocialExchangeUnavailableError
 
 
 class ApiV1AuthTests(TestCase):
@@ -74,8 +76,8 @@ class ApiV1AuthTests(TestCase):
             "Invalid username, email, or password.",
         )
 
-    def test_login_for_inactive_user_returns_disabled_error(self):
-        """Inactive accounts should receive a dedicated error."""
+    def test_login_for_inactive_user_returns_invalid_credentials(self):
+        """Inactive accounts should receive the generic auth failure."""
         inactive = self.User.objects.create_user(
             username="inactive_api_user",
             email="inactive_api_user@example.com",
@@ -89,12 +91,15 @@ class ApiV1AuthTests(TestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json()["code"], "account_disabled")
-        self.assertEqual(response.json()["message"], "This account is disabled.")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "invalid_credentials")
+        self.assertEqual(
+            response.json()["message"],
+            "Invalid username, email, or password.",
+        )
 
-    def test_login_for_merged_account_returns_merge_hint(self):
-        """Merged source accounts should return the target account hint."""
+    def test_login_for_merged_account_returns_invalid_credentials(self):
+        """Merged source accounts should not leak merge state."""
         target = self.User.objects.create_user(
             username="merged_target_api",
             email="merged_target_api@example.com",
@@ -115,12 +120,15 @@ class ApiV1AuthTests(TestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["code"], "account_merged")
-        self.assertIn("destination account", response.json()["message"])
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "invalid_credentials")
+        self.assertEqual(
+            response.json()["message"],
+            "Invalid username, email, or password.",
+        )
 
-    def test_login_with_email_for_merged_account_returns_merge_hint(self):
-        """Merged source accounts should return the same hint for email login."""
+    def test_login_with_email_for_merged_account_returns_invalid_credentials(self):
+        """Merged source email login should not leak merge state."""
         target = self.User.objects.create_user(
             username="merged_target_api_email",
             email="merged_target_api_email@example.com",
@@ -141,9 +149,12 @@ class ApiV1AuthTests(TestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["code"], "account_merged")
-        self.assertIn("destination account", response.json()["message"])
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "invalid_credentials")
+        self.assertEqual(
+            response.json()["message"],
+            "Invalid username, email, or password.",
+        )
 
     def test_login_request_validation_error_uses_api_shape(self):
         """Invalid request payloads should return the shared validation shape."""
@@ -393,6 +404,42 @@ class ApiV1AuthTests(TestCase):
         )
         enqueue_mock.enqueue.assert_called_once_with(self.user.id, "testserver", False)
 
+    @patch("accounts.api_v1.send_password_reset_email")
+    def test_password_reset_request_handles_duplicate_email_without_500(
+        self, enqueue_mock
+    ):
+        """Duplicate emails should pick a usable-password account without crashing."""
+        duplicate_email = "duplicate-reset@example.com"
+        social_user = self.User.objects.create_user(
+            username="duplicate_social_only",
+            email=duplicate_email,
+            password=None,
+        )
+        social_user.set_unusable_password()
+        social_user.save(update_fields=["password"])
+        password_user = self.User.objects.create_user(
+            username="duplicate_password_user",
+            email=duplicate_email,
+            password="AnotherStrongPass123!",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/password/reset/request",
+            {"email": duplicate_email},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["message"],
+            "If the email is registered, a reset link will be sent.",
+        )
+        enqueue_mock.enqueue.assert_called_once_with(
+            password_user.id,
+            "testserver",
+            False,
+        )
+
     def test_password_reset_confirm_revokes_existing_refresh_tokens(self):
         """Completing a password reset should invalidate previously issued refresh tokens."""
         login_response = self.client.post(
@@ -516,3 +563,70 @@ class ApiV1AuthTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["code"], "invalid_token")
+
+    @patch("accounts.api_v1.consume_exchange_code")
+    def test_social_exchange_code_can_only_be_used_once(self, consume_mock):
+        """The exchange endpoint should reject a reused one-time code."""
+        consume_mock.side_effect = [
+            {"user_id": self.user.pk, "provider": "github"},
+            None,
+        ]
+
+        first_response = self.client.post(
+            "/api/v1/auth/social/exchange",
+            {"exchange_code": "one-time-code"},
+            content_type="application/json",
+        )
+        second_response = self.client.post(
+            "/api/v1/auth/social/exchange",
+            {"exchange_code": "one-time-code"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertTrue(first_response.json()["access_token"])
+        self.assertEqual(second_response.status_code, 401)
+        self.assertEqual(second_response.json()["code"], "invalid_exchange_code")
+
+    @patch(
+        "accounts.api_v1.consume_exchange_code",
+        side_effect=SocialExchangeUnavailableError("redis required"),
+    )
+    def test_social_exchange_returns_503_when_exchange_storage_unavailable(
+        self,
+        _consume_mock,
+    ):
+        """The exchange endpoint should fail closed when Redis support is missing."""
+        response = self.client.post(
+            "/api/v1/auth/social/exchange",
+            {"exchange_code": "one-time-code"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "social_exchange_unavailable")
+
+    @override_settings(
+        FRONTEND_APP_URL="https://frontend.example",
+        FRONTEND_SOCIAL_CALLBACK_PATH="/auth/social/callback",
+    )
+    @patch("accounts.api_v1._get_provider_or_error", return_value={})
+    @patch(
+        "accounts.api_v1.create_exchange_code",
+        side_effect=SocialExchangeUnavailableError("redis required"),
+    )
+    def test_social_callback_redirects_with_authentication_failed_when_exchange_creation_fails(
+        self,
+        _create_exchange_code_mock,
+        _provider_mock,
+    ):
+        """The SPA handoff should fail safely when an exchange code cannot be created."""
+        self.client.force_login(self.user)
+        UserSocialAuth.objects.create(user=self.user, provider="github", uid="github-1")
+
+        response = self.client.get("/api/v1/auth/social/github/callback")
+
+        self.assertEqual(response.status_code, 302)
+        query = parse_qs(urlparse(response.url).query)
+        self.assertEqual(query["provider"], ["github"])
+        self.assertEqual(query["error"], ["authentication_failed"])

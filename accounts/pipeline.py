@@ -2,7 +2,31 @@
 
 import logging
 
+from accounts.email_addresses import email_in_use, normalize_email_address
+from accounts.social_auth import EmailConflictRequiresBinding
+
 logger = logging.getLogger(__name__)
+
+
+def prevent_duplicate_email_signup(
+    backend,
+    details,
+    response,
+    user=None,
+    new_association=False,
+    *args,
+    **kwargs,
+):
+    """Block social-auth account creation when the email is already owned."""
+    if not new_association:
+        return
+
+    email = normalize_email_address(details.get("email") or response.get("email"))
+    if not email:
+        return
+
+    if email_in_use(email, exclude_user=user):
+        raise EmailConflictRequiresBinding(backend)
 
 
 def update_user_profile_from_github(

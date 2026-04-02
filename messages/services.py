@@ -150,15 +150,14 @@ def mark_as_read(user, message_ids=None):
 
     Args:
         user: 用户对象
-        message_ids: 消息 ID 列表 (None 表示标记所有未读消息)
+        message_ids: 消息 ID 列表, 为空时标记全部未读消息
 
     Returns:
         int: 标记的消息数量
 
     """
     queryset = UserMessage.objects.filter(user=user, is_read=False, is_deleted=False)
-
-    if message_ids:
+    if message_ids is not None:
         queryset = queryset.filter(message_id__in=message_ids)
 
     from django.utils import timezone
@@ -166,6 +165,12 @@ def mark_as_read(user, message_ids=None):
     updated = queryset.update(is_read=True, read_at=timezone.now())
 
     return updated
+
+
+@transaction.atomic
+def mark_all_as_read(user):
+    """Mark all unread messages for the user as read."""
+    return mark_as_read(user)
 
 
 @transaction.atomic

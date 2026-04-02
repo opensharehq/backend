@@ -20,8 +20,7 @@ class ConfigUrlsDebugToolbarTests(SimpleTestCase):
         with mock.patch.dict(
             sys.modules, {"debug_toolbar.toolbar": fake_module}, clear=False
         ):
-            from config import urls
-
+            urls = importlib.import_module("config.urls")
             urls = importlib.reload(urls)
 
         self.assertIn("__debug__/", urls.urlpatterns[-1])
@@ -39,8 +38,7 @@ class ConfigUrlsDebugToolbarTests(SimpleTestCase):
             return real_import(name, *args, **kwargs)
 
         with mock.patch("builtins.__import__", side_effect=fake_import):
-            from config import urls
-
+            urls = importlib.import_module("config.urls")
             urls = importlib.reload(urls)
 
         self.assertTrue(

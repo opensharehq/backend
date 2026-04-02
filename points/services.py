@@ -143,6 +143,45 @@ def get_detailed_balance(owner: User | Organization) -> dict:
     }
 
 
+def get_detailed_balance_or_zero(owner: User | Organization) -> dict:
+    """Return detailed balance without implicitly creating a wallet."""
+    wallet = get_wallet_or_none(owner)
+    if wallet is None:
+        return {
+            "total": 0,
+            "cash": 0,
+            "gift": 0,
+            "gift_no_tag": 0,
+            "by_tag": {},
+        }
+
+    # Mirror get_detailed_balance while keeping the call read-only.
+    cash_balance = wallet.get_cash_balance()
+    gift_sources = wallet.sources.filter(
+        point_type=PointType.GIFT,
+        remaining_amount__gt=0,
+    ).select_related("tag")
+
+    gift_total = 0
+    by_tag = defaultdict(int)
+    no_tag_total = 0
+
+    for source in gift_sources:
+        gift_total += source.remaining_amount
+        if source.tag:
+            by_tag[source.tag.slug] += source.remaining_amount
+        else:
+            no_tag_total += source.remaining_amount
+
+    return {
+        "total": cash_balance + gift_total,
+        "cash": cash_balance,
+        "gift": gift_total,
+        "gift_no_tag": no_tag_total,
+        "by_tag": dict(by_tag),
+    }
+
+
 @transaction.atomic
 def grant_points(  # noqa: PLR0913
     owner: User | Organization,

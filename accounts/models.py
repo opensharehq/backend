@@ -5,6 +5,9 @@ import uuid
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.db.models import Q
+from django.db.models.functions import Lower
+
+from .email_addresses import normalize_email_address
 
 
 class User(AbstractUser):
@@ -25,6 +28,18 @@ class User(AbstractUser):
 
         verbose_name = "用户"
         verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(
+                Lower("email"),
+                condition=~Q(email=""),
+                name="accounts_user_email_ci_unique_non_empty",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        """Normalize non-empty emails before persisting the user record."""
+        self.email = normalize_email_address(self.email)
+        super().save(*args, **kwargs)
 
     @property
     def point_wallet(self):
@@ -38,6 +53,42 @@ class User(AbstractUser):
             content_type=ct, object_id=self.pk
         )
         return wallet
+
+
+class RefreshToken(models.Model):
+    """Server-side lifecycle record for JWT refresh tokens."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="refresh_tokens",
+        verbose_name="用户",
+    )
+    jti = models.UUIDField(default=uuid.uuid4, unique=True, verbose_name="令牌ID")
+    expires_at = models.DateTimeField(verbose_name="过期时间", db_index=True)
+    revoked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="吊销时间",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        """Meta configuration for RefreshToken."""
+
+        verbose_name = "刷新令牌"
+        verbose_name_plural = verbose_name
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "created_at"]),
+        ]
+
+    @property
+    def is_active(self) -> bool:
+        """Return whether the token record is still usable."""
+        from django.utils import timezone
+
+        return self.revoked_at is None and self.expires_at > timezone.now()
 
 
 class UserProfile(models.Model):

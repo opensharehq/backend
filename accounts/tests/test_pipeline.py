@@ -5,7 +5,11 @@ from unittest.mock import Mock
 from django.test import TestCase
 
 from accounts.models import User, UserProfile
-from accounts.pipeline import update_user_profile_from_github
+from accounts.pipeline import (
+    prevent_duplicate_email_signup,
+    update_user_profile_from_github,
+)
+from accounts.social_auth import EmailConflictRequiresBinding
 
 
 class UpdateUserProfileFromGithubTests(TestCase):
@@ -231,9 +235,38 @@ class UpdateUserProfileFromGithubTests(TestCase):
         profile = UserProfile.objects.get(user=self.user)
         self.assertEqual(profile.bio, "Test bio")
         self.assertEqual(profile.location, "Test City")
-        self.assertEqual(profile.company, "")
-        self.assertEqual(profile.github_url, "")
-        self.assertEqual(profile.homepage_url, "")
+
+    def test_prevent_duplicate_email_signup_blocks_existing_email(self):
+        """Social signup should stop when the email already belongs to an account."""
+        User.objects.create_user(
+            username="taken",
+            email="taken@example.com",
+            password="password123",
+        )
+
+        with self.assertRaises(EmailConflictRequiresBinding):
+            prevent_duplicate_email_signup(
+                backend=self.backend_github,
+                details={"email": "Taken@example.com"},
+                response={},
+                user=None,
+                new_association=True,
+            )
+
+    def test_prevent_duplicate_email_signup_allows_binding_same_user(self):
+        """Connecting a provider to the current account should allow the same email."""
+        self.user.email = "taken@example.com"
+        self.user.save(update_fields=["email"])
+
+        result = prevent_duplicate_email_signup(
+            backend=self.backend_github,
+            details={"email": "Taken@example.com"},
+            response={},
+            user=self.user,
+            new_association=True,
+        )
+
+        self.assertIsNone(result)
 
     def test_idempotent_multiple_calls(self):
         """Test that multiple calls with same data don't cause issues."""

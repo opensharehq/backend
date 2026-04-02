@@ -468,7 +468,9 @@ class PointsAdminBehaviorTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("admin:accounts_user_changelist"))
         messages_text = [message.message for message in get_messages(request)]
-        self.assertTrue(any("给用户 points-owner 发放失败" in text for text in messages_text))
+        self.assertTrue(
+            any("给用户 points-owner 发放失败" in text for text in messages_text)
+        )
         self.assertFalse(any("成功给" in text for text in messages_text))
 
     def test_grant_org_view_handles_missing_selection_results(self):
@@ -480,7 +482,9 @@ class PointsAdminBehaviorTests(TestCase):
         response = grant_points_to_orgs_view(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, reverse("admin:accounts_organization_changelist"))
+        self.assertEqual(
+            response.url, reverse("admin:accounts_organization_changelist")
+        )
         messages_text = [message.message for message in get_messages(request)]
         self.assertIn("未找到选中的组织", messages_text)
 
@@ -501,7 +505,11 @@ class PointsAdminBehaviorTests(TestCase):
         response = grant_points_to_orgs_view(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, reverse("admin:accounts_organization_changelist"))
+        self.assertEqual(
+            response.url, reverse("admin:accounts_organization_changelist")
+        )
         messages_text = [message.message for message in get_messages(request)]
-        self.assertTrue(any("给组织 失败组织 发放失败" in text for text in messages_text))
+        self.assertTrue(
+            any("给组织 失败组织 发放失败" in text for text in messages_text)
+        )
         self.assertFalse(any("成功给" in text for text in messages_text))

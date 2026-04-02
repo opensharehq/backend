@@ -6,6 +6,8 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+GENERIC_LOGIN_ERROR = "用户名或密码错误，请重试"
+
 
 class SignInViewTests(TestCase):
     """Validate manual username/email login works."""
@@ -47,9 +49,10 @@ class SignInViewTests(TestCase):
             follow=True,
         )
         assert not resp.wsgi_request.user.is_authenticated
+        assert GENERIC_LOGIN_ERROR in resp.content.decode()
 
-    def test_login_for_merged_account_shows_hint(self):
-        """Merged source account cannot log in and shows redirect hint."""
+    def test_login_for_merged_account_shows_generic_failure(self):
+        """Merged source accounts should not reveal merge relationships."""
         target = self.User.objects.create_user(
             username="merged_target",
             email="merged_target@example.com",
@@ -71,7 +74,9 @@ class SignInViewTests(TestCase):
         )
 
         assert not resp.wsgi_request.user.is_authenticated
-        assert "已合并到" in resp.content.decode()
+        content = resp.content.decode()
+        assert GENERIC_LOGIN_ERROR in content
+        assert "已合并到" not in content
 
     def test_malicious_next_is_rejected(self):
         """Open redirects are blocked and fallback to profile."""
@@ -108,8 +113,8 @@ class SignInViewTests(TestCase):
         assert resp.redirect_chain[-1][0] == target
         assert resp.wsgi_request.user.is_authenticated
 
-    def test_inactive_account_shows_disabled_message(self):
-        """Inactive users receive specific hint instead of generic failure."""
+    def test_inactive_account_shows_generic_failure(self):
+        """Inactive users should receive the same generic failure."""
         inactive = self.User.objects.create_user(
             username="inactive_user",
             email="inactive@example.com",
@@ -124,7 +129,9 @@ class SignInViewTests(TestCase):
         )
 
         assert not resp.wsgi_request.user.is_authenticated
-        assert "已被停用" in resp.content.decode()
+        content = resp.content.decode()
+        assert GENERIC_LOGIN_ERROR in content
+        assert "已被停用" not in content
 
     def test_authenticated_user_redirects_from_sign_in(self):
         """Authenticated users hitting sign-in should be redirected."""
@@ -137,7 +144,7 @@ class SignInViewTests(TestCase):
         return_value=True,
     )
     def test_active_authentication_blocked_for_inactive_user(self, _mock_auth):
-        """Even if authentication returns inactive user, view shows disabled message."""
+        """Even forced inactive auth results should show the generic failure."""
         inactive = self.User.objects.create_user(
             username="inactive_auth_user",
             email="inactive_auth@example.com",
@@ -152,4 +159,6 @@ class SignInViewTests(TestCase):
         )
 
         self.assertFalse(resp.wsgi_request.user.is_authenticated)
-        self.assertIn("已被停用", resp.content.decode())
+        content = resp.content.decode()
+        self.assertIn(GENERIC_LOGIN_ERROR, content)
+        self.assertNotIn("已被停用", content)

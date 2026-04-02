@@ -22,13 +22,15 @@ from django.contrib import admin
 from django.urls import include, path
 
 from accounts.views import public_profile_view
+from config import admin as _admin_config  # noqa: F401
 
 # Import admin customization to apply settings
-from config import admin as _admin_config  # noqa: F401
+from config.api_v1 import api_v1
 
 urlpatterns = [
     path("admin/doc/", include("django.contrib.admindocs.urls")),
     path("admin/", admin.site.urls),
+    path("api/v1/", api_v1.urls),
     path("", include("social_django.urls", namespace="social")),
     path("accounts/", include("accounts.urls")),
     path("messages/", include("messages.urls")),

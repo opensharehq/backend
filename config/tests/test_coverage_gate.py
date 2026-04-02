@@ -166,12 +166,18 @@ class CoverageGateScriptTests(SimpleTestCase):
 
         self.assertEqual(parsed.report_path, "coverage.json")
         self.assertEqual(self.script_module._calculate_percentage(0, 0), 100.0)
-        self.assertEqual(self.script_module._require_metric({"covered": 3}, "covered"), 3)
+        self.assertEqual(
+            self.script_module._require_metric({"covered": 3}, "covered"), 3
+        )
         self.assertTrue(
-            self.script_module._is_omitted("accounts/tests/test_views.py", ["*/tests/*"])
+            self.script_module._is_omitted(
+                "accounts/tests/test_views.py", ["*/tests/*"]
+            )
         )
         self.assertEqual(
-            self.script_module._normalize_report_path(self.repo_root, "accounts/admin.py"),
+            self.script_module._normalize_report_path(
+                self.repo_root, "accounts/admin.py"
+            ),
             "accounts/admin.py",
         )
         self.assertEqual(
@@ -238,14 +244,18 @@ class CoverageGateScriptTests(SimpleTestCase):
             ):
                 self.script_module._load_coverage_run_config(config_path)
 
-            config_path.write_text("[tool.coverage.run]\nsource = []\n", encoding="utf-8")
+            config_path.write_text(
+                "[tool.coverage.run]\nsource = []\n", encoding="utf-8"
+            )
             with self.assertRaisesMessage(
                 ValueError,
                 f"Coverage config at {config_path} must declare tool.coverage.run.source.",
             ):
                 self.script_module._load_coverage_run_config(config_path)
 
-            config_path.write_text("[tool.coverage]\nrun = 'invalid'\n", encoding="utf-8")
+            config_path.write_text(
+                "[tool.coverage]\nrun = 'invalid'\n", encoding="utf-8"
+            )
             with self.assertRaisesMessage(
                 ValueError,
                 f"Coverage config at {config_path} is missing [tool.coverage.run].",

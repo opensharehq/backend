@@ -11,6 +11,10 @@ from accounts.models import User
 logger = logging.getLogger(__name__)
 
 
+class ContributionDataUnavailableError(RuntimeError):
+    """Raised when contribution data cannot be fetched from the backend."""
+
+
 class ContributionService:
     """贡献度查询服务."""
 
@@ -56,13 +60,10 @@ class ContributionService:
             return ContributionService.query_from_clickhouse(
                 project_identifiers, start_month, end_month
             )
-        except Exception as e:
-            logger.error("查询 ClickHouse 失败: %s", e)
-            # 降级到 fake 数据
-            logger.warning("降级使用 fake 数据")
-            return ContributionService._get_fake_contributions(
-                project_identifiers, start_month, end_month
-            )
+        except Exception as exc:
+            logger.error("查询 ClickHouse 失败: %s", exc)
+            msg = "Contribution data is currently unavailable."
+            raise ContributionDataUnavailableError(msg) from exc
 
     @staticmethod
     def _get_fake_contributions(

@@ -214,9 +214,14 @@ class ClickHouseDBTests(ClickHouseMonkeyPatchedTestCase):
         """ping should return False when connection fails."""
         self.get_client_mock.side_effect = Exception("Connection failed")
 
-        result = ClickHouseDB.ping()
+        with self.assertLogs("chdb.clickhousedb", level="ERROR") as cm:
+            result = ClickHouseDB.ping()
+
         self.assertFalse(result)
         self.get_client_mock.assert_called_once()
+        self.assertEqual(len(cm.output), 2)
+        self.assertIn("ClickHouse 连接失败", cm.output[0])
+        self.assertIn("ClickHouse 连接测试失败", cm.output[1])
 
     def test_ping_exception(self):
         """ping should return False when client ping fails."""
@@ -224,9 +229,12 @@ class ClickHouseDBTests(ClickHouseMonkeyPatchedTestCase):
 
         ClickHouseDB.get_instance()
 
-        result = ClickHouseDB.ping()
+        with self.assertLogs("chdb.clickhousedb", level="ERROR") as cm:
+            result = ClickHouseDB.ping()
 
         self.assertFalse(result)
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("ClickHouse 连接测试失败", cm.output[0])
 
 
 class ConvenienceFunctionsTests(ClickHouseMonkeyPatchedTestCase):

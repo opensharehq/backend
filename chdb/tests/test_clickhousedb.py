@@ -33,7 +33,10 @@ class ClickHouseDBErrorHandlingTests(TestCase):
         client.query_df.side_effect = RuntimeError("df")
         client.query_arrow.side_effect = RuntimeError("arrow")
 
-        with mock.patch.object(ClickHouseDB, "get_instance", return_value=client):
+        with (
+            self.assertLogs("chdb.clickhousedb", level="ERROR") as cm,
+            mock.patch.object(ClickHouseDB, "get_instance", return_value=client),
+        ):
             with self.assertRaises(RuntimeError):
                 ClickHouseDB.query("select 1")
             with self.assertRaises(RuntimeError):
@@ -45,9 +48,22 @@ class ClickHouseDBErrorHandlingTests(TestCase):
             with self.assertRaises(RuntimeError):
                 ClickHouseDB.query_arrow("select 1")
 
+        self.assertEqual(len(cm.output), 5)
+        self.assertIn("查询执行失败", cm.output[0])
+        self.assertIn("命令执行失败", cm.output[1])
+        self.assertIn("数据插入失败", cm.output[2])
+        self.assertIn("查询 DataFrame 失败", cm.output[3])
+        self.assertIn("查询 Arrow Table 失败", cm.output[4])
+
     def test_ping_returns_false_on_error(self):
         """Ping should return False when client raises."""
         client = mock.Mock()
         client.ping.side_effect = RuntimeError("ping fail")
-        with mock.patch.object(ClickHouseDB, "get_instance", return_value=client):
+        with (
+            self.assertLogs("chdb.clickhousedb", level="ERROR") as cm,
+            mock.patch.object(ClickHouseDB, "get_instance", return_value=client),
+        ):
             self.assertFalse(ClickHouseDB.ping())
+
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("ClickHouse 连接测试失败", cm.output[0])

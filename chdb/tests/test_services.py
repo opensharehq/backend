@@ -109,13 +109,16 @@ class QueryContributionsTests(TestCase):
         """Test query handling exceptions."""
         mock_query.side_effect = Exception("ClickHouse error")
 
-        contributions = services.query_contributions(
-            label_ids=[":companies/test/project"],
-            start_month=202405,
-            end_month=202406,
-        )
+        with self.assertLogs("chdb.services", level="ERROR") as cm:
+            contributions = services.query_contributions(
+                label_ids=[":companies/test/project"],
+                start_month=202405,
+                end_month=202406,
+            )
 
         self.assertEqual(contributions, [])
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("查询贡献度数据失败", cm.output[0])
 
 
 class SearchTagsTests(TestCase):
@@ -211,10 +214,13 @@ class SearchTagsTests(TestCase):
         """Query exceptions should be swallowed and return empty list."""
         mock_query.side_effect = Exception("Database connection error")
 
-        tags = services.search_tags("vscode")
+        with self.assertLogs("chdb.services", level="ERROR") as cm:
+            tags = services.search_tags("vscode")
 
         self.assertEqual(tags, [])
         mock_query.assert_called_once()
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("搜索标签失败", cm.output[0])
 
     @patch("chdb.services.ClickHouseDB.query")
     def test_search_tags_keyword_trimmed(self, mock_query):
@@ -347,10 +353,13 @@ class GetLabelUsersTests(TestCase):
         """Query errors should return empty dict."""
         mock_query.side_effect = Exception("Database connection error")
 
-        label_info = services.get_label_users(["github-microsoft-vscode"])
+        with self.assertLogs("chdb.services", level="ERROR") as cm:
+            label_info = services.get_label_users(["github-microsoft-vscode"])
 
         self.assertEqual(label_info, {})
         mock_query.assert_called_once()
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("查询标签用户信息失败", cm.output[0])
 
     @patch("chdb.services.ClickHouseDB.query")
     def test_get_label_users_mismatched_array_lengths(self, mock_query):

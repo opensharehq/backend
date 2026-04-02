@@ -33,12 +33,18 @@ class ContributionServiceTests(TestCase):
     )
     def test_get_contributions_raises_when_clickhouse_is_unavailable(self, _mock_query):
         """ClickHouse failures should fail explicitly instead of falling back to fake data."""
-        with self.assertRaises(ContributionDataUnavailableError):
+        with (
+            self.assertLogs("contributions.services", level="ERROR") as cm,
+            self.assertRaises(ContributionDataUnavailableError),
+        ):
             ContributionService.get_contributions(
                 project_identifiers=["repo:github:test"],
                 start_month=date(2024, 1, 1),
                 end_month=date(2024, 12, 1),
             )
+
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("查询 ClickHouse 失败", cm.output[0])
 
     @patch("chdb.services.query_contributions", return_value=[])
     def test_get_contributions_preserves_empty_success_result(self, _mock_query):

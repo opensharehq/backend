@@ -396,14 +396,19 @@ class AllocationServiceTests(TestCase):
             email="rollback-user@example.com",
         )
 
-        with patch(
-            "points.allocation_services.grant_points",
-            side_effect=RuntimeError("grant failed"),
+        with (
+            patch(
+                "points.allocation_services.grant_points",
+                side_effect=RuntimeError("grant failed"),
+            ),
+            self.assertLogs("points.allocation_services", level="ERROR") as cm,
         ):
             result = AllocationService.claim_pending_points(claimant)
 
         self.assertEqual(result["claimed_count"], 0)
         self.assertEqual(result["total_amount"], 0)
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("Failed to claim pending grant", cm.output[0])
 
         pending_grant.refresh_from_db()
         self.assertFalse(pending_grant.is_claimed)
@@ -1067,9 +1072,12 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
 
-        with patch(
-            "points.allocation_services.grant_points",
-            side_effect=RuntimeError("grant failed"),
+        with (
+            patch(
+                "points.allocation_services.grant_points",
+                side_effect=RuntimeError("grant failed"),
+            ),
+            self.assertLogs("points.allocation_services", level="ERROR") as cm,
         ):
             success = AllocationService._grant_registered_points(
                 allocation,
@@ -1078,6 +1086,8 @@ class AllocationServiceTests(TestCase):
             )
 
         self.assertFalse(success)
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("Failed to grant points for allocation", cm.output[0])
 
     def test_build_pending_claim_query_without_identifiers_matches_nothing(self):
         """Test users without identifiers do not match blank pending grants."""
@@ -1137,9 +1147,12 @@ class AllocationServiceTests(TestCase):
             email="retry-user@example.com",
         )
 
-        with patch(
-            "points.allocation_services.grant_points",
-            side_effect=RuntimeError("grant failed"),
+        with (
+            patch(
+                "points.allocation_services.grant_points",
+                side_effect=RuntimeError("grant failed"),
+            ),
+            self.assertLogs("points.allocation_services", level="ERROR") as cm,
         ):
             failed_result = AllocationService.claim_pending_points(claimant)
 
@@ -1148,6 +1161,8 @@ class AllocationServiceTests(TestCase):
         self.assertEqual(failed_result, {"claimed_count": 0, "total_amount": 0})
         self.assertEqual(success_result, {"claimed_count": 1, "total_amount": 3000})
         self.assertEqual(get_balance(claimant, PointType.GIFT), 3000)
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("Failed to claim pending grant", cm.output[0])
         pending_grant.refresh_from_db()
         self.assertTrue(pending_grant.is_claimed)
         self.assertEqual(pending_grant.claimed_by, claimant)

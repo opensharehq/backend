@@ -194,6 +194,7 @@ def create_withdrawal_view(request):
             except (
                 services.InsufficientPointsError,
                 services.WithdrawalError,
+                ValueError,
             ) as e:
                 messages.error(request, str(e))
     else:
@@ -368,6 +369,7 @@ def org_create_withdrawal_view(request, slug):
             except (
                 services.InsufficientPointsError,
                 services.WithdrawalError,
+                ValueError,
             ) as e:
                 messages.error(request, str(e))
     else:

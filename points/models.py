@@ -359,6 +359,16 @@ class WithdrawalRequest(models.Model):
         verbose_name="处理时间",
     )
 
+    # 提现账号
+    withdrawal_account = models.ForeignKey(
+        "accounts.WithdrawalAccount",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="withdrawal_requests",
+        verbose_name="提现账号",
+    )
+
     # 关联交易记录
     transaction = models.OneToOneField(
         PointTransaction,

@@ -91,6 +91,10 @@ ERROR_MESSAGE_MAP = {
         "The target account already has too many pending merge requests. Try again "
         "later."
     ),
+    "尚未完成签约，请先签约。签约完成后五分钟方可进行绑定，请稍候。": (
+        "You have not completed signing. Please sign up first. "
+        "Binding is available 5 minutes after signing, please wait."
+    ),
     "提现金额必须大于 0": "The withdrawal amount must be greater than 0.",
     "请输入有效的手机号码（11位数字）": "Enter a valid 11-digit phone number.",
     "请输入有效的身份证号（15或18位）": (

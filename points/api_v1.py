@@ -16,6 +16,7 @@ from ninja import Router, Schema
 
 from accounts.api_v1 import jwt_bearer_auth
 from accounts.models import Organization, OrganizationMembership, User
+from accounts.services.masking import mask_card, mask_name
 from config.api_common import (
     ApiError,
     ErrorResponseSchema,
@@ -125,17 +126,28 @@ def _serialize_withdrawal(withdrawal: WithdrawalRequest) -> dict:
     owner = withdrawal.wallet.owner
     owner_type = "organization" if isinstance(owner, Organization) else "user"
     owner_slug = owner.slug if isinstance(owner, Organization) else None
+
+    # 优先从关联的提现账号读取银行卡号，确保同一账号的记录掩码一致
+    if withdrawal.withdrawal_account_id and withdrawal.withdrawal_account:
+        raw_bank_account = (
+            withdrawal.withdrawal_account.bank_card
+            or withdrawal.withdrawal_account.swift_account
+        )
+    else:
+        raw_bank_account = withdrawal.bank_account
+
     return {
         "id": withdrawal.id,
         "owner_type": owner_type,
         "owner_slug": owner_slug,
         "amount": withdrawal.amount,
         "status": withdrawal.status,
-        "real_name": withdrawal.real_name,
+        "real_name": mask_name(withdrawal.real_name),
         "phone": withdrawal.phone,
         "id_card": withdrawal.id_card,
         "bank_name": withdrawal.bank_name,
-        "bank_account": withdrawal.bank_account,
+        "bank_account": mask_card(raw_bank_account),
+        "withdrawal_account_id": withdrawal.withdrawal_account_id,
         "invoice_file_url": withdrawal.invoice_file.url
         if withdrawal.invoice_file
         else None,
@@ -632,7 +644,7 @@ def current_user_withdrawals_endpoint(request, page: int = 1, page_size: int = 2
     """List the current user's withdrawal requests."""
     wallet = services.get_wallet_or_none(request.auth)
     withdrawals = (
-        wallet.withdrawals.order_by("-created_at")
+        wallet.withdrawals.select_related("withdrawal_account").order_by("-created_at")
         if wallet is not None
         else WithdrawalRequest.objects.none()
     )
@@ -657,6 +669,37 @@ def current_user_withdrawals_endpoint(request, page: int = 1, page_size: int = 2
 def current_user_withdrawal_create_endpoint(request):
     """Create a withdrawal request for the current user."""
     data, invoice_file = _parse_request_data(request)
+
+    # 新流程：通过 withdrawal_account_id + amount 提交
+    withdrawal_account_id = data.get("withdrawal_account_id")
+    if withdrawal_account_id is not None:
+        try:
+            amount = int(data.get("amount", 0))
+        except (TypeError, ValueError):
+            raise ApiError(
+                "validation_error", 422, "amount must be a valid integer."
+            )
+        if amount < services.MINIMUM_WITHDRAWAL_AMOUNT:
+            raise ApiError(
+                "validation_error",
+                422,
+                f"Minimum withdrawal amount is {services.MINIMUM_WITHDRAWAL_AMOUNT} points.",
+            )
+        try:
+            withdrawal = services.create_withdrawal_request(
+                owner=request.auth,
+                amount=amount,
+                invoice_file=invoice_file,
+                withdrawal_account_id=int(withdrawal_account_id),
+            )
+        except ValueError as exc:
+            raise ApiError("validation_error", 422, str(exc))
+        except (services.InsufficientPointsError, services.WithdrawalError) as exc:
+            _raise_points_service_error(str(exc))
+            raise AssertionError("unreachable")
+        return 201, _serialize_withdrawal(withdrawal)
+
+    # 旧流程：直接传参方式（向后兼容）
     form = WithdrawalRequestForm(request.auth, data=data, files=request.FILES or None)
     if not validate_form(form):
         raise ApiError(
@@ -679,6 +722,8 @@ def current_user_withdrawal_create_endpoint(request):
     except (services.InsufficientPointsError, services.WithdrawalError) as exc:
         _raise_points_service_error(str(exc))
         raise AssertionError("unreachable")
+    except ValueError as exc:
+        raise ApiError("validation_error", 422, str(exc))
     return 201, _serialize_withdrawal(withdrawal)
 
 
@@ -825,6 +870,8 @@ def organization_withdrawal_create_endpoint(request, slug: str):
     except (services.InsufficientPointsError, services.WithdrawalError) as exc:
         _raise_points_service_error(str(exc))
         raise AssertionError("unreachable")
+    except ValueError as exc:
+        raise ApiError("validation_error", 422, str(exc))
     return 201, _serialize_withdrawal(withdrawal)
 
 

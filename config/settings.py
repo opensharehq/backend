@@ -85,6 +85,15 @@ env = environ.Env(
     FRONTEND_SOCIAL_CALLBACK_PATH=(str, "/auth/social/callback"),
     FRONTEND_PASSWORD_RESET_PATH=(str, "/auth/password-reset"),
     CORS_ALLOWED_ORIGINS=(list, []),
+    SBY_INTER_KEY=(str, ""),
+    SBY_MER_PRIVATE_KEY=(str, ""),
+    SBY_MER_PUBLIC_KEY=(str, ""),
+    SBY_FU_PUBLIC_KEY=(str, ""),
+    SBY_MER_ID=(str, ""),
+    SBY_TASK_ID=(str, ""),
+    SBY_API_VERSION=(str, "V1.0"),
+    SBY_PROVIDER_ID=(str, ""),
+    SBY_FU_URL=(str, ""),
 )
 
 TESTING = "test" in sys.argv or "PYTEST_VERSION" in os.environ
@@ -124,6 +133,17 @@ CLICKHOUSE_PASSWORD = env("CLICKHOUSE_PASSWORD")
 CLICKHOUSE_DATABASE = env("CLICKHOUSE_DATABASE")
 CLICKHOUSE_SECURE = env("CLICKHOUSE_SECURE")
 
+# 身边云 (Shenbianyun) Configuration
+SBY_INTER_KEY = env("SBY_INTER_KEY")
+SBY_MER_PRIVATE_KEY = env("SBY_MER_PRIVATE_KEY")
+SBY_MER_PUBLIC_KEY = env("SBY_MER_PUBLIC_KEY")
+SBY_FU_PUBLIC_KEY = env("SBY_FU_PUBLIC_KEY")
+SBY_MER_ID = env("SBY_MER_ID")
+SBY_TASK_ID = env("SBY_TASK_ID")
+SBY_API_VERSION = env("SBY_API_VERSION")
+SBY_PROVIDER_ID = env("SBY_PROVIDER_ID")
+SBY_FU_URL = env("SBY_FU_URL")
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -139,6 +159,7 @@ INSTALLED_APPS = [
     "django_extensions",
     "django_tasks",
     "django_tasks.backends.database",
+    "django_apscheduler",
     "social_django",
     "anymail",
     "turnstile",
@@ -150,6 +171,7 @@ INSTALLED_APPS = [
     "chdb",
     "contributions",
     "messages.apps.SiteMessagesConfig",
+    "shenbianyun",
 ]
 
 _BASE_MIDDLEWARE = [
@@ -423,6 +445,10 @@ SERVER_EMAIL = "server@openshare.cn"
 
 # tasks
 TASKS = {"default": {"BACKEND": "django_tasks.backends.database.DatabaseBackend"}}
+
+# APScheduler Configuration
+APSCHEDULER_DATETIME_FORMAT = "N j, Y, f:s a"
+APSCHEDULER_RUN_NOW_TIMEOUT = 25  # seconds
 
 
 # Logging Configuration

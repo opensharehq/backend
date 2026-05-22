@@ -360,7 +360,7 @@ class PointsApiV1Tests(TestCase):
         create_response = self.client.post(
             f"/api/v1/points/organizations/{self.organization.slug}/withdrawals",
             {
-                "amount": 100,
+                "amount": 200,
                 "real_name": "Org Owner",
                 "phone": "13800138000",
                 "id_card": "11010519491231002X",

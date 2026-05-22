@@ -362,6 +362,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         "wallet_owner",
         "amount",
         "status_display",
+        "withdrawal_account",
         "real_name",
         "phone",
         "id_card",
@@ -378,6 +379,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         "bank_name",
         "bank_account",
         "wallet__id",
+        "withdrawal_account__id",
     )
     readonly_fields = (
         "wallet",
@@ -388,6 +390,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         "bank_name",
         "bank_account",
         "invoice_file",
+        "withdrawal_account",
         "transaction",
         "created_at",
         "updated_at",
@@ -422,6 +425,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
                 "fields": (
                     "bank_name",
                     "bank_account",
+                    "withdrawal_account",
                 )
             },
         ),

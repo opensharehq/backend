@@ -26,6 +26,8 @@ dependencies = [
     "psycopg2-binary>=2.9.11",
     "django-ninja>=1.6.2",
     "pyjwt>=2.10.1",
+    "pycryptodome>=3.20.0",
+    "django-apscheduler>=0.7.0",
 ]
 
 [tool.djlint]

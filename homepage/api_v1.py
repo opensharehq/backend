@@ -23,6 +23,8 @@ from config.api_common import (
     paginate_queryset,
 )
 
+from accounts.api_v1 import jwt_bearer_auth
+
 from .views import (
     MAX_SEARCH_RESULTS,
     SearchFilters,
@@ -111,11 +113,11 @@ def _public_profile_payload(user) -> PublicProfileSchema:
     )
 
 
-@router.get("/search")
+@router.get("/search", auth=jwt_bearer_auth)
 def homepage_search_endpoint(request, q: str = ""):
     """Search repos and developers from name_info table."""
     keyword = q.strip()
-    if not keyword:
+    if not keyword or len(keyword) < 2:
         return {"items": []}
     try:
         from chdb import services as chdb_services

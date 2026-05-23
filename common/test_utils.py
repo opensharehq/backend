@@ -2,10 +2,12 @@
 
 import os
 import re
+import time
 from urllib.parse import urlparse
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from django.core.cache import cache
+from django.db import OperationalError
 from django.test import TestCase
 from playwright.sync_api import sync_playwright
 
@@ -134,6 +136,32 @@ class BrowserE2ETestCase(CacheClearMixin, StaticLiveServerTestCase):
         """Assert that the current page body contains text."""
         self.assertIn(text, self.page.locator("body").inner_text())
 
+    def wait_for_database(self, operation, *, timeout=2.0, interval=0.05):
+        """
+        Retry a database-backed browser assertion until the live request settles.
+
+        SQLite can briefly report table locks when a live-server request and the
+        test thread touch the same table at the same time. This helper keeps
+        those waits explicit at the assertion boundary.
+        """
+        deadline = time.monotonic() + timeout
+        last_error = None
+
+        while True:
+            try:
+                return operation()
+            except OperationalError as exc:
+                if not self._is_sqlite_lock_error(exc):
+                    raise
+                last_error = exc
+            except AssertionError as exc:
+                last_error = exc
+
+            if time.monotonic() >= deadline:
+                raise last_error
+
+            time.sleep(interval)
+
     def assert_browser_clean(self):
         """Fail the test when the browser captured unexpected frontend errors."""
         failures = []
@@ -248,6 +276,12 @@ class BrowserE2ETestCase(CacheClearMixin, StaticLiveServerTestCase):
         if not url:
             return False
         return urlparse(url).netloc == urlparse(self.live_server_url).netloc
+
+    @staticmethod
+    def _is_sqlite_lock_error(error):
+        """Return whether an OperationalError is a transient SQLite lock."""
+        message = str(error).lower()
+        return "database table is locked" in message or "database is locked" in message
 
     @staticmethod
     def _is_allowed(entry, patterns):

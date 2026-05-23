@@ -168,9 +168,7 @@ def test_request_signature_verification_failure(client, platform_keypair):
     """mock 返回签名不匹配的响应，验证抛出 ShenbianyunSignatureError."""
     # 使用另一对完全不同的 RSA 私钥来签名，使其与 client 持有的平台公钥不匹配
     wrong_key = RSA.generate(1024)  # noqa: S505
-    wrong_private_b64 = base64.b64encode(
-        wrong_key.export_key("DER")
-    ).decode()
+    wrong_private_b64 = base64.b64encode(wrong_key.export_key("DER")).decode()
 
     def fake_post(url, json=None, timeout=None):
         req_id = json["reqId"]

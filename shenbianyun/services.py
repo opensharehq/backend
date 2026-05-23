@@ -164,9 +164,7 @@ class ShenbianyunClient:
 
         return self._process_response(resp_json, req_id, fun_code)
 
-    def _process_response(
-        self, resp_json: dict, req_id: str, fun_code: str
-    ) -> dict:
+    def _process_response(self, resp_json: dict, req_id: str, fun_code: str) -> dict:
         """
         处理并校验响应数据.
 
@@ -255,19 +253,13 @@ class ShenbianyunClient:
             errors.append(f"reqId 不匹配: 期望={req_id}, 实际={resp_req_id}")
 
         if resp_fun_code and resp_fun_code != fun_code:
-            errors.append(
-                f"funCode 不匹配: 期望={fun_code}, 实际={resp_fun_code}"
-            )
+            errors.append(f"funCode 不匹配: 期望={fun_code}, 实际={resp_fun_code}")
 
         if resp_mer_id and resp_mer_id != self.mer_id:
-            errors.append(
-                f"merId 不匹配: 期望={self.mer_id}, 实际={resp_mer_id}"
-            )
+            errors.append(f"merId 不匹配: 期望={self.mer_id}, 实际={resp_mer_id}")
 
         if resp_version and resp_version != self.version:
-            errors.append(
-                f"version 不匹配: 期望={self.version}, 实际={resp_version}"
-            )
+            errors.append(f"version 不匹配: 期望={self.version}, 实际={resp_version}")
 
         if errors:
             msg = "身边云响应校验失败: " + "; ".join(errors)
@@ -299,7 +291,9 @@ def batch_payment():  # noqa: PLR0915
     from .models import PaymentRecord, PaymentState
 
     # 1. 获取已有PaymentRecord的提现申请ID，排除它们
-    existing_wr_ids = PaymentRecord.objects.values_list("withdrawal_request_id", flat=True)
+    existing_wr_ids = PaymentRecord.objects.values_list(
+        "withdrawal_request_id", flat=True
+    )
 
     # 2. 查询最多20条已批准且未发起过付款的提现申请（按创建时间升序）
     withdrawals = (
@@ -341,15 +335,17 @@ def batch_payment():  # noqa: PLR0915
 
         amt = wr.amount * 10  # 积分值 * 10 = 分
 
-        pay_items.append({
-            "merOrderId": mer_order_id,
-            "amt": amt,
-            "payeeName": payee_name,
-            "payeeAcc": payee_acc,
-            "idCard": id_card,
-            "mobile": mobile,
-            "paymentType": 0,  # 银行卡
-        })
+        pay_items.append(
+            {
+                "merOrderId": mer_order_id,
+                "amt": amt,
+                "payeeName": payee_name,
+                "payeeAcc": payee_acc,
+                "idCard": id_card,
+                "mobile": mobile,
+                "paymentType": 0,  # 银行卡
+            }
+        )
 
         record = PaymentRecord.objects.create(
             mer_batch_id=mer_batch_id,
@@ -415,7 +411,9 @@ def batch_payment():  # noqa: PLR0915
         record.amount = result.get("amt", pay_item["amt"])
         record.fee = result.get("fee", 0) or 0
         record.res_msg = result.get("resMsg", "") or ""
-        record.save(update_fields=["order_no", "amount", "fee", "res_msg", "updated_at"])
+        record.save(
+            update_fields=["order_no", "amount", "fee", "res_msg", "updated_at"]
+        )
         updated_count += 1
 
     logger.info(
@@ -539,7 +537,9 @@ def check_payment_status():  # noqa: PLR0915, PLR0912
                 # 非终态 (PAYING / PENDING_CONFIRM) 仅保存状态变更
                 record.save()
 
-    logger.info("付款状态查询完成: 批次数=%d, 状态更新=%d", len(batch_ids), total_updated)
+    logger.info(
+        "付款状态查询完成: 批次数=%d, 状态更新=%d", len(batch_ids), total_updated
+    )
     return {"checked": len(batch_ids), "updated": total_updated}
 
 

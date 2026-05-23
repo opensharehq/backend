@@ -121,7 +121,9 @@ class ClaimPendingPointsSignalIntegrationTests(TestCase):
             allocation=self.allocation,
         )
         UserSocialAuth.objects.create(
-            user=self.claimant, provider="gitee", uid="99999",
+            user=self.claimant,
+            provider="gitee",
+            uid="99999",
         )
         grant.refresh_from_db()
         assert grant.is_claimed is True
@@ -142,7 +144,9 @@ class ClaimPendingPointsSignalIntegrationTests(TestCase):
         )
         # 绑定 GitHub 账号（不是 Gitee）
         UserSocialAuth.objects.create(
-            user=self.claimant, provider="github", uid="123456",
+            user=self.claimant,
+            provider="github",
+            uid="123456",
         )
         grant.refresh_from_db()
         assert grant.is_claimed is False  # 不应被认领
@@ -151,16 +155,26 @@ class ClaimPendingPointsSignalIntegrationTests(TestCase):
         """用户绑定多个平台账号后能认领所有匹配平台的待领取积分"""
         # 创建两个不同平台的待领取记录
         grant_gh = PendingPointGrant.objects.create(
-            platform="github", actor_id="111", actor_login="user1",
-            amount=100, point_type=PointType.CASH, reason="GH reward",
+            platform="github",
+            actor_id="111",
+            actor_login="user1",
+            amount=100,
+            point_type=PointType.CASH,
+            reason="GH reward",
             granter_type=ContentType.objects.get_for_model(self.source),
-            granter_id=self.source.id, allocation=self.allocation,
+            granter_id=self.source.id,
+            allocation=self.allocation,
         )
         grant_gitee = PendingPointGrant.objects.create(
-            platform="gitee", actor_id="222", actor_login="user1",
-            amount=200, point_type=PointType.CASH, reason="Gitee reward",
+            platform="gitee",
+            actor_id="222",
+            actor_login="user1",
+            amount=200,
+            point_type=PointType.CASH,
+            reason="Gitee reward",
             granter_type=ContentType.objects.get_for_model(self.source),
-            granter_id=self.source.id, allocation=self.allocation,
+            granter_id=self.source.id,
+            allocation=self.allocation,
         )
         # 绑定 GitHub
         UserSocialAuth.objects.create(user=self.claimant, provider="github", uid="111")

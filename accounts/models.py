@@ -491,7 +491,11 @@ class WithdrawalAccount(models.Model):
 
     # 中国以外字段
     currency = models.CharField(
-        max_length=10, blank=True, default="", choices=CURRENCY_CHOICES, verbose_name="币种"
+        max_length=10,
+        blank=True,
+        default="",
+        choices=CURRENCY_CHOICES,
+        verbose_name="币种",
     )
     swift_account = models.CharField(
         max_length=100, blank=True, default="", verbose_name="SWIFT 账号"

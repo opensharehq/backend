@@ -464,9 +464,7 @@ def _validate_execute_request(payload: AllocationExecuteRequestSchema) -> None:
             "validation_error",
             422,
             "Request validation failed.",
-            _validation_detail(
-                "allocations", "allocations must not be empty."
-            ),
+            _validation_detail("allocations", "allocations must not be empty."),
         )
     if any(item.amount < 0 for item in payload.allocations):
         raise ApiError(
@@ -676,9 +674,7 @@ def current_user_withdrawal_create_endpoint(request):
         try:
             amount = int(data.get("amount", 0))
         except (TypeError, ValueError):
-            raise ApiError(
-                "validation_error", 422, "amount must be a valid integer."
-            )
+            raise ApiError("validation_error", 422, "amount must be a valid integer.")
         if amount < services.MINIMUM_WITHDRAWAL_AMOUNT:
             raise ApiError(
                 "validation_error",

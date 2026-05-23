@@ -1119,7 +1119,12 @@ class AllocationExecuteAPIViewTests(TestCase):
             ),
             patch(
                 "points.views.AllocationService.execute_allocation",
-                return_value={"success": 1, "pending": 0, "failed": 0, "total_points": 300},
+                return_value={
+                    "success": 1,
+                    "pending": 0,
+                    "failed": 0,
+                    "total_points": 300,
+                },
             ),
         ):
             response = self.client.post(

@@ -154,9 +154,7 @@ class SocialExchangeServiceTests(SimpleTestCase):
 
     def test_exchange_code_works_with_locmem_cache_backend(self):
         """Local development without Redis should still round-trip codes."""
-        backend = LocMemCache(
-            "social-exchange-test", {"TIMEOUT": 60, "OPTIONS": {}}
-        )
+        backend = LocMemCache("social-exchange-test", {"TIMEOUT": 60, "OPTIONS": {}})
         user = SimpleNamespace(pk=21)
 
         with patch(

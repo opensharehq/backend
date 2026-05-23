@@ -586,7 +586,9 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             password="pass",
         )
         UserSocialAuth.objects.create(user=user, provider="github", uid="single-uid")
-        pending_grant = self._create_pending_grant(user, amount=3500, actor_id="single-uid")
+        pending_grant = self._create_pending_grant(
+            user, amount=3500, actor_id="single-uid"
+        )
         out = StringIO()
 
         call_command(
@@ -620,7 +622,9 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             password="pass",
         )
 
-        github_grant = self._create_pending_grant(github_user, amount=2000, actor_id="10001")
+        github_grant = self._create_pending_grant(
+            github_user, amount=2000, actor_id="10001"
+        )
         normal_grant = self._create_pending_grant(non_github_user, amount=1800)
 
         call_command("retrigger_pending_point_claims", all=True)
@@ -648,7 +652,9 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             password="pass",
         )
 
-        github_grant = self._create_pending_grant(github_user, amount=2200, actor_id="10002")
+        github_grant = self._create_pending_grant(
+            github_user, amount=2200, actor_id="10002"
+        )
         normal_grant = self._create_pending_grant(non_github_user, amount=2100)
 
         call_command(
@@ -689,7 +695,9 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             password="pass",
         )
         UserSocialAuth.objects.create(user=user, provider="github", uid="dry-uid")
-        pending_grant = self._create_pending_grant(user, amount=3200, actor_id="dry-uid")
+        pending_grant = self._create_pending_grant(
+            user, amount=3200, actor_id="dry-uid"
+        )
         out = StringIO()
 
         call_command(

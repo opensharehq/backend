@@ -59,7 +59,5 @@ class Command(BaseCommand):
         except (ShenbianyunError, ValueError) as exc:
             raise CommandError(str(exc)) from exc
 
-        self.stdout.write(
-            self.style.SUCCESS(f"共获取到 {len(users)} 条签约用户记录")
-        )
+        self.stdout.write(self.style.SUCCESS(f"共获取到 {len(users)} 条签约用户记录"))
         self.stdout.write(json.dumps(users, ensure_ascii=False, indent=2))

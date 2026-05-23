@@ -280,9 +280,7 @@ MEDIA_ROOT = BASE_DIR / "media"
 # 仅当 AWS S3 必要参数齐全时启用 S3 存储后端，否则回退到本地文件系统，
 # 避免因空 endpoint_url 等参数触发 botocore 的 `ValueError: Invalid endpoint:`。
 _USE_S3_STORAGE = bool(
-    AWS_STORAGE_BUCKET_NAME
-    and AWS_S3_ACCESS_KEY_ID
-    and AWS_S3_SECRET_ACCESS_KEY
+    AWS_STORAGE_BUCKET_NAME and AWS_S3_ACCESS_KEY_ID and AWS_S3_SECRET_ACCESS_KEY
 )
 
 if _USE_S3_STORAGE:

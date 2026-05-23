@@ -528,9 +528,7 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
 
-        UserSocialAuth.objects.create(
-            user=self.user, provider="github", uid="777888"
-        )
+        UserSocialAuth.objects.create(user=self.user, provider="github", uid="777888")
 
         PendingPointGrant.objects.create(
             platform="github",

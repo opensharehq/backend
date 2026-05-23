@@ -20,18 +20,12 @@ class SignedUser(models.Model):
     )
 
     name = models.CharField(max_length=64, db_index=True, verbose_name="姓名")
-    mobile = models.CharField(
-        max_length=20, db_index=True, verbose_name="手机号"
-    )
-    id_card = models.CharField(
-        max_length=32, db_index=True, verbose_name="身份证号"
-    )
+    mobile = models.CharField(max_length=20, db_index=True, verbose_name="手机号")
+    id_card = models.CharField(max_length=32, db_index=True, verbose_name="身份证号")
 
     provider_id = models.BigIntegerField(verbose_name="服务商 ID")
     payment_type = models.IntegerField(default=0, verbose_name="结算方式")
-    state = models.IntegerField(
-        default=1, db_index=True, verbose_name="签约状态"
-    )
+    state = models.IntegerField(default=1, db_index=True, verbose_name="签约状态")
     force_create_contract_flag = models.BooleanField(
         default=False, verbose_name="强制创建合同标记"
     )
@@ -80,9 +74,15 @@ class PaymentRecord(models.Model):
     """提现付款状态记录表, 追踪每笔通过身边云发起的付款."""
 
     # 批次信息
-    mer_batch_id = models.CharField(max_length=32, db_index=True, verbose_name="商户批次号")
-    mer_order_id = models.CharField(max_length=32, unique=True, verbose_name="商户订单号")
-    order_no = models.CharField(max_length=25, blank=True, default="", verbose_name="平台订单号")
+    mer_batch_id = models.CharField(
+        max_length=32, db_index=True, verbose_name="商户批次号"
+    )
+    mer_order_id = models.CharField(
+        max_length=32, unique=True, verbose_name="商户订单号"
+    )
+    order_no = models.CharField(
+        max_length=25, blank=True, default="", verbose_name="平台订单号"
+    )
 
     # 关联提现申请
     withdrawal_request = models.ForeignKey(
@@ -92,12 +92,18 @@ class PaymentRecord(models.Model):
     # 付款信息
     amount = models.PositiveIntegerField(verbose_name="付款金额（分）")
     fee = models.PositiveIntegerField(default=0, verbose_name="服务费（分）")
-    user_fee = models.PositiveIntegerField(default=0, verbose_name="个人服务费/个税（分）")
-    user_due_amt = models.PositiveIntegerField(default=0, verbose_name="个人实际到账（分）")
+    user_fee = models.PositiveIntegerField(
+        default=0, verbose_name="个人服务费/个税（分）"
+    )
+    user_due_amt = models.PositiveIntegerField(
+        default=0, verbose_name="个人实际到账（分）"
+    )
 
     # 状态
     state = models.IntegerField(
-        choices=PaymentState.choices, default=PaymentState.INITIATED, verbose_name="付款状态"
+        choices=PaymentState.choices,
+        default=PaymentState.INITIATED,
+        verbose_name="付款状态",
     )
     res_msg = models.TextField(blank=True, default="", verbose_name="响应信息")
 

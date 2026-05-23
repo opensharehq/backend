@@ -56,7 +56,14 @@ class SignedUserAdmin(admin.ModelAdmin):
 class PaymentRecordAdmin(admin.ModelAdmin):
     """付款记录管理."""
 
-    list_display = ["mer_batch_id", "mer_order_id", "withdrawal_request", "amount", "state", "created_at"]
+    list_display = [
+        "mer_batch_id",
+        "mer_order_id",
+        "withdrawal_request",
+        "amount",
+        "state",
+        "created_at",
+    ]
     list_filter = ["state"]
     search_fields = ["mer_batch_id", "mer_order_id", "order_no"]
     readonly_fields = ["mer_batch_id", "mer_order_id", "order_no", "withdrawal_request"]

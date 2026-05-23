@@ -514,7 +514,9 @@ class PendingPointGrant(models.Model):
             models.Index(fields=["actor_login", "is_claimed"]),
             models.Index(fields=["email", "is_claimed"]),
             models.Index(fields=["created_at"]),
-            models.Index(fields=["platform", "actor_id"], name="idx_pending_platform_actor"),
+            models.Index(
+                fields=["platform", "actor_id"], name="idx_pending_platform_actor"
+            ),
         ]
 
     def __str__(self):

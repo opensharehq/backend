@@ -178,18 +178,18 @@ class ContributionService:
 
     @staticmethod
     def _validate_platform_present(contributions: list[dict]) -> None:
-        """强制校验每条 ClickHouse 贡献数据都携带非空 platform 字段.
+        """
+        Require every ClickHouse contribution row to include a platform.
 
-        按设计，贡献者在代码托管平台上的身份以 (platform, actor_id) 为唯一键,
-        platform 缺失会导致下游待领取池存储 / 认领逻辑丢失身份区分能力.
-        这里只验证存在性（非空字符串），不对具体取值做限制.
+        Contributor identity is keyed by (platform, actor_id). Missing platform
+        values would make downstream pending-grant storage and claim flows lose
+        identity boundaries. This only validates presence and does not restrict
+        specific platform values.
         """
         for index, contrib in enumerate(contributions):
             platform = contrib.get("platform") if isinstance(contrib, dict) else None
             if not isinstance(platform, str) or not platform.strip():
-                msg = (
-                    f"ClickHouse 贡献数据第 {index} 条缺失 platform 字段,拒绝进入后续流程"
-                )
+                msg = f"ClickHouse 贡献数据第 {index} 条缺失 platform 字段,拒绝进入后续流程"
                 logger.error(msg)
                 raise ContributionDataUnavailableError(msg)
 

@@ -8,7 +8,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 from django.conf import settings
-from django.contrib.auth import get_user_model, login as django_login, logout
+from django.contrib.auth import get_user_model, logout
+from django.contrib.auth import login as django_login
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
@@ -429,9 +430,7 @@ def register_endpoint(request: HttpRequest, payload: RegisterRequestSchema):
     except IntegrityError:
         form.add_error(
             "email",
-            DjangoValidationError(
-                "该邮箱已被注册", code="email_already_registered"
-            ),
+            DjangoValidationError("该邮箱已被注册", code="email_already_registered"),
         )
         raise ApiError(
             "validation_error",
@@ -764,7 +763,8 @@ def social_start_endpoint(
     provider: str,
     access_token: str | None = None,
 ):
-    """Start a social-login flow that hands off to the frontend callback.
+    """
+    Start a social-login flow that hands off to the frontend callback.
 
     When ``access_token`` is provided and resolves to an active user, promote
     the JWT identity to a Django session so ``social_django`` can recognize

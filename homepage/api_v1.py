@@ -15,6 +15,7 @@ from accounts.api_serializers import (
     serialize_education,
     serialize_work_experience,
 )
+from accounts.api_v1 import jwt_bearer_auth
 from config.api_common import (
     ApiError,
     ErrorResponseSchema,
@@ -22,8 +23,6 @@ from config.api_common import (
     build_paginated_response,
     paginate_queryset,
 )
-
-from accounts.api_v1 import jwt_bearer_auth
 
 from .views import (
     MAX_SEARCH_RESULTS,

@@ -8,7 +8,8 @@ from typing import Any
 def build_cache_settings(
     debug: bool, redis_url: str, testing: bool = False
 ) -> dict[str, Any]:
-    """Return Django cache configuration based on debug flag and Redis URL.
+    """
+    Return Django cache configuration based on debug flag and Redis URL.
 
     Always provides a ``social_exchange`` cache alias suitable for storing
     short-lived one-time codes. When Redis is available it is shared with the

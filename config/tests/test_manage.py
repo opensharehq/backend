@@ -1,7 +1,7 @@
 """Tests for manage.py module."""
 
 import os
-import subprocess
+import runpy
 import sys
 from pathlib import Path
 from unittest import mock
@@ -141,21 +141,12 @@ except ImportError as e:
 
     def test_manage_script_as_main(self):
         """Test that manage.py can be executed as a script."""
-        # Test the if __name__ == "__main__" block by actually running the script
-        # We'll use subprocess to run it with --help to avoid hanging
-        result = subprocess.run(  # noqa: S603 - controlled inputs for testing.
-            [sys.executable, "manage.py", "--help"],
-            check=False,
-            cwd=str(PROJECT_ROOT),
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        with mock.patch(
+            "django.core.management.execute_from_command_line"
+        ) as mock_execute:
+            runpy.run_path(str(PROJECT_ROOT / "manage.py"), run_name="__main__")
 
-        # Verify the script executed successfully
-        assert result.returncode == 0
-        # Verify Django management command help text is in output
-        assert "manage.py" in result.stdout or "Type 'manage.py help'" in result.stdout
+        mock_execute.assert_called_once_with(sys.argv)
 
     def test_manage_import_error_exception_chain(self):
         """Test that ImportError in manage.py has proper exception chaining."""

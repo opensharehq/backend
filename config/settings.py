@@ -604,8 +604,12 @@ if not DEBUG:
     # Session security
     SESSION_COOKIE_HTTPONLY = True
     CSRF_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = "Strict"
-    CSRF_COOKIE_SAMESITE = "Strict"
+    # OAuth 回调 (/complete/<provider>/) 由第三方平台发起跨站顶级重定向,
+    # 必须使用 Lax 才能让浏览器在跳回时携带 sessionid;
+    # 否则 social-django 读不到此前写入的 state, 抛 AuthStateMissing。
+    # Lax 仍然阻断跨站 POST / 跨站子资源请求, CSRF 防护不受影响。
+    SESSION_COOKIE_SAMESITE = "Lax"
+    CSRF_COOKIE_SAMESITE = "Lax"
 
 # Tests run without HTTPS, so disable SSL redirects and secure-only cookies to avoid
 # interfering with client requests in the test suite.

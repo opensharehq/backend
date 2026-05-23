@@ -48,10 +48,10 @@ class SecurityHeadersTests(TestCase):
     ALLOWED_HOSTS=["testserver"],
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Strict",
+    SESSION_COOKIE_SAMESITE="Lax",
     CSRF_COOKIE_SECURE=True,
     CSRF_COOKIE_HTTPONLY=True,
-    CSRF_COOKIE_SAMESITE="Strict",
+    CSRF_COOKIE_SAMESITE="Lax",
 )
 class CookieHardeningTests(TestCase):
     """Validate cookie attributes for session and CSRF protections."""
@@ -75,7 +75,7 @@ class CookieHardeningTests(TestCase):
         session_cookie = response.cookies["sessionid"]
         self.assertTrue(session_cookie["secure"])
         self.assertTrue(session_cookie["httponly"])
-        self.assertEqual(session_cookie["samesite"], "Strict")
+        self.assertEqual(session_cookie["samesite"], "Lax")
 
     def test_sign_in_page_sets_hardened_csrf_cookie(self):
         client = Client()
@@ -88,7 +88,7 @@ class CookieHardeningTests(TestCase):
         csrf_cookie = response.cookies["csrftoken"]
         self.assertTrue(csrf_cookie["secure"])
         self.assertTrue(csrf_cookie["httponly"])
-        self.assertEqual(csrf_cookie["samesite"], "Strict")
+        self.assertEqual(csrf_cookie["samesite"], "Lax")
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

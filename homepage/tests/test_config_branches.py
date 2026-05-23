@@ -84,7 +84,7 @@ class ConfigSettingsBranchTests(SimpleTestCase):
         self.assertTrue(reloaded.SECURE_SSL_REDIRECT)
         self.assertTrue(reloaded.SECURE_HSTS_INCLUDE_SUBDOMAINS)
         self.assertEqual(reloaded.SECURE_REFERRER_POLICY, "same-origin")
-        self.assertEqual(reloaded.SESSION_COOKIE_SAMESITE, "Strict")
+        self.assertEqual(reloaded.SESSION_COOKIE_SAMESITE, "Lax")
 
 
 class ConfigUrlsBranchTests(SimpleTestCase):

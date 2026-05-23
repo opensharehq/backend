@@ -75,4 +75,4 @@ class SettingsBranchesExplicitTests(SimpleTestCase):
             reloaded.SECURE_CROSS_ORIGIN_OPENER_POLICY,
             "same-origin",
         )
-        self.assertEqual(reloaded.CSRF_COOKIE_SAMESITE, "Strict")
+        self.assertEqual(reloaded.CSRF_COOKIE_SAMESITE, "Lax")

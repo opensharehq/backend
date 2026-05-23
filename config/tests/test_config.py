@@ -183,7 +183,7 @@ class SettingsBranchCoverageTests(SimpleTestCase):
             reloaded.SECURE_CROSS_ORIGIN_OPENER_POLICY,
             "same-origin",
         )
-        self.assertEqual(reloaded.SESSION_COOKIE_SAMESITE, "Strict")
+        self.assertEqual(reloaded.SESSION_COOKIE_SAMESITE, "Lax")
 
     @override_settings(DEBUG=True, TESTING=False)
     def test_urls_append_debug_toolbar_patterns(self):

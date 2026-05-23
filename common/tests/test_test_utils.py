@@ -4,6 +4,7 @@ import os
 from unittest.mock import Mock, call, patch
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
+from django.db import OperationalError
 from django.test import SimpleTestCase
 
 from common.test_utils import BrowserE2ETestCase
@@ -215,6 +216,47 @@ class BrowserE2ETestCaseTests(SimpleTestCase):
         self.assertIn("request failures", message)
         self.assertIn("server errors", message)
 
+    @patch("common.test_utils.time.sleep")
+    def test_wait_for_database_retries_sqlite_locks(self, mock_sleep):
+        """Database helper should tolerate transient SQLite live-server locks."""
+        case = self.make_case()
+        operation = Mock(
+            side_effect=[
+                OperationalError("database table is locked: demo"),
+                "settled",
+            ]
+        )
+
+        result = BrowserE2ETestCase.wait_for_database(case, operation)
+
+        self.assertEqual(result, "settled")
+        self.assertEqual(operation.call_count, 2)
+        mock_sleep.assert_called_once_with(0.05)
+
+    def test_wait_for_database_retries_assertions_and_reraises_errors(self):
+        """Database helper should retry assertions and preserve real failures."""
+        case = self.make_case()
+        operation = Mock(side_effect=[AssertionError("not yet"), "settled"])
+
+        self.assertEqual(
+            BrowserE2ETestCase.wait_for_database(case, operation),
+            "settled",
+        )
+
+        with self.assertRaises(OperationalError):
+            BrowserE2ETestCase.wait_for_database(
+                case,
+                Mock(side_effect=OperationalError("syntax error")),
+            )
+
+        with self.assertRaises(AssertionError) as exc:
+            BrowserE2ETestCase.wait_for_database(
+                case,
+                Mock(side_effect=AssertionError("still failing")),
+                timeout=0,
+            )
+        self.assertEqual(str(exc.exception), "still failing")
+
     def test_allowlist_helpers_append_patterns(self):
         """Allowlist helpers should extend the regex pattern tuples."""
         case = self.make_case()
@@ -339,6 +381,14 @@ class BrowserE2ETestCaseTests(SimpleTestCase):
             BrowserE2ETestCase._is_same_origin(case, "https://example.com")
         )
         self.assertFalse(BrowserE2ETestCase._is_same_origin(case, ""))
+        self.assertTrue(
+            BrowserE2ETestCase._is_sqlite_lock_error(
+                OperationalError("database is locked")
+            )
+        )
+        self.assertFalse(
+            BrowserE2ETestCase._is_sqlite_lock_error(OperationalError("other error"))
+        )
         self.assertTrue(BrowserE2ETestCase._is_allowed("boom", [r"boom"]))
         self.assertEqual(
             BrowserE2ETestCase._playwright_value(

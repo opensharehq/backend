@@ -251,6 +251,7 @@ class FrontOfficeE2ETests(BrowserE2ETestCase):
             content="请查看这条消息",
             recipients=[user],
         )
+        user_message = UserMessage.objects.get(user=user, message=message)
 
         self.login_via_ui("message-user", "MessagePass123!")
         self.goto(reverse("messages:list"))
@@ -258,26 +259,44 @@ class FrontOfficeE2ETests(BrowserE2ETestCase):
         self.page.wait_for_url(
             re.compile(rf".*{reverse('messages:detail', args=[message.id])}$")
         )
+        self.page.wait_for_load_state("networkidle")
 
-        user_message = UserMessage.objects.get(user=user, message=message)
-        user_message.refresh_from_db()
-        self.assertTrue(user_message.is_read)
+        self.wait_for_database(
+            lambda: self.assertTrue(UserMessage.objects.get(pk=user_message.pk).is_read)
+        )
 
         self.goto(reverse("messages:list"))
         self.page.locator("#selectAll").click()
-        self.page.locator("#markUnreadBtn").click()
+        with self.page.expect_response(
+            lambda response: (
+                reverse("messages:mark_unread") in response.url
+                and response.status == 200
+            )
+        ):
+            self.page.locator("#markUnreadBtn").click()
         self.page.wait_for_load_state("networkidle")
 
-        user_message.refresh_from_db()
-        self.assertFalse(user_message.is_read)
+        self.wait_for_database(
+            lambda: self.assertFalse(
+                UserMessage.objects.get(pk=user_message.pk).is_read
+            )
+        )
 
         self.page.locator("#selectAll").click()
         self.page.on("dialog", lambda dialog: dialog.accept())
-        self.page.locator("#deleteBtn").click()
+        with self.page.expect_response(
+            lambda response: (
+                reverse("messages:delete") in response.url and response.status == 200
+            )
+        ):
+            self.page.locator("#deleteBtn").click()
         self.page.wait_for_load_state("networkidle")
 
-        user_message.refresh_from_db()
-        self.assertTrue(user_message.is_deleted)
+        self.wait_for_database(
+            lambda: self.assertTrue(
+                UserMessage.objects.get(pk=user_message.pk).is_deleted
+            )
+        )
 
     def test_organization_management_journey(self):
         owner = User.objects.create_user(

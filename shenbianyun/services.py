@@ -289,9 +289,10 @@ def _generate_order_id():
     return f"{timestamp}{random_part}"
 
 
-def batch_payment():
+def batch_payment():  # noqa: PLR0915
     """批量付款定时任务: 从已批准的提现申请中取20条, 调用 6001 接口."""
     from django.conf import settings
+    from django.db import transaction
 
     from points.models import WithdrawalRequest, WithdrawalStatus
 
@@ -315,9 +316,12 @@ def batch_payment():
     # 3. 生成批次号
     mer_batch_id = _generate_batch_id()
 
-    # 4. 构造 payItems
+    # 4. 构造 payItems 并预创建 PaymentRecord (state=INITIATED, order_no 暂为空)
+    #    预创建可保证：即使后续调用 6001 后本地崩溃，下次定时任务也不会因为提现
+    #    无 PaymentRecord 而被重复付款。
     pay_items = []
     order_id_map = {}  # mer_order_id -> withdrawal
+    record_map = {}  # mer_order_id -> PaymentRecord
 
     for wr in withdrawals:
         mer_order_id = _generate_order_id()
@@ -335,15 +339,34 @@ def batch_payment():
             id_card = wr.id_card
             mobile = wr.phone
 
+        amt = wr.amount * 10  # 积分值 * 10 = 分
+
         pay_items.append({
             "merOrderId": mer_order_id,
-            "amt": wr.amount * 10,  # 积分值 * 10 = 分
+            "amt": amt,
             "payeeName": payee_name,
             "payeeAcc": payee_acc,
             "idCard": id_card,
             "mobile": mobile,
             "paymentType": 0,  # 银行卡
         })
+
+        record = PaymentRecord.objects.create(
+            mer_batch_id=mer_batch_id,
+            mer_order_id=mer_order_id,
+            order_no="",
+            withdrawal_request=wr,
+            amount=amt,
+            fee=0,
+            state=PaymentState.INITIATED,
+            res_msg="",
+            payee_name=payee_name,
+            payee_acc=payee_acc,
+            id_card=id_card,
+            mobile=mobile,
+            payment_type=0,
+        )
+        record_map[mer_order_id] = record
 
     # 5. 构造请求数据
     req_data = {
@@ -359,61 +382,67 @@ def batch_payment():
         res_data = client.request(fun_code=FUN_CODE_BATCH_PAYMENT, req_data=req_data)
     except Exception:
         logger.exception("批量付款请求失败, mer_batch_id=%s", mer_batch_id)
+        # 整体请求失败：将这批预创建的 PaymentRecord 标记为 FAILED，
+        # 并将对应的 WithdrawalRequest 标记为 rejected。
+        for mer_order_id, record in record_map.items():
+            wr = order_id_map[mer_order_id]
+            with transaction.atomic():
+                record.state = PaymentState.FAILED
+                record.res_msg = "请求失败"
+                record.save(update_fields=["state", "res_msg", "updated_at"])
+                wr.status = WithdrawalStatus.REJECTED
+                wr.admin_note = "付款失败: 请求失败"
+                wr.save(update_fields=["status", "admin_note", "updated_at"])
         return {"batched": 0, "error": "请求失败"}
 
-    # 7. 解析响应，创建 PaymentRecord
+    # 7. 解析响应，更新预创建的 PaymentRecord
     res_data_inner = res_data.get("res_data") or {}
     pay_result_list = res_data_inner.get("payResultList", [])
-    created_count = 0
+    updated_count = 0
 
     for result in pay_result_list:
         mer_order_id = result.get("merOrderId", "")
-        wr = order_id_map.get(mer_order_id)
-        if not wr:
+        record = record_map.get(mer_order_id)
+        if not record:
             continue
 
-        # 找到对应的 pay_item 获取收款人信息
+        # 找到对应的 pay_item 获取兜底金额
         pay_item = next((p for p in pay_items if p["merOrderId"] == mer_order_id), None)
         if not pay_item:
             continue
 
-        PaymentRecord.objects.create(
-            mer_batch_id=mer_batch_id,
-            mer_order_id=mer_order_id,
-            order_no=str(result.get("orderNo", "")),
-            withdrawal_request=wr,
-            amount=result.get("amt", pay_item["amt"]),
-            fee=result.get("fee", 0) or 0,
-            state=PaymentState.INITIATED,
-            res_msg=result.get("resMsg", ""),
-            payee_name=pay_item["payeeName"],
-            payee_acc=pay_item["payeeAcc"],
-            id_card=pay_item["idCard"],
-            mobile=pay_item["mobile"],
-            payment_type=0,
-        )
-        created_count += 1
+        record.order_no = str(result.get("orderNo", ""))
+        record.amount = result.get("amt", pay_item["amt"])
+        record.fee = result.get("fee", 0) or 0
+        record.res_msg = result.get("resMsg", "") or ""
+        record.save(update_fields=["order_no", "amount", "fee", "res_msg", "updated_at"])
+        updated_count += 1
 
     logger.info(
         "批量付款完成: mer_batch_id=%s, 提交=%d, 受理=%d",
         mer_batch_id,
         len(withdrawals),
-        created_count,
+        updated_count,
     )
-    return {"batched": created_count, "mer_batch_id": mer_batch_id}
+    return {"batched": updated_count, "mer_batch_id": mer_batch_id}
 
 
-def check_payment_status():  # noqa: PLR0915
+def check_payment_status():  # noqa: PLR0915, PLR0912
     """定时查询付款结果: 查询所有未完成的 PaymentRecord 状态."""
+    from django.db import transaction
     from django.utils import timezone
 
     from points.models import WithdrawalStatus
 
     from .models import PaymentRecord, PaymentState
 
-    # 1. 查询未完成的记录
+    # 1. 查询未完成的记录（PENDING_CONFIRM 也纳入轮询，作为防御性兜底）
     pending_records = PaymentRecord.objects.filter(
-        state__in=[PaymentState.INITIATED, PaymentState.PAYING]
+        state__in=[
+            PaymentState.INITIATED,
+            PaymentState.PAYING,
+            PaymentState.PENDING_CONFIRM,
+        ]
     )
 
     if not pending_records.exists():
@@ -467,6 +496,9 @@ def check_payment_status():  # noqa: PLR0915
                         order_no,
                     )
                     continue
+                # 回写 order_no 便于后续按平台订单号检索
+                if order_no and not record.order_no:
+                    record.order_no = order_no
 
             # 5. 更新 PaymentRecord 状态和详细信息
             record.state = state
@@ -484,20 +516,28 @@ def check_payment_status():  # noqa: PLR0915
                 except (ValueError, TypeError):
                     pass
 
-            record.save()
-
-            # 6. 终态时同步更新提现申请
+            # 6. 终态时同步更新提现申请，事务保护避免出现 PaymentRecord
+            #    与 WithdrawalRequest 状态不一致的中间态。
             wr = record.withdrawal_request
             if state == PaymentState.SUCCESS:
-                wr.status = WithdrawalStatus.COMPLETED
-                wr.processed_at = timezone.now()
-                wr.save(update_fields=["status", "processed_at", "updated_at"])
+                with transaction.atomic():
+                    record.save()
+                    wr.status = WithdrawalStatus.COMPLETED
+                    wr.processed_at = timezone.now()
+                    wr.save(update_fields=["status", "processed_at", "updated_at"])
                 total_updated += 1
             elif state in (PaymentState.FAILED, PaymentState.CANCELLED):
-                wr.status = WithdrawalStatus.REJECTED
-                wr.admin_note = f"付款失败: {record.res_msg}" if record.res_msg else "付款失败"
-                wr.save(update_fields=["status", "admin_note", "updated_at"])
+                with transaction.atomic():
+                    record.save()
+                    wr.status = WithdrawalStatus.REJECTED
+                    wr.admin_note = (
+                        f"付款失败: {record.res_msg}" if record.res_msg else "付款失败"
+                    )
+                    wr.save(update_fields=["status", "admin_note", "updated_at"])
                 total_updated += 1
+            else:
+                # 非终态 (PAYING / PENDING_CONFIRM) 仅保存状态变更
+                record.save()
 
     logger.info("付款状态查询完成: 批次数=%d, 状态更新=%d", len(batch_ids), total_updated)
     return {"checked": len(batch_ids), "updated": total_updated}

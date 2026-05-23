@@ -451,3 +451,207 @@ class ApiV1OrganizationTests(TestCase):
             **outsider_headers,
         )
         self.assertEqual(outsider_members.status_code, 403)
+
+    def test_validation_error_branches_for_payloads_avatar_delete_and_members(self):
+        """Validation and not-found branches should return stable API errors."""
+        organization = Organization.objects.create(name="Branch Org", slug="branch-org")
+        OrganizationMembership.objects.create(
+            user=self.owner,
+            organization=organization,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        existing = Organization.objects.create(name="Existing", slug="existing")
+
+        empty_payload = self.client.post(
+            "/api/v1/organizations/",
+            {"name": "   ", "slug": "   "},
+            content_type="application/json",
+            **self.headers,
+        )
+        invalid_slug = self.client.post(
+            "/api/v1/organizations/",
+            {"name": "Invalid Slug", "slug": "bad slug"},
+            content_type="application/json",
+            **self.headers,
+        )
+        update_duplicate_slug = self.client.patch(
+            f"/api/v1/organizations/{organization.slug}",
+            {"slug": existing.slug},
+            content_type="application/json",
+            **self.headers,
+        )
+        missing_avatar = self.client.post(
+            f"/api/v1/organizations/{organization.slug}/avatar",
+            {},
+            **self.headers,
+        )
+        delete_empty_avatar = self.client.delete(
+            f"/api/v1/organizations/{organization.slug}/avatar",
+            **self.headers,
+        )
+        wrong_confirm_slug = self.client.delete(
+            f"/api/v1/organizations/{organization.slug}?confirm_slug=wrong",
+            **self.headers,
+        )
+        invalid_role_add = self.client.post(
+            f"/api/v1/organizations/{organization.slug}/members",
+            {"username": self.member.username, "role": "invalid"},
+            content_type="application/json",
+            **self.headers,
+        )
+        missing_user_add = self.client.post(
+            f"/api/v1/organizations/{organization.slug}/members",
+            {"username": "missing-user", "role": OrganizationMembership.Role.MEMBER},
+            content_type="application/json",
+            **self.headers,
+        )
+        duplicate_membership = OrganizationMembership.objects.create(
+            user=self.member,
+            organization=organization,
+            role=OrganizationMembership.Role.MEMBER,
+        )
+        duplicate_add = self.client.post(
+            f"/api/v1/organizations/{organization.slug}/members",
+            {
+                "username": self.member.username,
+                "role": OrganizationMembership.Role.MEMBER,
+            },
+            content_type="application/json",
+            **self.headers,
+        )
+        invalid_role_update = self.client.patch(
+            f"/api/v1/organizations/{organization.slug}/members/{duplicate_membership.id}",
+            {"role": "invalid"},
+            content_type="application/json",
+            **self.headers,
+        )
+        missing_member_update = self.client.patch(
+            f"/api/v1/organizations/{organization.slug}/members/999999",
+            {"role": OrganizationMembership.Role.ADMIN},
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertEqual(empty_payload.status_code, 422)
+        self.assertEqual(invalid_slug.status_code, 422)
+        self.assertEqual(update_duplicate_slug.status_code, 422)
+        self.assertEqual(missing_avatar.status_code, 422)
+        self.assertEqual(delete_empty_avatar.status_code, 204)
+        self.assertEqual(wrong_confirm_slug.status_code, 422)
+        self.assertEqual(invalid_role_add.status_code, 422)
+        self.assertEqual(missing_user_add.status_code, 404)
+        self.assertEqual(duplicate_add.status_code, 409)
+        self.assertEqual(invalid_role_update.status_code, 422)
+        self.assertEqual(missing_member_update.status_code, 404)
+
+    def test_owner_branches_for_avatar_replacement_and_multi_owner_changes(self):
+        """Avatar replacement and multi-owner role changes should cover success branches."""
+        organization = Organization.objects.create(name="Owners Org", slug="owners-org")
+        owner_membership = OrganizationMembership.objects.create(
+            user=self.owner,
+            organization=organization,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        second_owner_membership = OrganizationMembership.objects.create(
+            user=self.member,
+            organization=organization,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        third_owner_membership = OrganizationMembership.objects.create(
+            user=self.outsider,
+            organization=organization,
+            role=OrganizationMembership.Role.OWNER,
+        )
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(
+                MEDIA_ROOT=media_root,
+                STORAGES={
+                    "default": {
+                        "BACKEND": "django.core.files.storage.FileSystemStorage"
+                    },
+                    "staticfiles": {
+                        "BACKEND": (
+                            "django.contrib.staticfiles.storage.StaticFilesStorage"
+                        )
+                    },
+                },
+            ):
+                first_avatar = self.client.post(
+                    f"/api/v1/organizations/{organization.slug}/avatar",
+                    {
+                        "avatar": SimpleUploadedFile(
+                            "first.png",
+                            b"first",
+                            "image/png",
+                        )
+                    },
+                    **self.headers,
+                )
+                second_avatar = self.client.post(
+                    f"/api/v1/organizations/{organization.slug}/avatar",
+                    {
+                        "avatar": SimpleUploadedFile(
+                            "second.png",
+                            b"second",
+                            "image/png",
+                        )
+                    },
+                    **self.headers,
+                )
+                delete_with_avatar = self.client.delete(
+                    f"/api/v1/organizations/{organization.slug}/avatar",
+                    **self.headers,
+                )
+
+                organization.avatar.save(
+                    "delete.png",
+                    SimpleUploadedFile("delete.png", b"delete", "image/png"),
+                    save=True,
+                )
+                avatar_delete_org = Organization.objects.create(
+                    name="Avatar Delete Org",
+                    slug="avatar-delete-org",
+                    avatar=organization.avatar.name,
+                )
+                OrganizationMembership.objects.create(
+                    user=self.owner,
+                    organization=avatar_delete_org,
+                    role=OrganizationMembership.Role.OWNER,
+                )
+                delete_org_with_avatar = self.client.delete(
+                    f"/api/v1/organizations/{avatar_delete_org.slug}?confirm_slug={avatar_delete_org.slug}",
+                    **self.headers,
+                )
+
+        demote_owner = self.client.patch(
+            f"/api/v1/organizations/{organization.slug}/members/{second_owner_membership.id}",
+            {"role": OrganizationMembership.Role.ADMIN},
+            content_type="application/json",
+            **self.headers,
+        )
+
+        remove_owner = self.client.delete(
+            f"/api/v1/organizations/{organization.slug}/members/{third_owner_membership.id}",
+            **self.headers,
+        )
+        demote_last_owner = self.client.patch(
+            f"/api/v1/organizations/{organization.slug}/members/{owner_membership.id}",
+            {"role": OrganizationMembership.Role.MEMBER},
+            content_type="application/json",
+            **self.headers,
+        )
+        members_response = self.client.get(
+            f"/api/v1/organizations/{organization.slug}/members",
+            **self.headers,
+        )
+
+        self.assertEqual(first_avatar.status_code, 200)
+        self.assertEqual(second_avatar.status_code, 200)
+        self.assertEqual(delete_with_avatar.status_code, 204)
+        self.assertEqual(delete_org_with_avatar.status_code, 204)
+        self.assertEqual(demote_owner.status_code, 200)
+        self.assertEqual(remove_owner.status_code, 204)
+        self.assertEqual(demote_last_owner.status_code, 409)
+        self.assertEqual(members_response.status_code, 200)
+        self.assertEqual(members_response.json()["owner_count"], 1)

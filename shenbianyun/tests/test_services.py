@@ -1,10 +1,10 @@
-"""身边云通用请求服务单元测试."""
+"""Tests for the Shenbianyun request client."""
 
 import base64
 import json
+from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-import pytest
 import requests
 from Crypto.PublicKey import RSA
 
@@ -23,37 +23,12 @@ TEST_MER_ID = "TEST_MER_001"
 TEST_VERSION = "V1.0"
 
 
-@pytest.fixture
-def platform_keypair():
-    """模拟平台侧 RSA 密钥对（用于平台签名响应）."""
+def _rsa_keypair():
+    """Generate a test RSA key pair."""
     key = RSA.generate(1024)  # noqa: S505
     private_key_b64 = base64.b64encode(key.export_key("DER")).decode()
     public_key_b64 = base64.b64encode(key.publickey().export_key("DER")).decode()
     return private_key_b64, public_key_b64
-
-
-@pytest.fixture
-def merchant_keypair():
-    """商户侧 RSA 密钥对（用于商户签名请求）."""
-    key = RSA.generate(1024)  # noqa: S505
-    private_key_b64 = base64.b64encode(key.export_key("DER")).decode()
-    public_key_b64 = base64.b64encode(key.publickey().export_key("DER")).decode()
-    return private_key_b64, public_key_b64
-
-
-@pytest.fixture
-def client(merchant_keypair, platform_keypair):
-    """创建测试用客户端实例."""
-    mer_private, _ = merchant_keypair
-    _, fu_public = platform_keypair
-    return ShenbianyunClient(
-        api_url=TEST_API_URL,
-        mer_id=TEST_MER_ID,
-        version=TEST_VERSION,
-        inter_key=TEST_DES_KEY,
-        mer_private_key=mer_private,
-        fu_public_key=fu_public,
-    )
 
 
 def _build_platform_response(  # noqa: PLR0913
@@ -84,126 +59,127 @@ def _build_platform_response(  # noqa: PLR0913
     }
 
 
-def test_generate_req_id_length():
-    """验证 _generate_req_id 生成 30 位字符串."""
-    req_id = _generate_req_id()
-    assert isinstance(req_id, str)
-    assert len(req_id) == 30
-    assert req_id.isalnum()
+class ShenbianyunClientTests(TestCase):
+    """Tests for request assembly and response processing."""
 
-
-def test_generate_req_id_uniqueness():
-    """多次调用生成的值不同."""
-    ids = {_generate_req_id() for _ in range(100)}
-    assert len(ids) == 100
-
-
-def test_request_success(client, platform_keypair):
-    """mock requests.post 返回正确加密签名的响应，验证完整流程."""
-    platform_private, _ = platform_keypair
-    expected_res_data = {"orderId": "ORDER123", "amount": 100}
-
-    captured = {}
-
-    def fake_post(url, json=None, timeout=None):
-        # 记录请求信息以校验请求组装正确性
-        captured["url"] = url
-        captured["payload"] = json
-        captured["timeout"] = timeout
-
-        req_id = json["reqId"]
-        fun_code = json["funCode"]
-
-        resp_json = _build_platform_response(
-            expected_res_data, platform_private, req_id, fun_code
+    def setUp(self):
+        """Create client keys for each test."""
+        self.platform_private, fu_public = _rsa_keypair()
+        mer_private, _ = _rsa_keypair()
+        self.client = ShenbianyunClient(
+            api_url=TEST_API_URL,
+            mer_id=TEST_MER_ID,
+            version=TEST_VERSION,
+            inter_key=TEST_DES_KEY,
+            mer_private_key=mer_private,
+            fu_public_key=fu_public,
         )
+
+    def test_generate_req_id_length(self):
+        """Generated request IDs are 30 alphanumeric characters."""
+        req_id = _generate_req_id()
+
+        self.assertIsInstance(req_id, str)
+        self.assertEqual(len(req_id), 30)
+        self.assertTrue(req_id.isalnum())
+
+    def test_generate_req_id_uniqueness(self):
+        """Repeated request IDs are unique in a small sample."""
+        ids = {_generate_req_id() for _ in range(100)}
+
+        self.assertEqual(len(ids), 100)
+
+    def test_request_success(self):
+        """A valid encrypted and signed response is parsed successfully."""
+        expected_res_data = {"orderId": "ORDER123", "amount": 100}
+        captured = {}
+
+        def fake_post(url, json=None, timeout=None):
+            captured["url"] = url
+            captured["payload"] = json
+            captured["timeout"] = timeout
+
+            req_id = json["reqId"]
+            fun_code = json["funCode"]
+            resp_json = _build_platform_response(
+                expected_res_data, self.platform_private, req_id, fun_code
+            )
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = resp_json
+            mock_resp.raise_for_status = MagicMock()
+            return mock_resp
+
+        with patch("shenbianyun.services.requests.post", side_effect=fake_post):
+            result = self.client.request("FUN001", {"name": "test"})
+
+        self.assertEqual(result["res_code"], "0000")
+        self.assertEqual(result["res_msg"], "success")
+        self.assertEqual(result["res_data"], expected_res_data)
+        self.assertEqual(captured["url"], TEST_API_URL)
+        self.assertEqual(captured["timeout"], 30)
+        payload = captured["payload"]
+        self.assertEqual(payload["funCode"], "FUN001")
+        self.assertEqual(payload["merId"], TEST_MER_ID)
+        self.assertEqual(payload["version"], TEST_VERSION)
+        self.assertEqual(len(payload["reqId"]), 30)
+        self.assertIn("reqData", payload)
+        self.assertIn("sign", payload)
+
+    def test_request_network_error(self):
+        """Network errors are wrapped in ShenbianyunRequestError."""
+        with patch(
+            "shenbianyun.services.requests.post",
+            side_effect=requests.ConnectionError("connection refused"),
+        ):
+            with self.assertRaises(ShenbianyunRequestError):
+                self.client.request("FUN001", {"name": "test"})
+
+    def test_request_invalid_json_response(self):
+        """Non-JSON responses are wrapped in ShenbianyunResponseError."""
         mock_resp = MagicMock()
-        mock_resp.json.return_value = resp_json
+        mock_resp.json.side_effect = ValueError("not a JSON")
+        mock_resp.text = "this is not json"
         mock_resp.raise_for_status = MagicMock()
-        return mock_resp
 
-    with patch("shenbianyun.services.requests.post", side_effect=fake_post):
-        result = client.request("FUN001", {"name": "test"})
+        with patch("shenbianyun.services.requests.post", return_value=mock_resp):
+            with self.assertRaises(ShenbianyunResponseError):
+                self.client.request("FUN001", {"name": "test"})
 
-    # 校验响应解析结果
-    assert result["res_code"] == "0000"
-    assert result["res_msg"] == "success"
-    assert result["res_data"] == expected_res_data
+    def test_request_signature_verification_failure(self):
+        """Responses signed by an unrelated key are rejected."""
+        wrong_private_b64, _ = _rsa_keypair()
 
-    # 校验请求组装
-    assert captured["url"] == TEST_API_URL
-    assert captured["timeout"] == 30
-    payload = captured["payload"]
-    assert payload["funCode"] == "FUN001"
-    assert payload["merId"] == TEST_MER_ID
-    assert payload["version"] == TEST_VERSION
-    assert len(payload["reqId"]) == 30
-    assert "reqData" in payload
-    assert "sign" in payload
+        def fake_post(url, json=None, timeout=None):
+            req_id = json["reqId"]
+            fun_code = json["funCode"]
+            resp_json = _build_platform_response(
+                {"orderId": "X"}, wrong_private_b64, req_id, fun_code
+            )
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = resp_json
+            mock_resp.raise_for_status = MagicMock()
+            return mock_resp
 
+        with patch("shenbianyun.services.requests.post", side_effect=fake_post):
+            with self.assertRaises(ShenbianyunSignatureError):
+                self.client.request("FUN001", {"name": "test"})
 
-def test_request_network_error(client):
-    """mock requests.post 抛出 ConnectionError，验证抛出 ShenbianyunRequestError."""
-    with patch(
-        "shenbianyun.services.requests.post",
-        side_effect=requests.ConnectionError("connection refused"),
-    ):
-        with pytest.raises(ShenbianyunRequestError):
-            client.request("FUN001", {"name": "test"})
+    def test_request_req_id_mismatch(self):
+        """Mismatched response request IDs are rejected."""
 
+        def fake_post(url, json=None, timeout=None):
+            fun_code = json["funCode"]
+            resp_json = _build_platform_response(
+                {"orderId": "X"},
+                self.platform_private,
+                req_id="WRONG_REQ_ID_NOT_MATCHING_REQUEST",
+                fun_code=fun_code,
+            )
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = resp_json
+            mock_resp.raise_for_status = MagicMock()
+            return mock_resp
 
-def test_request_invalid_json_response(client):
-    """mock 返回非 JSON 响应，验证抛出 ShenbianyunResponseError."""
-    mock_resp = MagicMock()
-    mock_resp.json.side_effect = ValueError("not a JSON")
-    mock_resp.text = "this is not json"
-    mock_resp.raise_for_status = MagicMock()
-
-    with patch("shenbianyun.services.requests.post", return_value=mock_resp):
-        with pytest.raises(ShenbianyunResponseError):
-            client.request("FUN001", {"name": "test"})
-
-
-def test_request_signature_verification_failure(client, platform_keypair):
-    """mock 返回签名不匹配的响应，验证抛出 ShenbianyunSignatureError."""
-    # 使用另一对完全不同的 RSA 私钥来签名，使其与 client 持有的平台公钥不匹配
-    wrong_key = RSA.generate(1024)  # noqa: S505
-    wrong_private_b64 = base64.b64encode(wrong_key.export_key("DER")).decode()
-
-    def fake_post(url, json=None, timeout=None):
-        req_id = json["reqId"]
-        fun_code = json["funCode"]
-        resp_json = _build_platform_response(
-            {"orderId": "X"}, wrong_private_b64, req_id, fun_code
-        )
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = resp_json
-        mock_resp.raise_for_status = MagicMock()
-        return mock_resp
-
-    with patch("shenbianyun.services.requests.post", side_effect=fake_post):
-        with pytest.raises(ShenbianyunSignatureError):
-            client.request("FUN001", {"name": "test"})
-
-
-def test_request_req_id_mismatch(client, platform_keypair):
-    """mock 返回 reqId 不一致的响应，验证抛出 ShenbianyunResponseError."""
-    platform_private, _ = platform_keypair
-
-    def fake_post(url, json=None, timeout=None):
-        fun_code = json["funCode"]
-        # 故意使用错误的 req_id 来构造响应
-        resp_json = _build_platform_response(
-            {"orderId": "X"},
-            platform_private,
-            req_id="WRONG_REQ_ID_NOT_MATCHING_REQUEST",
-            fun_code=fun_code,
-        )
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = resp_json
-        mock_resp.raise_for_status = MagicMock()
-        return mock_resp
-
-    with patch("shenbianyun.services.requests.post", side_effect=fake_post):
-        with pytest.raises(ShenbianyunResponseError):
-            client.request("FUN001", {"name": "test"})
+        with patch("shenbianyun.services.requests.post", side_effect=fake_post):
+            with self.assertRaises(ShenbianyunResponseError):
+                self.client.request("FUN001", {"name": "test"})

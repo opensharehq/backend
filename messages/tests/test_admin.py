@@ -63,6 +63,20 @@ class MessageAdminFormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("非广播消息必须指定接收用户", str(form.errors))
 
+    def test_valid_targeted_form_returns_cleaned_data(self):
+        """A targeted admin message with recipients should pass validation."""
+        form = MessageAdminForm(
+            data={
+                "title": "定向",
+                "content": "内容",
+                "message_type": Message.MessageType.SYSTEM,
+                "sender": self.sender.id,
+                "recipients": [self.recipient.id],
+            }
+        )
+
+        self.assertTrue(form.is_valid())
+
 
 class MessageAdminTests(TestCase):
     """Cover the behaviorful parts of MessageAdmin."""
@@ -139,6 +153,11 @@ class MessageAdminTests(TestCase):
             "bg-warning", str(self.message_admin.unread_count(annotated_message))
         )
 
+        annotated_message.is_broadcast = True
+        self.assertIn(
+            "广播",
+            str(self.message_admin.recipient_count(annotated_message)),
+        )
         annotated_message._unread_count = 0
         self.assertEqual(self.message_admin.unread_count(annotated_message), 0)
 

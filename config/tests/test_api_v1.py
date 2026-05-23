@@ -4,7 +4,11 @@ import importlib
 import os
 import sys
 
-from django.test import SimpleTestCase
+from django.core.exceptions import PermissionDenied
+from django.test import RequestFactory, SimpleTestCase
+
+from config import api_v1
+from config.api_common import ApiError, translate_error_text
 
 
 class ConfigApiV1Tests(SimpleTestCase):
@@ -100,3 +104,32 @@ class ConfigApiV1Tests(SimpleTestCase):
         self.assertEqual(reloaded.JWT_SECRET_KEY, reloaded.SECRET_KEY)
         self.assertEqual(reloaded.JWT_ALGORITHM, "HS256")
         self.assertEqual(reloaded.JWT_ACCESS_TTL_SECONDS, 86400)
+
+    def test_settings_enable_s3_storage_when_required_keys_are_present(self):
+        """S3 storage should activate only when all required credentials exist."""
+        reloaded = self.reload_settings(
+            env={
+                "AWS_STORAGE_BUCKET_NAME": "openshare-test",
+                "AWS_S3_ACCESS_KEY_ID": "access-key",
+                "AWS_S3_SECRET_ACCESS_KEY": "secret-key",
+            },
+            argv=["manage.py"],
+        )
+
+        self.assertEqual(
+            reloaded.STORAGES["default"]["BACKEND"],
+            "storages.backends.s3.S3Storage",
+        )
+
+    def test_api_error_and_permission_handlers_and_translation_pattern(self):
+        """Shared API handlers and translations should cover simple branches."""
+        request = RequestFactory().get("/api/v1/test")
+
+        self.assertEqual(str(ApiError("code", 409, "message")), "message")
+        self.assertEqual(
+            translate_error_text("现金积分不足，当前可用: 123"),
+            "Not enough cash points. Available balance: 123.",
+        )
+
+        response = api_v1._permission_denied_handler(request, PermissionDenied())
+        self.assertEqual(response.status_code, 403)

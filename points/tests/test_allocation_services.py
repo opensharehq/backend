@@ -1052,6 +1052,80 @@ class AllocationServiceTests(TestCase):
         with self.assertRaises(RuntimeError):
             AllocationService.execute_allocation(allocation, allocations_data)
 
+    def test_execute_allocation_rejects_mismatched_total_before_execution(self):
+        """Allocation execution should reject client totals that do not add up."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=100,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        with self.assertRaisesMessage(ValueError, "does not match total_amount"):
+            AllocationService.execute_allocation(
+                allocation,
+                [
+                    {
+                        "actor_login": self.user.username,
+                        "actor_id": "123456",
+                        "platform": "GitHub",
+                        "email": self.user.email,
+                        "contribution_score": 1.0,
+                        "is_registered": True,
+                        "user_id": self.user.id,
+                        "amount": 99,
+                    }
+                ],
+            )
+
+        allocation.refresh_from_db()
+        self.assertEqual(allocation.status, AllocationStatus.DRAFT)
+
+    def test_execute_allocation_rejects_negative_amounts_before_execution(self):
+        """Allocation execution should reject negative item amounts."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=100,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        with self.assertRaisesMessage(ValueError, "must not be negative"):
+            AllocationService.execute_allocation(
+                allocation,
+                [
+                    {
+                        "actor_login": "negative-recipient",
+                        "actor_id": "neg",
+                        "platform": "GitHub",
+                        "email": "negative@example.com",
+                        "contribution_score": 1.0,
+                        "is_registered": False,
+                        "user_id": None,
+                        "amount": -1,
+                    },
+                    {
+                        "actor_login": self.user.username,
+                        "actor_id": "123456",
+                        "platform": "GitHub",
+                        "email": self.user.email,
+                        "contribution_score": 1.0,
+                        "is_registered": True,
+                        "user_id": self.user.id,
+                        "amount": 101,
+                    },
+                ],
+            )
+
+        allocation.refresh_from_db()
+        self.assertEqual(allocation.status, AllocationStatus.DRAFT)
+
     def test_mark_allocation_failed_only_transitions_from_executing(self):
         """Failed marking should not overwrite non-executing allocation states."""
         allocation = PointAllocation.objects.create(
@@ -1107,6 +1181,125 @@ class AllocationServiceTests(TestCase):
             result = AllocationService._process_preview_item(allocation, item)
 
         self.assertEqual(result, (0, 0, 1, 0))
+
+    def test_process_preview_item_counts_successful_registered_grants(self):
+        """Test successful registered grants return success stats and amount."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+        item = {"amount": 1200, "is_registered": True, "user_id": self.user.id}
+
+        with patch.object(
+            AllocationService, "_grant_registered_points", return_value=True
+        ) as grant_mock:
+            result = AllocationService._process_preview_item(allocation, item)
+
+        self.assertEqual(result, (1, 0, 0, 1200))
+        grant_mock.assert_called_once_with(allocation, item, 1200)
+
+    def test_process_preview_item_creates_pending_grant_for_unregistered_user(self):
+        """Test unregistered preview items create a pending grant and count amount."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+        item = {
+            "amount": 900,
+            "is_registered": False,
+            "platform": " GitHub ",
+            "actor_id": "pending-actor",
+            "actor_login": "pending-preview",
+            "email": "pending-preview@example.com",
+        }
+
+        result = AllocationService._process_preview_item(allocation, item)
+
+        self.assertEqual(result, (0, 1, 0, 900))
+        grant = PendingPointGrant.objects.get(allocation=allocation)
+        self.assertEqual(grant.platform, "github")
+        self.assertEqual(grant.actor_login, "pending-preview")
+        self.assertEqual(grant.amount, 900)
+
+    def test_apply_allocation_items_skips_zero_and_counts_failed_registered(self):
+        """Test batched allocation stats for skipped, failed, and pending items."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+        allocations = [
+            {"amount": 0, "is_registered": False},
+            {"amount": 100, "is_registered": True, "user_id": self.user.id},
+            {
+                "amount": 200,
+                "is_registered": False,
+                "platform": "GitHub",
+                "actor_id": "pending-batch",
+                "actor_login": "pending-batch",
+                "email": "pending-batch@example.com",
+            },
+        ]
+
+        with patch.object(
+            AllocationService, "_grant_registered_points", return_value=False
+        ):
+            stats = AllocationService._apply_allocation_items(allocation, allocations)
+
+        self.assertEqual(
+            stats,
+            {"success": 0, "pending": 1, "failed": 1, "total_points": 200},
+        )
+        self.assertEqual(
+            PendingPointGrant.objects.filter(allocation=allocation).count(), 1
+        )
+
+    def test_build_pending_grant_instance_requires_platform(self):
+        """Pending grants need an explicit platform to avoid ambiguous claims."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+
+        with self.assertRaisesMessage(ValueError, "without a platform"):
+            AllocationService._build_pending_grant_instance(
+                allocation,
+                {"platform": " ", "actor_id": "missing-platform"},
+                100,
+            )
+
+    def test_normalize_contribution_item_converts_decimal_score_only(self):
+        """Snapshot normalization should make Decimal scores JSON friendly."""
+        item = {
+            "actor_login": "decimal-user",
+            "contribution_score": Decimal("1.25"),
+            "amount": Decimal("300.00"),
+        }
+
+        normalized = AllocationService._normalize_contribution_item(item)
+
+        self.assertEqual(normalized["contribution_score"], 1.25)
+        self.assertEqual(normalized["amount"], Decimal("300.00"))
+        self.assertEqual(item["contribution_score"], Decimal("1.25"))
 
     def test_deduct_source_pool_ignores_non_positive_amount(self):
         """Test source pool deduction is skipped when there is nothing to deduct."""
@@ -1183,6 +1376,46 @@ class AllocationServiceTests(TestCase):
         query = AllocationService._build_pending_claim_query(user)
 
         self.assertEqual(PendingPointGrant.objects.filter(query).count(), 0)
+
+    def test_build_pending_claim_query_skips_blank_prefetched_uid(self):
+        """Blank social auth identifiers should be ignored before OR query building."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=ContentType.objects.get_for_model(User),
+            initiator_id=self.user.id,
+            source_pool=self.source_pool,
+            total_amount=50000,
+            project_scope={"tags": ["test-repo"], "operation": "AND"},
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 12, 1),
+        )
+        prefetched_user = User.objects.create_user(
+            username="blank-prefetched-user",
+            email="blank-prefetched-user@example.com",
+        )
+        setattr(
+            prefetched_user,
+            AllocationService.SOCIAL_AUTH_PREFETCH_ATTR,
+            [
+                SimpleNamespace(provider="github", uid=" "),
+                SimpleNamespace(provider="gitee", uid="valid-uid"),
+            ],
+        )
+        PendingPointGrant.objects.create(
+            platform="gitee",
+            actor_id="valid-uid",
+            actor_login="valid-user",
+            email="valid-user@example.com",
+            amount=3000,
+            point_type=PointType.GIFT,
+            reason="valid prefetched uid",
+            granter_type=ContentType.objects.get_for_model(User),
+            granter_id=self.user.id,
+            allocation=allocation,
+        )
+
+        query = AllocationService._build_pending_claim_query(prefetched_user)
+
+        self.assertEqual(PendingPointGrant.objects.filter(query).count(), 1)
 
     def test_claim_pending_points_retries_failed_claim_once(self):
         """A grant that fails once should remain claimable and succeed exactly once later."""

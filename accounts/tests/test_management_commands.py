@@ -206,6 +206,18 @@ class DedupeUserEmailsCommandTests(SimpleTestCase):
     @patch(
         "accounts.management.commands.dedupe_user_emails.build_duplicate_email_plans"
     )
+    def test_no_duplicate_email_groups_reports_success(self, build_plans_mock):
+        """An empty plan list should short-circuit without warnings."""
+        build_plans_mock.return_value = []
+        output = StringIO()
+
+        call_command("dedupe_user_emails", stdout=output)
+
+        self.assertIn("No duplicate non-empty emails found.", output.getvalue())
+
+    @patch(
+        "accounts.management.commands.dedupe_user_emails.build_duplicate_email_plans"
+    )
     @patch(
         "accounts.management.commands.dedupe_user_emails.apply_duplicate_email_plans"
     )
@@ -223,6 +235,19 @@ class DedupeUserEmailsCommandTests(SimpleTestCase):
         self.assertIn("DRY-RUN", output.getvalue())
         self.assertIn("Dry-run only", output.getvalue())
         apply_mock.assert_not_called()
+
+    @patch(
+        "accounts.management.commands.dedupe_user_emails.build_duplicate_email_plans"
+    )
+    def test_dry_run_reports_blocked_groups_without_raising(self, build_plans_mock):
+        """Dry-runs should print blocked group warnings but not raise."""
+        build_plans_mock.return_value = [self._build_plan(blocked=True)]
+        output = StringIO()
+
+        call_command("dedupe_user_emails", stdout=output)
+
+        self.assertIn("blocked: group contains an admin account", output.getvalue())
+        self.assertIn("Blocked duplicate-email groups remain.", output.getvalue())
 
     @patch(
         "accounts.management.commands.dedupe_user_emails.build_duplicate_email_plans"
@@ -257,3 +282,17 @@ class DedupeUserEmailsCommandTests(SimpleTestCase):
 
         apply_mock.assert_called_once_with([plan])
         self.assertIn("cleanup completed", output.getvalue().lower())
+
+    @patch(
+        "accounts.management.commands.dedupe_user_emails.build_duplicate_email_plans"
+    )
+    @patch(
+        "accounts.management.commands.dedupe_user_emails.apply_duplicate_email_plans"
+    )
+    def test_apply_wraps_account_merge_errors(self, apply_mock, build_plans_mock):
+        """Execution errors should be reported as management command failures."""
+        build_plans_mock.return_value = [self._build_plan()]
+        apply_mock.side_effect = AccountMergeError("merge failed")
+
+        with self.assertRaisesMessage(CommandError, "merge failed"):
+            call_command("dedupe_user_emails", apply=True)

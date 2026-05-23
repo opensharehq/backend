@@ -871,6 +871,39 @@ class ContributionPreviewAPIViewWithLabelsTests(TestCase):
         self.assertIn("contribution_score", contributions[0])
         self.assertNotIn("contribution_score", contributions[1])
 
+    def test_contribution_preview_applies_individual_adjustments(self):
+        """Preview responses should prefer per-actor adjustments over the ratio."""
+        mock_preview = [
+            {
+                "actor_login": "alice",
+                "actor_id": "123",
+                "contribution_score": 2.0,
+            }
+        ]
+
+        with (
+            patch(
+                "points.allocation_services.AllocationService.preview_allocation",
+                return_value=mock_preview,
+            ),
+            patch("chdb.services.get_label_users", return_value={}),
+        ):
+            response = self.client.post(
+                reverse("points:api_contribution_preview"),
+                data={
+                    "project_scope": {"tags": []},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                    "total_amount": 100,
+                    "adjustment_ratio": 0.5,
+                    "individual_adjustments": {"alice": 77},
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["contributions"][0]["adjusted_points"], 77)
+
     def test_contribution_preview_without_project_tags(self):
         """Test contribution preview without project tags returns empty label info."""
         from unittest.mock import patch
@@ -1149,6 +1182,53 @@ class AllocationExecuteAPIViewTests(TestCase):
             set(data.keys()),
             {"allocation_id", "success", "pending", "failed", "total_points"},
         )
+
+    def test_allocation_execute_applies_individual_adjustments(self):
+        """Execute should use per-actor adjustments when building allocations."""
+        mock_preview = [
+            {
+                "actor_id": "1",
+                "actor_login": "alice",
+                "platform": "github",
+                "email": "alice@example.com",
+                "is_registered": True,
+                "user_id": self.user.id,
+                "contribution_score": 2.0,
+            }
+        ]
+
+        with (
+            patch(
+                "points.views.AllocationService.preview_allocation",
+                return_value=mock_preview,
+            ),
+            patch(
+                "points.views.AllocationService.execute_allocation",
+                return_value={
+                    "success": 1,
+                    "pending": 0,
+                    "failed": 0,
+                    "total_points": 77,
+                },
+            ) as execute_mock,
+        ):
+            response = self.client.post(
+                reverse("points:api_allocation_execute"),
+                data={
+                    "pool_id": self.pool.id,
+                    "total_amount": 77,
+                    "project_scope": {"tags": ["test-repo"], "operation": "AND"},
+                    "start_month": "2024-01-01",
+                    "end_month": "2024-01-31",
+                    "adjustment_ratio": 0.5,
+                    "individual_adjustments": {"alice": 77},
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        allocations = execute_mock.call_args.args[1]
+        self.assertEqual(allocations[0]["amount"], 77)
 
     def test_allocation_execute_api_invalid_payload_returns_400(self):
         """Test malformed execute payloads are rejected with a JSON error."""

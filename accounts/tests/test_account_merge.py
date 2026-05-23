@@ -23,10 +23,12 @@ from accounts.models import (
 from accounts.services.account_merge import (
     AccountMergeError,
     _copy_profile_fields,
+    _log,
     _merge_profiles,
     _migrate_organization_memberships,
     _migrate_shipping_addresses,
     _migrate_social_accounts,
+    merge_users,
     perform_merge,
 )
 from common.test_utils import CacheClearTestCase
@@ -493,6 +495,39 @@ class AccountMergeServiceEdgeTests(CacheClearTestCase):
         target_profile = UserProfile.objects.create(user=self.target)
         copied = _copy_profile_fields(None, target_profile)
         assert copied == 0
+
+    def test_log_ignores_missing_merge_request(self):
+        """_log should be a no-op for direct merge calls without a request."""
+        _log(None, "profile", counts={"migrated": 1})
+
+        assert AccountMergeLog.objects.count() == 0
+
+    def test_copy_profile_fields_skips_non_blank_target_values(self):
+        """No profile save is needed when all target fields already have values."""
+        source_profile = UserProfile.objects.create(
+            user=self.source,
+            bio="source bio",
+        )
+        target_profile = UserProfile.objects.create(
+            user=self.target,
+            bio="target bio",
+        )
+
+        copied = _copy_profile_fields(source_profile, target_profile)
+
+        assert copied == 0
+        target_profile.refresh_from_db()
+        assert target_profile.bio == "target bio"
+
+    def test_merge_users_rejects_self_and_admin_source(self):
+        """Merge validation should reject self-merges and source admin accounts."""
+        with self.assertRaisesMessage(AccountMergeError, "不能合并到自己的账号"):
+            merge_users(self.source, self.source)
+
+        self.source.is_staff = True
+        self.source.save(update_fields=["is_staff"])
+        with self.assertRaisesMessage(AccountMergeError, "不允许合并管理员账号"):
+            merge_users(self.source, self.target)
 
     def test_migrate_social_accounts_counts_conflicts(self):
         """Duplicate social accounts increment conflict count without migration."""

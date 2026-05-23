@@ -249,6 +249,7 @@ class BackOfficeE2ETests(BrowserE2ETestCase):
                 "platform": "GitHub",
                 "actor_id": "1001",
                 "actor_login": registered.username,
+                "github_login": registered.username,
                 "email": registered.email,
                 "contribution_score": 2.0,
                 "is_registered": True,
@@ -258,6 +259,7 @@ class BackOfficeE2ETests(BrowserE2ETestCase):
                 "platform": "GitHub",
                 "actor_id": "2002",
                 "actor_login": "pending-recipient",
+                "github_login": "pending-recipient",
                 "email": "pending-recipient@example.com",
                 "contribution_score": 1.0,
                 "is_registered": False,
@@ -268,6 +270,7 @@ class BackOfficeE2ETests(BrowserE2ETestCase):
         self.login_via_ui(operator.username, "AllocPass123!")
         self.goto(reverse("points:allocation_config"))
         self.page.select_option("#allocation-pool-select", str(source_pool.id))
+        self.page.fill("#allocation-total-amount", "900")
         self.page.fill("#project-tag-search", "demo")
         self.page.locator("#project-tag-search-results .search-result-item").click()
         self.page.locator("#preview-contributions-button").click()

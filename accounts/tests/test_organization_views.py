@@ -165,6 +165,26 @@ class OrganizationCreateViewTests(TestCase):
         )
         self.assertEqual(membership.role, OrganizationMembership.Role.OWNER)
 
+    def test_post_success_without_avatar_skips_avatar_save(self):
+        """Valid submission without avatar should still create the organization."""
+        response = self.client.post(
+            reverse("accounts:organization_create"),
+            {
+                "name": "Created No Avatar",
+                "slug": "created-no-avatar",
+                "description": "desc",
+                "website": "https://example.com",
+                "location": "Earth",
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("accounts:organization_detail", args=["created-no-avatar"]),
+        )
+        org = Organization.objects.get(slug="created-no-avatar")
+        self.assertFalse(org.avatar)
+
 
 class OrganizationDetailViewTests(TestCase):
     """Test cases for organization detail view."""

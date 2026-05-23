@@ -117,6 +117,18 @@ class GetDetailedBalanceTests(TestCase):
         self.assertEqual(balance["gift_no_tag"], 50)
         self.assertEqual(balance["by_tag"]["event"], 30)
 
+    def test_read_only_detailed_balance_includes_tag_names(self):
+        """Read-only detailed balance should include tagged and untagged gift buckets."""
+        services.grant_points(self.user, 40, PointType.GIFT, "Gift no tag")
+        services.grant_points(self.user, 30, PointType.GIFT, "Event", tag_slug="event")
+
+        balance = services.get_detailed_balance_or_zero(self.user)
+
+        self.assertEqual(balance["gift"], 70)
+        self.assertEqual(balance["gift_no_tag"], 40)
+        self.assertEqual(balance["by_tag"], {"event": 30})
+        self.assertEqual(balance["by_tag_names"], {"event": "活动"})
+
 
 class GrantPointsTests(TestCase):
     """Tests for grant_points function."""
@@ -334,11 +346,34 @@ class WithdrawalRequestTests(TestCase):
                 "6222",
             )
 
+    def test_create_withdrawal_rejects_non_positive_and_below_minimum_amounts(self):
+        """Withdrawal requests should validate positive and minimum amounts first."""
+        with self.assertRaises(services.WithdrawalError):
+            services.create_withdrawal_request(
+                self.user,
+                0,
+                "张三",
+                "13800138000",
+                "11010519491231002X",
+                "中国银行",
+                "6222000000000000000",
+            )
+        with self.assertRaises(ValueError):
+            services.create_withdrawal_request(
+                self.user,
+                100,
+                "张三",
+                "13800138000",
+                "11010519491231002X",
+                "中国银行",
+                "6222000000000000000",
+            )
+
     def test_create_withdrawal_with_pending_fails(self):
         """Test that creating withdrawal when pending exists fails."""
         services.create_withdrawal_request(
             self.user,
-            100,
+            200,
             "张三",
             "13800138000",
             "11010519491231002X",

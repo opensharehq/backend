@@ -186,6 +186,29 @@ class MessagesApiV1Tests(TestCase):
             Message.MessageType.PAYMENT,
         )
 
+        read_payment = UserMessage.objects.get(
+            user=self.user,
+            message=self.payment_message,
+        )
+        read_payment.is_read = True
+        read_payment.save(update_fields=["is_read"])
+        unread_response = self.client.get(
+            "/api/v1/messages/",
+            {"status": "unread"},
+            **self.headers,
+        )
+        read_response = self.client.get(
+            "/api/v1/messages/",
+            {"status": "read"},
+            **self.headers,
+        )
+        self.assertEqual(unread_response.status_code, 200)
+        self.assertEqual(read_response.status_code, 200)
+        self.assertTrue(
+            all(not item["is_read"] for item in unread_response.json()["items"])
+        )
+        self.assertTrue(all(item["is_read"] for item in read_response.json()["items"]))
+
         invalid_list_response = self.client.get(
             "/api/v1/messages/",
             {"message_type": "unknown"},
@@ -193,6 +216,14 @@ class MessagesApiV1Tests(TestCase):
         )
         self.assertEqual(invalid_list_response.status_code, 422)
         self.assertEqual(invalid_list_response.json()["code"], "validation_error")
+
+        invalid_status_response = self.client.get(
+            "/api/v1/messages/",
+            {"status": "archived"},
+            **self.headers,
+        )
+        self.assertEqual(invalid_status_response.status_code, 422)
+        self.assertEqual(invalid_status_response.json()["code"], "validation_error")
 
         invalid_count_response = self.client.get(
             "/api/v1/messages/unread-count",

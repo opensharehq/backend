@@ -50,8 +50,14 @@ class AllocationContractTests(TestCase):
         result = MagicMock()
         if "normalized_community_openrank" in sql:
             result.result_rows = [
-                (12345, "registered-recipient", 2.0, [("repo-a", 2.0, 202401)]),
-                (99999, "guest-recipient", 1.0, [("repo-a", 1.0, 202401)]),
+                (
+                    "GitHub",
+                    12345,
+                    "registered-recipient",
+                    2.0,
+                    [("repo-a", 2.0, 202401)],
+                ),
+                ("GitHub", 99999, "guest-recipient", 1.0, [("repo-a", 1.0, 202401)]),
             ]
             return result
 

@@ -268,6 +268,30 @@ class UpdateUserProfileFromGithubTests(TestCase):
 
         self.assertIsNone(result)
 
+    def test_prevent_duplicate_email_signup_skips_existing_associations(self):
+        """Existing social associations should not run duplicate email checks."""
+        result = prevent_duplicate_email_signup(
+            backend=self.backend_github,
+            details={"email": "taken@example.com"},
+            response={},
+            user=self.user,
+            new_association=False,
+        )
+
+        self.assertIsNone(result)
+
+    def test_prevent_duplicate_email_signup_skips_missing_email(self):
+        """Social signup without an email should not trigger conflict checks."""
+        result = prevent_duplicate_email_signup(
+            backend=self.backend_github,
+            details={},
+            response={},
+            user=None,
+            new_association=True,
+        )
+
+        self.assertIsNone(result)
+
     def test_idempotent_multiple_calls(self):
         """Test that multiple calls with same data don't cause issues."""
         response = {

@@ -11,16 +11,21 @@ from django.utils import timezone
 
 from accounts.email_addresses import (
     get_email_login_candidates,
+    matching_email_users,
     select_password_reset_user,
 )
 from accounts.services.authentication import (
+    AccountDisabledError,
+    AccountMergedError,
     PasswordLoginError,
     authenticate_by_login_id,
 )
 from accounts.services.jwt_tokens import (
+    create_access_token,
     create_refresh_token,
     decode_access_token,
     get_user_from_access_token,
+    get_user_from_refresh_token,
     rotate_refresh_token,
 )
 
@@ -37,6 +42,8 @@ class PasswordLoginErrorTests(SimpleTestCase):
         )
 
         self.assertEqual(str(error), error.message)
+        self.assertEqual(str(AccountDisabledError()), "账号已被停用，请联系管理员")
+        self.assertIn("target", str(AccountMergedError("target")))
 
     @patch("accounts.services.authentication.get_email_login_candidates")
     @patch("accounts.services.authentication.authenticate")
@@ -89,6 +96,10 @@ class PasswordLoginErrorTests(SimpleTestCase):
         )
         self.assertEqual(candidates[0], active_password_user)
 
+    def test_matching_email_users_blank_input_returns_empty_queryset(self):
+        """Blank email lookups should return an empty queryset."""
+        self.assertFalse(matching_email_users("").exists())
+
 
 class JwtTokenServiceTests(SimpleTestCase):
     """Cover JWT helper edge cases not exercised by API tests."""
@@ -132,6 +143,35 @@ class RefreshTokenServiceTests(TestCase):
             email="refresh-service-user@example.com",
             password="RefreshPass123!",
         )
+
+    def test_get_user_from_access_token_rejects_merged_user(self):
+        """Access tokens for merged users should not authenticate."""
+        target = self.User.objects.create_user(
+            username="access-target",
+            email="access-target@example.com",
+            password="RefreshPass123!",
+        )
+        self.user.merged_into = target
+        self.user.save(update_fields=["merged_into"])
+
+        self.assertIsNone(get_user_from_access_token(create_access_token(self.user)))
+
+    def test_refresh_token_user_resolution_rejects_invalid_subject(self):
+        """Refresh user resolution should reject non-integer subjects."""
+        refresh_token = create_refresh_token(self.user)
+        payload = jwt.decode(
+            refresh_token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+        payload["sub"] = "not-an-integer"
+        invalid_subject = jwt.encode(
+            payload,
+            settings.JWT_SECRET_KEY,
+            algorithm=settings.JWT_ALGORITHM,
+        )
+
+        self.assertIsNone(get_user_from_refresh_token(invalid_subject))
 
     @patch("accounts.services.jwt_tokens.issue_token_pair")
     @patch("accounts.services.jwt_tokens._revoke_refresh_record_if_active")

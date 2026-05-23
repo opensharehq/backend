@@ -5,8 +5,10 @@ from django.test import TestCase
 
 from accounts.models import ShippingAddress
 from accounts.services.jwt_tokens import create_access_token
+from config.api_common import ApiError
 from points.models import PointType, PointWallet
 from points.services import grant_points
+from shop.api_v1 import _raise_redemption_api_error
 from shop.models import Redemption, ShopItem
 
 
@@ -100,6 +102,16 @@ class ShopApiV1Tests(TestCase):
         self.assertEqual(history_payload["items"][0]["item"]["name"], self.item.name)
         self.assertEqual(history_payload["pagination"]["total_items"], 1)
 
+    def test_item_detail_for_non_shipping_item_omits_addresses(self):
+        """Non-shipping item detail should not include shipping address choices."""
+        response = self.client.get(f"/api/v1/shop/items/{self.item.id}", **self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["id"], self.item.id)
+        self.assertFalse(payload["requires_shipping"])
+        self.assertIsNone(payload["shipping_addresses"])
+
     def test_item_detail_includes_only_current_users_shipping_addresses(self):
         """Shipping item detail should expose only the current user's addresses."""
         shipping_item = ShopItem.objects.create(
@@ -135,6 +147,50 @@ class ShopApiV1Tests(TestCase):
         self.assertEqual(
             [item["id"] for item in payload["shipping_addresses"]], [own_address.id]
         )
+
+    def test_redemption_api_error_mapping_handles_remaining_business_messages(self):
+        """Redemption service messages should map to stable API error codes."""
+        cases = [
+            (
+                "商品不存在。",
+                404,
+                "not_found",
+                "The requested item was not found.",
+            ),
+            (
+                "此商品需要收货地址。",
+                422,
+                "shipping_address_required",
+                "A shipping address is required for this item.",
+            ),
+            (
+                "您没有足够的符合条件的积分来兑换此商品",
+                409,
+                "insufficient_points",
+                "You do not have enough eligible points to redeem this item.",
+            ),
+            (
+                "积分不足：余额类型不符合商品要求",
+                409,
+                "insufficient_points",
+                "Not enough points to redeem this item.",
+            ),
+            (
+                "unknown redemption failure",
+                409,
+                "redemption_failed",
+                "The item could not be redeemed.",
+            ),
+        ]
+
+        for message, status_code, code, response_message in cases:
+            with self.subTest(message=message), self.assertRaises(ApiError) as cm:
+                _raise_redemption_api_error(message)
+
+            error = cm.exception
+            self.assertEqual(error.status_code, status_code)
+            self.assertEqual(error.code, code)
+            self.assertEqual(error.message, response_message)
 
     def test_item_list_is_read_only_for_user_without_wallet(self):
         """Listing shop items should not create a wallet for zero-balance users."""
@@ -348,3 +404,30 @@ class ShopApiV1Tests(TestCase):
             code="not_found",
             message="The requested resource was not found.",
         )
+
+    def test_redemption_detail_returns_owned_record(self):
+        """Users should be able to fetch their own redemption detail."""
+        address = self._create_shipping_address(
+            self.user,
+            receiver_name="API Receiver",
+            phone="13800138001",
+            address="123 API Lane",
+        )
+        redemption = Redemption.objects.create(
+            user_profile=self.user,
+            item=self.item,
+            shipping_address=address,
+            points_cost_at_redemption=self.item.cost,
+            status=Redemption.StatusChoices.COMPLETED,
+        )
+
+        response = self.client.get(
+            f"/api/v1/shop/redemptions/{redemption.id}",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["id"], redemption.id)
+        self.assertEqual(payload["item"]["id"], self.item.id)
+        self.assertEqual(payload["shipping_address"]["id"], address.id)

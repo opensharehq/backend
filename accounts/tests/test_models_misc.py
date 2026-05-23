@@ -11,6 +11,7 @@ from accounts.models import (
     AccountMergeRequest,
     Organization,
     OrganizationMembership,
+    WithdrawalAccount,
 )
 
 
@@ -67,3 +68,15 @@ class AccountModelMiscTests(TestCase):
             request=req, table_name="test", migrated_count=2, conflict_count=1
         )
         self.assertEqual(str(log), "test: +2/~1")
+
+    def test_withdrawal_account_str(self):
+        """WithdrawalAccount __str__ includes owner, account type, and real name."""
+        account = WithdrawalAccount.objects.create(
+            user=self.user,
+            account_type="international",
+            real_name="Cache User",
+            currency="USD",
+            swift_account="SWIFT123456",
+        )
+
+        self.assertEqual(str(account), "cache-user - 中国以外 - Cache User")

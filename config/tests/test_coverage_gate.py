@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import importlib
 import io
 import json
+import os
+import sys
 import types
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
@@ -11,7 +14,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from django.test import SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase
+
+from config import api_v1
+from config.api_common import ApiError, translate_error_text
 
 
 @dataclass(frozen=True)
@@ -342,3 +348,41 @@ class CoverageGateScriptTests(SimpleTestCase):
 
         self.assertEqual(returncode, 1)
         self.assertIn("missing a totals section", stderr.getvalue())
+
+    def test_api_helpers_and_s3_settings_branches_for_full_coverage(self):
+        """Cover direct API helpers in the non-parallel coverage test segment."""
+        request = RequestFactory().get("/api/v1/test")
+
+        self.assertEqual(str(ApiError("code", 409, "message")), "message")
+        self.assertEqual(
+            translate_error_text("现金积分不足，当前可用: 123"),
+            "Not enough cash points. Available balance: 123.",
+        )
+        response = api_v1._permission_denied_handler(request, PermissionError())
+        self.assertEqual(response.status_code, 403)
+
+        original_env = os.environ.copy()
+        original_argv = sys.argv[:]
+        try:
+            os.environ.update(
+                {
+                    "AWS_STORAGE_BUCKET_NAME": "openshare-test",
+                    "AWS_S3_ACCESS_KEY_ID": "access-key",
+                    "AWS_S3_SECRET_ACCESS_KEY": "secret-key",
+                }
+            )
+            sys.argv = ["manage.py"]
+            sys.modules.pop("config.settings", None)
+            import config.settings as settings_module
+
+            reloaded = importlib.reload(settings_module)
+            self.assertEqual(
+                reloaded.STORAGES["default"]["BACKEND"],
+                "storages.backends.s3.S3Storage",
+            )
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+            sys.argv = original_argv
+            sys.modules.pop("config.settings", None)
+            importlib.import_module("config.settings")

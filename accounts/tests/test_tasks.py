@@ -9,6 +9,8 @@ from django.test import TestCase, override_settings
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
+from accounts.tasks import _build_password_reset_url
+
 User = get_user_model()
 
 
@@ -82,6 +84,24 @@ class PasswordResetTaskTests(TestCase):
 
         email = mail.outbox[0]
         self.assertIn("/accounts/password-reset-confirm/", email.body)
+
+    @override_settings(
+        FRONTEND_APP_URL="https://frontend.example/",
+        FRONTEND_PASSWORD_RESET_PATH="/auth/reset",
+    )
+    def test_build_password_reset_url_uses_frontend_when_configured(self):
+        """Configured frontend URLs should be used for password reset links."""
+        reset_url = _build_password_reset_url(
+            "testserver",
+            False,
+            "uid value",
+            "token/value",
+        )
+
+        self.assertEqual(
+            reset_url,
+            "https://frontend.example/auth/reset?uid=uid+value&token=token%2Fvalue",
+        )
 
 
 # Additional comprehensive tests for edge cases and security

@@ -98,3 +98,16 @@ class ApiCorsMiddlewareTests(SimpleTestCase):
         response = middleware(request)
 
         self.assertNotIn("Access-Control-Allow-Credentials", response.headers)
+
+    def test_disallowed_origin_does_not_apply_cors_headers(self):
+        """Requests from non-allowlisted origins should pass through untouched."""
+        middleware = ApiCorsMiddleware(lambda _request: HttpResponse("ok"))
+        request = self.factory.get(
+            "/api/v1/auth/verify",
+            HTTP_ORIGIN="https://evil.example.com",
+        )
+
+        response = middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)

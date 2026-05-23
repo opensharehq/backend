@@ -89,3 +89,17 @@ class EmailDedupePlanTests(SimpleTestCase):
 
         self.assertEqual(len(plans), 1)
         self.assertEqual(plans[0].blocking_reason, "group contains an admin account")
+
+    @patch("accounts.services.email_deduplication._user_model")
+    def test_build_duplicate_email_plans_skips_blank_normalized_email(
+        self, user_model_mock
+    ):
+        """Planning should ignore users whose normalized email is blank."""
+        manager = Mock()
+        manager.exclude.return_value.select_related.return_value.order_by.return_value = [
+            _user(pk=1, username="blank", email="   "),
+            _user(pk=2, username="single", email="single@example.com"),
+        ]
+        user_model_mock.return_value = SimpleNamespace(objects=manager)
+
+        self.assertEqual(build_duplicate_email_plans(), [])

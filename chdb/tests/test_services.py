@@ -47,9 +47,9 @@ class QueryContributionsTests(TestCase):
         # Mock ClickHouse query result
         mock_result = MagicMock()
         mock_result.result_rows = [
-            (111111, "user1", 100.5, [("repo1", 10.0, 202501)]),
-            (222222, "user2", 50.3, [("repo2", 5.0, 202501)]),
-            (333333, "user3", 25.0, []),
+            ("GitHub", 111111, "user1", 100.5, [("repo1", 10.0, 202501)]),
+            ("GitHub", 222222, "user2", 50.3, [("repo2", 5.0, 202501)]),
+            ("GitHub", 333333, "user3", 25.0, []),
         ]
         mock_query.return_value = mock_result
 
@@ -504,7 +504,7 @@ class HelperFunctionsTests(TestCase):
     def test_parse_contribution_rows_handles_multiple_formats(self):
         rows = [
             ["GitHub", 123, "login", 99.5, [("repo", 1.0, 202501)]],
-            [456, "other", 25.0, [("repo2", 0.5, 202502)]],
+            ["GitHub", 456, "other", 25.0, [("repo2", 0.5, 202502)]],
         ]
 
         parsed = services._parse_contribution_rows(rows)
@@ -515,10 +515,10 @@ class HelperFunctionsTests(TestCase):
         self.assertEqual(parsed[1]["actor_id"], "456")
         self.assertEqual(parsed[1]["actor_login"], "other")
 
-    def test_parse_contribution_rows_four_column_default_github_row(self):
-        """4-column default rows should use GitHub platform and preserve details."""
+    def test_parse_contribution_rows_defaults_blank_platform_to_github(self):
+        """Blank platform values should use GitHub and preserve details."""
         rows = [
-            [12345, "default-github-user", 18.2, [("repo-x", 18.2, 202501)]],
+            [None, 12345, "default-github-user", 18.2, [("repo-x", 18.2, 202501)]],
         ]
 
         parsed = services._parse_contribution_rows(rows)
@@ -546,10 +546,10 @@ class HelperFunctionsTests(TestCase):
         self.assertEqual(parsed[0]["details"], [("repo-y", 31.4, 202502)])
 
     def test_parse_contribution_rows_omits_details_when_not_present(self):
-        """Rows without details should not include a details key."""
+        """Rows with null details should not include a details key."""
         rows = [
-            [888, "no-details-user", 12.0],
-            ["Gitee", 999, "gitee-no-details", 5.5],
+            ["GitHub", 888, "no-details-user", 12.0, None],
+            ["Gitee", 999, "gitee-no-details", 5.5, None],
         ]
 
         parsed = services._parse_contribution_rows(rows)
@@ -566,7 +566,7 @@ class HelperFunctionsTests(TestCase):
         """actor_id should always be normalized to string across row formats."""
         rows = [
             ["GitHub", 1001, "platform-row", 1.0, []],
-            [2002, "default-row", 2.0, []],
+            ["GitHub", 2002, "default-row", 2.0, []],
         ]
 
         parsed = services._parse_contribution_rows(rows)
@@ -594,6 +594,38 @@ class HelperFunctionsTests(TestCase):
         self.assertEqual(formatted["platform"], "unknown")
         self.assertEqual(formatted["name"], "id")
         self.assertEqual(formatted["slug"], "id")
+
+    @patch("chdb.services.ClickHouseDB.query")
+    def test_search_name_info_formats_numeric_and_label_ids(self, mock_query):
+        """search_name_info should normalize numeric ids while preserving label ids."""
+        mock_result = MagicMock()
+        mock_result.result_rows = [
+            ("github", "123", "repo", "Repo", "Repository"),
+            ("Project", ":companies/demo", "Demo", "演示", "Label"),
+        ]
+        mock_query.return_value = mock_result
+
+        results = services.search_name_info("demo")
+
+        self.assertEqual(results[0]["id"], 123)
+        self.assertEqual(results[1]["id"], ":companies/demo")
+        mock_query.assert_called_once_with(
+            services.SEARCH_NAME_INFO_SQL,
+            parameters={"keyword": "%demo%"},
+        )
+
+    def test_search_name_info_empty_keyword_returns_empty_list(self):
+        """Blank search keywords should not query ClickHouse."""
+        with patch("chdb.services.ClickHouseDB.query") as mock_query:
+            results = services.search_name_info("  ")
+
+        self.assertEqual(results, [])
+        mock_query.assert_not_called()
+
+    @patch("chdb.services.ClickHouseDB.query", side_effect=Exception("boom"))
+    def test_search_name_info_query_error_returns_empty_list(self, _mock_query):
+        """ClickHouse failures should be converted to an empty result list."""
+        self.assertEqual(services.search_name_info("demo"), [])
 
     def test_parse_openrank_returns_none_for_bad_payloads(self):
         payload = {"openrank": "bad"}

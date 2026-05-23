@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
+from django.db import IntegrityError
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils.encoding import force_bytes
@@ -84,6 +85,22 @@ class SignUpViewEdgeCaseTests(TestCase):
         response = self.client.post(reverse("accounts:sign_up"), data, follow=True)
         assert response.context["user"].is_authenticated
         assert response.context["user"].username == "newuser"
+
+    @patch("accounts.views.SignUpForm.save", side_effect=IntegrityError("duplicate"))
+    def test_sign_up_view_handles_save_integrity_error(self, _save_mock):
+        """A save-time duplicate email race should re-render the form with an error."""
+        response = self.client.post(
+            reverse("accounts:sign_up"),
+            {
+                "username": "raceuser",
+                "email": "race@example.com",
+                "password1": "testpass123",
+                "password2": "testpass123",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "该邮箱已被注册")
 
 
 class ProfileEditHelperTests(TestCase):
@@ -507,6 +524,24 @@ class ChangeEmailViewEdgeCaseTests(TestCase):
         assert len(messages) == 1
         assert "邮箱修改成功" in str(messages[0])
 
+    def test_change_email_view_handles_save_integrity_error(self):
+        """A save-time duplicate email race should add an email form error."""
+        user = User.objects.create_user(
+            username="emailrace",
+            email="old-race@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+
+        with patch.object(User, "save", side_effect=IntegrityError("duplicate")):
+            response = self.client.post(
+                reverse("accounts:change_email"),
+                {"email": "new-race@example.com", "password": "testpass123"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "该邮箱已被其他用户使用")
+
 
 class PasswordResetRequestEdgeCaseTests(TestCase):
     """Edge case tests for password reset request view."""
@@ -537,6 +572,37 @@ class PasswordResetRequestEdgeCaseTests(TestCase):
         assert "github" in str(messages[0])
         assert "google-oauth2" in str(messages[0])
         mock_task.enqueue.assert_not_called()
+
+    @patch("accounts.views.send_password_reset_email")
+    def test_password_reset_request_logs_duplicate_email_matches(self, mock_task):
+        """Duplicate password-reset candidates should log and still send to chosen user."""
+        primary = User.objects.create_user(
+            username="reset-primary",
+            email="reset-shared@example.com",
+            password="testpass123",
+        )
+        secondary = User.objects.create_user(
+            username="reset-secondary",
+            email="reset-secondary@example.com",
+            password="testpass123",
+        )
+
+        with (
+            patch(
+                "accounts.views.select_password_reset_user",
+                return_value=(primary, [primary, secondary]),
+            ),
+            self.assertLogs("accounts.views", level="WARNING") as cm,
+        ):
+            response = self.client.post(
+                reverse("accounts:password_reset_request"),
+                {"email": "reset-shared@example.com"},
+            )
+
+        self.assertRedirects(response, reverse("accounts:password_reset_done"))
+        self.assertIn("duplicate email", cm.output[0])
+        mock_task.enqueue.assert_called_once()
+        self.assertEqual(mock_task.enqueue.call_args.args[0], primary.id)
 
     def test_password_reset_request_with_invalid_email_format(self):
         """Test password reset with invalid email format."""

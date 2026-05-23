@@ -173,6 +173,29 @@ class BrowserE2ETestCaseTests(SimpleTestCase):
         submit_button.click.assert_called_once_with()
         page.wait_for_load_state.assert_called_once_with("networkidle")
 
+    def test_url_navigation_and_text_assertion_helpers(self):
+        """URL helpers should normalize paths and page text assertions."""
+        page = Mock()
+        page.locator.return_value.inner_text.return_value = "Hello OpenShare"
+        case = self.make_case()
+        case.page = page
+
+        self.assertEqual(
+            BrowserE2ETestCase.absolute_url(case, "https://example.com/a"),
+            "https://example.com/a",
+        )
+        self.assertEqual(
+            BrowserE2ETestCase.absolute_url(case, "/dashboard/"),
+            "http://localhost:8000/dashboard/",
+        )
+
+        BrowserE2ETestCase.goto(case, "/dashboard/")
+        page.goto.assert_called_once_with(
+            "http://localhost:8000/dashboard/",
+            wait_until="networkidle",
+        )
+        BrowserE2ETestCase.assert_page_contains(case, "OpenShare")
+
     def test_assert_browser_clean_reports_collected_failures(self):
         """Collected browser failures should fail the test with readable output."""
         case = self.make_case()
@@ -287,6 +310,23 @@ class BrowserE2ETestCaseTests(SimpleTestCase):
             case._browser_failures["request"],
             ["fetch http://localhost:8000/api/preview/: socket hang up"],
         )
+
+        case._browser_failures["request"].clear()
+        request.resource_type.return_value = "image"
+        BrowserE2ETestCase._handle_request_failed(case, request)
+        self.assertEqual(case._browser_failures["request"], [])
+
+        request.resource_type.return_value = "fetch"
+        request.url.return_value = "https://cdn.example/api/preview/"
+        BrowserE2ETestCase._handle_request_failed(case, request)
+        self.assertEqual(case._browser_failures["request"], [])
+
+        case._browser_failures["http"].clear()
+        request.resource_type.return_value = "fetch"
+        response.url.return_value = "http://localhost:8000/api/preview/"
+        response.status.return_value = 499
+        BrowserE2ETestCase._handle_response(case, response)
+        self.assertEqual(case._browser_failures["http"], [])
 
     def test_helper_utilities_cover_origin_and_regex_helpers(self):
         """Static helpers should normalize common checks."""

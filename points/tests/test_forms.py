@@ -63,6 +63,23 @@ class WithdrawalRequestFormTests(TestCase):
         )
         self.assertFalse(form.is_valid())
 
+    def test_amount_below_minimum(self):
+        """Test amount below the configured withdrawal minimum."""
+        form = WithdrawalRequestForm(
+            self.user,
+            data={
+                "amount": 100,
+                "real_name": "张三",
+                "phone": "13800138000",
+                "id_card": "11010519491231002X",
+                "bank_name": "中国银行",
+                "bank_account": "6222000000000000000",
+            },
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("amount", form.errors)
+
     def test_invalid_phone(self):
         """Test invalid phone number."""
         form = WithdrawalRequestForm(

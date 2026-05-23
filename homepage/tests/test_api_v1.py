@@ -1,9 +1,12 @@
 """Tests for public API endpoints."""
 
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from accounts.models import UserProfile
+from accounts.services.jwt_tokens import create_access_token
 
 
 class HomepageApiV1Tests(TestCase):
@@ -66,6 +69,58 @@ class HomepageApiV1Tests(TestCase):
         )
         self.hidden_merged.merged_into = self.alice
         self.hidden_merged.save(update_fields=["merged_into"])
+        self.headers = {
+            "HTTP_AUTHORIZATION": f"Bearer {create_access_token(self.alice)}"
+        }
+
+    def test_homepage_search_rejects_blank_or_short_queries(self):
+        """Name-info search should return no results for empty effective queries."""
+        for query in ("", " ", "a"):
+            response = self.client.get(
+                "/api/v1/public/search",
+                {"q": query},
+                **self.headers,
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"items": []})
+
+    def test_homepage_search_returns_chdb_name_info_results(self):
+        """Name-info search should proxy normalized ClickHouse results."""
+        result = [
+            {
+                "platform": "GitHub",
+                "id": 123,
+                "name": "alice/repo",
+                "name_zh": "",
+                "type": "repo",
+            }
+        ]
+
+        with patch(
+            "chdb.services.search_name_info", return_value=result
+        ) as search_mock:
+            response = self.client.get(
+                "/api/v1/public/search",
+                {"q": " alice "},
+                **self.headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"items": result})
+        search_mock.assert_called_once_with("alice")
+
+    def test_homepage_search_returns_unavailable_when_backend_fails(self):
+        """Name-info backend failures should be surfaced as a stable API error."""
+        with patch("chdb.services.search_name_info", side_effect=RuntimeError("boom")):
+            response = self.client.get(
+                "/api/v1/public/search",
+                {"q": "alice"},
+                **self.headers,
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "search_unavailable")
 
     def test_public_search_returns_filtered_results(self):
         """Public search should return JSON results with filters applied."""
@@ -100,6 +155,13 @@ class HomepageApiV1Tests(TestCase):
         response = self.client.get("/api/v1/public/users/search", {})
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["code"], "validation_error")
+
+    def test_search_with_blank_query_returns_validation_error(self):
+        """Blank search queries should be rejected after trimming."""
+        response = self.client.get("/api/v1/public/users/search", {"q": " "})
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"]["q"][0]["code"], "required")
 
     def test_search_invalid_sort_falls_back(self):
         """Unsupported sort values revert to the default ordering."""

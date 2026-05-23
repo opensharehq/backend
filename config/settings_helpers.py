@@ -18,13 +18,18 @@ def build_cache_settings(
     the stored codes).
     """
     if redis_url:
-        redis_backend = {
+        # ``ssl_cert_reqs`` is only accepted by redis-py for TLS connections
+        # (``rediss://``). Passing it on plain ``redis://`` URLs raises
+        # ``TypeError`` on redis-py 7+. Build OPTIONS conditionally.
+        options: dict[str, Any] = {}
+        if redis_url.startswith("rediss://"):
+            options["ssl_cert_reqs"] = None
+        redis_backend: dict[str, Any] = {
             "BACKEND": "django.core.cache.backends.redis.RedisCache",
             "LOCATION": redis_url,
-            "OPTIONS": {
-                "ssl_cert_reqs": None,
-            },
         }
+        if options:
+            redis_backend["OPTIONS"] = options
         return {
             "default": redis_backend,
             "social_exchange": redis_backend,

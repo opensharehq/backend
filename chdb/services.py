@@ -51,8 +51,21 @@ LABEL_ENTITIES_SQL = """
     WHERE id IN {label_ids:Array(String)}
 """
 
+SEARCH_NAME_INFO_SQL = """
+    (SELECT lower(platform) AS platform, toString(id) AS id, name, name AS name_zh, type
+    FROM name_info
+    WHERE name ILIKE {keyword:String}
+    ORDER BY openrank DESC
+    LIMIT 5 BY platform, type)
+    UNION ALL
+    (SELECT l.type AS platform, id, name, name_zh, 'Label' AS type
+    FROM labels l WHERE l.type IN ('Company', 'Division-0', 'Foundation', 'Project', 'Agency-0', 'University-0', 'Institution-0', 'Community')
+    AND (name ILIKE {keyword:String} OR name_zh ILIKE {keyword:String}))
+"""
+
 CONTRIBUTIONS_SQL = """
     SELECT
+        platform,
         actor_id,
         argMax(actor_login, created_at) AS login,
         SUM(openrank) AS or,
@@ -74,9 +87,9 @@ CONTRIBUTIONS_SQL = """
     )
       AND toYYYYMM(created_at) >= {start_month:UInt32}
       AND toYYYYMM(created_at) <= {end_month:UInt32}
-    GROUP BY actor_id
+    GROUP BY platform, actor_id
     ORDER BY or DESC
-    LIMIT 300
+    LIMIT 300000
 """
 
 
@@ -268,25 +281,17 @@ def _collect_user_ids(label_entities: dict[str, dict[str, Any]]) -> list[int]:
 
 
 def _parse_contribution_rows(rows: list[Any]) -> list[dict[str, Any]]:
-    """解析贡献度查询结果."""
+    """解析贡献度查询结果.
+
+    期望列顺序：(platform, actor_id, actor_login, contribution_score, details)。
+    """
     contributions = []
     for row in rows:
-        platform = "GitHub"
-        details = None
-
-        if len(row) >= 4 and isinstance(row[0], str) and isinstance(row[2], str):
-            platform = row[0]
-            actor_id = row[1]
-            actor_login = row[2]
-            contribution_score = row[3]
-            if len(row) > 4:
-                details = row[4]
-        else:
-            actor_id = row[0]
-            actor_login = row[1]
-            contribution_score = row[2]
-            if len(row) > 3:
-                details = row[3]
+        platform = row[0] or "GitHub"
+        actor_id = row[1]
+        actor_login = row[2]
+        contribution_score = row[3]
+        details = row[4]
 
         payload = {
             "platform": platform,
@@ -336,6 +341,52 @@ def search_tags(keyword: str, limit: int = 5) -> list[dict[str, Any]]:
 
     except Exception as e:
         logger.error("搜索标签失败 (关键词: %s): %s", keyword, e)
+        return []
+
+
+def search_name_info(keyword: str) -> list[dict[str, Any]]:
+    """
+    搜索 name_info 表中的仓库和开发者信息。
+
+    Args:
+        keyword: 搜索关键词（大小写不敏感的包含匹配）
+
+    Returns:
+        结果列表, 每项包含 platform, id, name, type 字段
+
+    """
+    keyword = _normalize_keyword(keyword)
+    if not keyword:
+        return []
+
+    try:
+        result = ClickHouseDB.query(
+            SEARCH_NAME_INFO_SQL,
+            parameters={"keyword": f"%{keyword}%"},
+        )
+        rows = _get_result_rows(result)
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            raw_id = row[1]
+            # name_info.id is numeric (toString'ed in SQL), flatten_labels.id
+            # carries the canonical ':companies/...' form. Coerce numeric
+            # strings back to int so existing repo/user consumers stay
+            # backward-compatible while label rows keep the string id.
+            item_id: Any = raw_id
+            if isinstance(raw_id, str) and raw_id.isdigit():
+                item_id = int(raw_id)
+            items.append(
+                {
+                    "platform": row[0],
+                    "id": item_id,
+                    "name": row[2],
+                    "name_zh": row[3],
+                    "type": row[4],
+                }
+            )
+        return items
+    except Exception as e:
+        logger.error("搜索name_info失败 (关键词: %s): %s", keyword, e)
         return []
 
 

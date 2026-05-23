@@ -6,13 +6,15 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from social_django.models import UserSocialAuth
 
+from common.constants import CODE_HOSTING_PROVIDERS
+
 logger = logging.getLogger(__name__)
 
 
 @receiver(post_save, sender=UserSocialAuth)
 def claim_pending_points_on_login(sender, instance, created, **kwargs):
     """用户首次 OAuth 登录时自动领取待领取积分."""
-    if created and instance.provider == "github":
+    if created and instance.provider in CODE_HOSTING_PROVIDERS:
         from points.allocation_services import AllocationService
 
         user = instance.user

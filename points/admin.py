@@ -362,6 +362,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         "wallet_owner",
         "amount",
         "status_display",
+        "withdrawal_account",
         "real_name",
         "phone",
         "id_card",
@@ -378,6 +379,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         "bank_name",
         "bank_account",
         "wallet__id",
+        "withdrawal_account__id",
     )
     readonly_fields = (
         "wallet",
@@ -388,6 +390,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         "bank_name",
         "bank_account",
         "invoice_file",
+        "withdrawal_account",
         "transaction",
         "created_at",
         "updated_at",
@@ -422,6 +425,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
                 "fields": (
                     "bank_name",
                     "bank_account",
+                    "withdrawal_account",
                 )
             },
         ),
@@ -823,7 +827,8 @@ class PendingPointGrantAdmin(admin.ModelAdmin):
     """Admin for PendingPointGrant model."""
 
     list_display = (
-        "github_login",
+        "platform",
+        "actor_login",
         "email",
         "amount",
         "point_type",
@@ -831,11 +836,12 @@ class PendingPointGrantAdmin(admin.ModelAdmin):
         "claimed_by",
         "created_at",
     )
-    list_filter = ("is_claimed", "point_type", "created_at")
-    search_fields = ("github_id", "github_login", "email")
+    list_filter = ("is_claimed", "point_type", "platform", "created_at")
+    search_fields = ("actor_id", "actor_login", "email", "platform")
     readonly_fields = (
-        "github_id",
-        "github_login",
+        "platform",
+        "actor_id",
+        "actor_login",
         "email",
         "amount",
         "point_type",
@@ -857,8 +863,9 @@ class PendingPointGrantAdmin(admin.ModelAdmin):
             "用户信息",
             {
                 "fields": (
-                    "github_id",
-                    "github_login",
+                    "platform",
+                    "actor_id",
+                    "actor_login",
                     "email",
                 )
             },

@@ -38,9 +38,13 @@ from .models import (
     Education,
     ShippingAddress,
     UserProfile,
+    WithdrawalAccount,
     WorkExperience,
 )
 from .services import AccountMergeError, perform_merge
+from .services.masking import mask_card, mask_name
+from shenbianyun.models import SignedUser
+from shenbianyun.services import SIGN_STATE_SIGNED
 from .views import (
     _build_asset_snapshot,
     _expire_request_if_needed,
@@ -143,6 +147,16 @@ class ShippingAddressUpdateSchema(Schema):
     district: str | None = None
     address: str | None = None
     is_default: bool | None = None
+
+
+class WithdrawalAccountCreateSchema(Schema):
+    account_type: str
+    real_name: str
+    id_card: str = ""
+    phone: str = ""
+    bank_card: str = ""
+    currency: str = ""
+    swift_account: str = ""
 
 
 class AccountMergeCreateSchema(Schema):
@@ -472,6 +486,156 @@ def shipping_address_set_default_endpoint(request, address_id: int):
     address.save(update_fields=["is_default"])
     address.refresh_from_db()
     return serialize_shipping_address(address)
+
+
+# ---------------------------------------------------------------------------
+# Withdrawal Accounts
+# ---------------------------------------------------------------------------
+
+
+def serialize_withdrawal_account(account):
+    """Serialize a withdrawal account with sensitive fields masked."""
+    data = {
+        "id": account.id,
+        "account_type": account.account_type,
+        "real_name": mask_name(account.real_name),
+        "created_at": account.created_at.isoformat(),
+    }
+    if account.account_type == "domestic":
+        data.update({
+            "id_card": mask_card(account.id_card),
+            "phone": mask_card(account.phone),
+            "bank_card": mask_card(account.bank_card),
+        })
+    else:
+        data.update({
+            "currency": account.currency,
+            "swift_account": mask_card(account.swift_account),
+        })
+    return data
+
+
+@router.get("/withdrawal-accounts", response=dict)
+def withdrawal_account_list_endpoint(request):
+    """List the authenticated user's withdrawal accounts (masked)."""
+    return {
+        "items": [
+            serialize_withdrawal_account(account)
+            for account in WithdrawalAccount.objects.filter(user=request.auth)
+        ]
+    }
+
+
+@router.post(
+    "/withdrawal-accounts",
+    response={201: dict, 422: ErrorResponseSchema},
+)
+def withdrawal_account_create_endpoint(
+    request, payload: WithdrawalAccountCreateSchema
+):
+    """Create a withdrawal account."""
+    data = payload.model_dump()
+    account_type = data.get("account_type", "")
+
+    # Validate account_type
+    if account_type not in ("domestic", "international"):
+        raise ApiError(
+            "validation_error",
+            422,
+            "Request validation failed.",
+            {"account_type": [{"message": "Must be 'domestic' or 'international'."}]},
+        )
+
+    # Validate required fields per type
+    if account_type == "domestic":
+        missing = [
+            f
+            for f in ("real_name", "id_card", "phone", "bank_card")
+            if not data.get(f)
+        ]
+        if missing:
+            raise ApiError(
+                "validation_error",
+                422,
+                "Request validation failed.",
+                {
+                    field: [{"message": "This field is required."}]
+                    for field in missing
+                },
+            )
+
+        # 银行卡号清洗：去除空格并校验纯数字
+        data["bank_card"] = data["bank_card"].replace(" ", "")
+        if not data["bank_card"].isdigit():
+            raise ApiError(
+                "validation_error",
+                422,
+                "Request validation failed.",
+                {"bank_card": [{"message": "Bank card number must contain only digits."}]},
+            )
+
+        # 校验身边云签约用户：姓名、手机号、身份证号三字段必须在已签约记录中匹配
+        signed_exists = SignedUser.objects.filter(
+            name=data["real_name"],
+            mobile=data["phone"],
+            id_card=data["id_card"],
+            state=SIGN_STATE_SIGNED,
+        ).exists()
+        if not signed_exists:
+            raise ApiError(
+                "not_signed",
+                422,
+                "尚未完成签约，请先签约。签约完成后五分钟方可进行绑定，请稍候。",
+            )
+    else:
+        missing = [
+            f
+            for f in ("real_name", "currency", "swift_account")
+            if not data.get(f)
+        ]
+        if missing:
+            raise ApiError(
+                "validation_error",
+                422,
+                "Request validation failed.",
+                {
+                    field: [{"message": "This field is required."}]
+                    for field in missing
+                },
+            )
+        # Validate currency
+        if data.get("currency") and data["currency"] != "USD":
+            raise ApiError(
+                "validation_error",
+                422,
+                "Request validation failed.",
+                {"currency": [{"message": "Only 'USD' is supported."}]},
+            )
+
+    account = WithdrawalAccount.objects.create(
+        user=request.auth,
+        account_type=account_type,
+        real_name=data["real_name"],
+        id_card=data.get("id_card", ""),
+        phone=data.get("phone", ""),
+        bank_card=data.get("bank_card", ""),
+        currency=data.get("currency", ""),
+        swift_account=data.get("swift_account", ""),
+    )
+    return 201, serialize_withdrawal_account(account)
+
+
+@router.delete(
+    "/withdrawal-accounts/{account_id}",
+    response={204: None, 404: ErrorResponseSchema},
+)
+def withdrawal_account_delete_endpoint(request, account_id: int):
+    """Delete a withdrawal account."""
+    account = get_object_or_404(
+        WithdrawalAccount, id=account_id, user=request.auth
+    )
+    account.delete()
+    return 204, None
 
 
 @router.get("/account-merges", response=dict)

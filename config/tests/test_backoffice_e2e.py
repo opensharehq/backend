@@ -247,8 +247,8 @@ class BackOfficeE2ETests(BrowserE2ETestCase):
         mock_get_contributions.return_value = [
             {
                 "platform": "GitHub",
-                "github_id": "1001",
-                "github_login": registered.username,
+                "actor_id": "1001",
+                "actor_login": registered.username,
                 "email": registered.email,
                 "contribution_score": 2.0,
                 "is_registered": True,
@@ -256,8 +256,8 @@ class BackOfficeE2ETests(BrowserE2ETestCase):
             },
             {
                 "platform": "GitHub",
-                "github_id": "2002",
-                "github_login": "pending-recipient",
+                "actor_id": "2002",
+                "actor_login": "pending-recipient",
                 "email": "pending-recipient@example.com",
                 "contribution_score": 1.0,
                 "is_registered": False,
@@ -286,7 +286,7 @@ class BackOfficeE2ETests(BrowserE2ETestCase):
         self.assertEqual(
             PendingPointGrant.objects.filter(
                 allocation=allocation,
-                github_login="pending-recipient",
+                actor_login="pending-recipient",
             ).count(),
             1,
         )

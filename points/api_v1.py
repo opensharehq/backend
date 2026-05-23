@@ -16,6 +16,7 @@ from ninja import Router, Schema
 
 from accounts.api_v1 import jwt_bearer_auth
 from accounts.models import Organization, OrganizationMembership, User
+from accounts.services.masking import mask_card, mask_name
 from config.api_common import (
     ApiError,
     ErrorResponseSchema,
@@ -35,6 +36,7 @@ from .models import (
     PointTransaction,
     PointType,
     Tag,
+    TransactionType,
     WithdrawalRequest,
 )
 
@@ -61,9 +63,28 @@ class AllocationPreviewRequestSchema(Schema):
     user_scope: AllocationScopeSchema | None = None
     start_month: date
     end_month: date
-    total_amount: int
+
+
+class AllocationItemSchema(Schema):
+    actor_id: str
+    actor_login: str
+    platform: str
+    email: str = ""
+    is_registered: bool
+    user_id: int | None = None
+    contribution_score: float
+    amount: int
+
+
+class AllocationExecuteRequestSchema(Schema):
+    source_selector: SourceSelectorSchema
+    project_scope: AllocationScopeSchema
+    user_scope: AllocationScopeSchema | None = None
+    start_month: date
+    end_month: date
     adjustment_ratio: float = 1.0
-    individual_adjustments: dict[str, int] = {}
+    total_amount: int
+    allocations: list[AllocationItemSchema]
 
 
 def _validation_detail(field: str, message: str, code: str = "invalid") -> dict:
@@ -105,17 +126,28 @@ def _serialize_withdrawal(withdrawal: WithdrawalRequest) -> dict:
     owner = withdrawal.wallet.owner
     owner_type = "organization" if isinstance(owner, Organization) else "user"
     owner_slug = owner.slug if isinstance(owner, Organization) else None
+
+    # 优先从关联的提现账号读取银行卡号，确保同一账号的记录掩码一致
+    if withdrawal.withdrawal_account_id and withdrawal.withdrawal_account:
+        raw_bank_account = (
+            withdrawal.withdrawal_account.bank_card
+            or withdrawal.withdrawal_account.swift_account
+        )
+    else:
+        raw_bank_account = withdrawal.bank_account
+
     return {
         "id": withdrawal.id,
         "owner_type": owner_type,
         "owner_slug": owner_slug,
         "amount": withdrawal.amount,
         "status": withdrawal.status,
-        "real_name": withdrawal.real_name,
+        "real_name": mask_name(withdrawal.real_name),
         "phone": withdrawal.phone,
         "id_card": withdrawal.id_card,
         "bank_name": withdrawal.bank_name,
-        "bank_account": withdrawal.bank_account,
+        "bank_account": mask_card(raw_bank_account),
+        "withdrawal_account_id": withdrawal.withdrawal_account_id,
         "invoice_file_url": withdrawal.invoice_file.url
         if withdrawal.invoice_file
         else None,
@@ -191,8 +223,9 @@ def _serialize_allocation(allocation: PointAllocation) -> dict:
         "pending_grants": [
             {
                 "id": grant.id,
-                "github_id": grant.github_id,
-                "github_login": grant.github_login,
+                "platform": grant.platform,
+                "actor_id": grant.actor_id,
+                "actor_login": grant.actor_login,
                 "email": grant.email,
                 "amount": grant.amount,
                 "point_type": grant.point_type,
@@ -391,7 +424,22 @@ def _validate_allocation_scope(
     return scope.model_dump()
 
 
-def _validate_allocation_request(payload: AllocationPreviewRequestSchema) -> None:
+def _validate_preview_request(payload: AllocationPreviewRequestSchema) -> None:
+    if payload.start_month > payload.end_month:
+        raise ApiError(
+            "validation_error",
+            422,
+            "Request validation failed.",
+            _validation_detail(
+                "end_month",
+                "end_month must be greater than or equal to start_month.",
+            ),
+        )
+    _validate_allocation_scope("project_scope", payload.project_scope, required=True)
+    _validate_allocation_scope("user_scope", payload.user_scope, required=False)
+
+
+def _validate_execute_request(payload: AllocationExecuteRequestSchema) -> None:
     if payload.total_amount <= 0:
         raise ApiError(
             "validation_error",
@@ -399,16 +447,6 @@ def _validate_allocation_request(payload: AllocationPreviewRequestSchema) -> Non
             "Request validation failed.",
             _validation_detail(
                 "total_amount", "total_amount must be greater than zero."
-            ),
-        )
-    if payload.adjustment_ratio <= 0:
-        raise ApiError(
-            "validation_error",
-            422,
-            "Request validation failed.",
-            _validation_detail(
-                "adjustment_ratio",
-                "adjustment_ratio must be greater than zero.",
             ),
         )
     if payload.start_month > payload.end_month:
@@ -421,37 +459,52 @@ def _validate_allocation_request(payload: AllocationPreviewRequestSchema) -> Non
                 "end_month must be greater than or equal to start_month.",
             ),
         )
-    invalid_adjustments = [
-        key
-        for key, value in payload.individual_adjustments.items()
-        if isinstance(value, bool) or value < 0
-    ]
-    if invalid_adjustments:
+    if not payload.allocations:
         raise ApiError(
             "validation_error",
             422,
             "Request validation failed.",
             _validation_detail(
-                "individual_adjustments",
-                "Each individual adjustment must be a non-negative integer.",
+                "allocations", "allocations must not be empty."
+            ),
+        )
+    if any(item.amount < 0 for item in payload.allocations):
+        raise ApiError(
+            "validation_error",
+            422,
+            "Request validation failed.",
+            _validation_detail(
+                "allocations.amount",
+                "Each allocation amount must not be negative.",
+            ),
+        )
+    computed_total = sum(item.amount for item in payload.allocations)
+    if computed_total != payload.total_amount:
+        raise ApiError(
+            "validation_error",
+            422,
+            "Request validation failed.",
+            _validation_detail(
+                "total_amount",
+                f"Sum of allocation amounts ({computed_total}) does not match total_amount ({payload.total_amount}).",
             ),
         )
     _validate_allocation_scope("project_scope", payload.project_scope, required=True)
     _validate_allocation_scope("user_scope", payload.user_scope, required=False)
 
 
-def _build_unsaved_allocation(
+def _build_unsaved_preview_allocation(
     payload: AllocationPreviewRequestSchema, source_pool: PointSource
 ) -> PointAllocation:
     return PointAllocation(
         source_pool=source_pool,
-        total_amount=payload.total_amount,
+        total_amount=0,
         project_scope=payload.project_scope.model_dump(),
         user_scope=payload.user_scope.model_dump() if payload.user_scope else None,
         start_month=payload.start_month,
         end_month=payload.end_month,
-        adjustment_ratio=Decimal(str(payload.adjustment_ratio)),
-        individual_adjustments=payload.individual_adjustments,
+        adjustment_ratio=Decimal("1.0"),
+        individual_adjustments={},
     )
 
 
@@ -591,7 +644,7 @@ def current_user_withdrawals_endpoint(request, page: int = 1, page_size: int = 2
     """List the current user's withdrawal requests."""
     wallet = services.get_wallet_or_none(request.auth)
     withdrawals = (
-        wallet.withdrawals.order_by("-created_at")
+        wallet.withdrawals.select_related("withdrawal_account").order_by("-created_at")
         if wallet is not None
         else WithdrawalRequest.objects.none()
     )
@@ -616,6 +669,37 @@ def current_user_withdrawals_endpoint(request, page: int = 1, page_size: int = 2
 def current_user_withdrawal_create_endpoint(request):
     """Create a withdrawal request for the current user."""
     data, invoice_file = _parse_request_data(request)
+
+    # 新流程：通过 withdrawal_account_id + amount 提交
+    withdrawal_account_id = data.get("withdrawal_account_id")
+    if withdrawal_account_id is not None:
+        try:
+            amount = int(data.get("amount", 0))
+        except (TypeError, ValueError):
+            raise ApiError(
+                "validation_error", 422, "amount must be a valid integer."
+            )
+        if amount < services.MINIMUM_WITHDRAWAL_AMOUNT:
+            raise ApiError(
+                "validation_error",
+                422,
+                f"Minimum withdrawal amount is {services.MINIMUM_WITHDRAWAL_AMOUNT} points.",
+            )
+        try:
+            withdrawal = services.create_withdrawal_request(
+                owner=request.auth,
+                amount=amount,
+                invoice_file=invoice_file,
+                withdrawal_account_id=int(withdrawal_account_id),
+            )
+        except ValueError as exc:
+            raise ApiError("validation_error", 422, str(exc))
+        except (services.InsufficientPointsError, services.WithdrawalError) as exc:
+            _raise_points_service_error(str(exc))
+            raise AssertionError("unreachable")
+        return 201, _serialize_withdrawal(withdrawal)
+
+    # 旧流程：直接传参方式（向后兼容）
     form = WithdrawalRequestForm(request.auth, data=data, files=request.FILES or None)
     if not validate_form(form):
         raise ApiError(
@@ -638,6 +722,8 @@ def current_user_withdrawal_create_endpoint(request):
     except (services.InsufficientPointsError, services.WithdrawalError) as exc:
         _raise_points_service_error(str(exc))
         raise AssertionError("unreachable")
+    except ValueError as exc:
+        raise ApiError("validation_error", 422, str(exc))
     return 201, _serialize_withdrawal(withdrawal)
 
 
@@ -784,6 +870,8 @@ def organization_withdrawal_create_endpoint(request, slug: str):
     except (services.InsufficientPointsError, services.WithdrawalError) as exc:
         _raise_points_service_error(str(exc))
         raise AssertionError("unreachable")
+    except ValueError as exc:
+        raise ApiError("validation_error", 422, str(exc))
     return 201, _serialize_withdrawal(withdrawal)
 
 
@@ -901,19 +989,12 @@ def point_tag_search_endpoint(request, q: str = ""):
 )
 def allocation_preview_endpoint(request, payload: AllocationPreviewRequestSchema):
     """Preview a points allocation run without executing it."""
-    _validate_allocation_request(payload)
+    _validate_preview_request(payload)
     source_pool, available_balance = _resolve_source_pool(
         request.auth, payload.source_selector
     )
-    if payload.total_amount > available_balance:
-        raise ApiError(
-            "insufficient_points",
-            409,
-            "The selected point pool does not have enough balance for this allocation.",
-            {"available_balance": available_balance},
-        )
 
-    allocation = _build_unsaved_allocation(payload, source_pool)
+    allocation = _build_unsaved_preview_allocation(payload, source_pool)
     try:
         preview = _normalize_preview_items(
             AllocationService.preview_allocation(allocation)
@@ -927,7 +1008,7 @@ def allocation_preview_endpoint(request, payload: AllocationPreviewRequestSchema
     return {
         "source_selector": payload.source_selector.model_dump(),
         "available_balance": available_balance,
-        "total_points": sum(item["adjusted_points"] for item in preview),
+        "contribution_to_points_ratio": AllocationService.CONTRIBUTION_TO_POINTS_RATIO,
         "total_recipients": len(preview),
         "preview": preview,
     }
@@ -944,9 +1025,9 @@ def allocation_preview_endpoint(request, payload: AllocationPreviewRequestSchema
         503: ErrorResponseSchema,
     },
 )
-def allocation_execute_endpoint(request, payload: AllocationPreviewRequestSchema):
+def allocation_execute_endpoint(request, payload: AllocationExecuteRequestSchema):
     """Create and execute a points allocation."""
-    _validate_allocation_request(payload)
+    _validate_execute_request(payload)
     source_pool, available_balance = _resolve_source_pool(
         request.auth, payload.source_selector
     )
@@ -958,7 +1039,13 @@ def allocation_execute_endpoint(request, payload: AllocationPreviewRequestSchema
             {"available_balance": available_balance},
         )
 
+    # initiator_type/initiator_id 同时起“发起者”与“执行操作者”作用,
+    # 始终记录当前登录用户(request.auth), 等价于 created_by / operator.
     initiator_type = ContentType.objects.get_for_model(request.auth)
+    # adjustment_ratio 语义: 实际发放积分总量 / 理论应发放积分总量,
+    # 理论应发放 = sum(floor(contribution_score *
+    # AllocationService.CONTRIBUTION_TO_POINTS_RATIO)).
+    # 由前端依照该定义计算后传入, 后端原样持久化以用于详情展示.
     allocation = PointAllocation.objects.create(
         initiator_type=initiator_type,
         initiator_id=request.auth.id,
@@ -969,17 +1056,12 @@ def allocation_execute_endpoint(request, payload: AllocationPreviewRequestSchema
         start_month=payload.start_month,
         end_month=payload.end_month,
         adjustment_ratio=Decimal(str(payload.adjustment_ratio)),
-        individual_adjustments=payload.individual_adjustments,
+        individual_adjustments={},
     )
+
+    allocations_data = [item.model_dump() for item in payload.allocations]
     try:
-        result = AllocationService.execute_allocation(allocation)
-    except ContributionDataUnavailableError as exc:
-        allocation.delete()
-        raise ApiError(
-            "contribution_data_unavailable",
-            503,
-            "Contribution data is currently unavailable.",
-        ) from exc
+        result = AllocationService.execute_allocation(allocation, allocations_data)
     except (services.InsufficientPointsError, RuntimeError, ValueError) as exc:
         raise ApiError(
             "allocation_failed",
@@ -1012,6 +1094,70 @@ def _user_can_access_allocation(user, allocation: PointAllocation) -> bool:
     return False
 
 
+def _user_is_allocation_beneficiary(user, allocation: PointAllocation) -> bool:
+    """
+    判断 user 是否为该次分配的受益人.
+
+    依据当前用户钱包中是否存在 reference_id=allocation_{id} 的 EARN 类型交易,
+    覆盖以下两种场景:
+    1. 分配执行时即被直接发放积分的已注册受益人
+    2. 分配生成的待领取记录被该用户后续认领后发放的积分
+    """
+    user_ct = ContentType.objects.get_for_model(user)
+    return PointTransaction.objects.filter(
+        wallet__content_type=user_ct,
+        wallet__object_id=user.id,
+        transaction_type=TransactionType.EARN,
+        reference_id=f"allocation_{allocation.id}",
+    ).exists()
+
+
+def _serialize_allocation_summary(allocation: PointAllocation) -> dict:
+    """
+    返回受益人可见的有限分配信息.
+
+    仅暴露与受益人自身权益相关的元数据:
+    - 积分池来源 (个人/组织、名称、积分类型、标签)
+    - 项目范围/用户范围标签
+    - 时间区间
+    - 全局调整比例
+    - 状态与执行时间
+
+    刻意排除以下敏感字段, 避免泄露其他受益人或资金细节:
+    - total_amount (本次分配总额)
+    - contribution_data (其他开发者贡献度与分配明细)
+    - pending_grants (待领取列表)
+    - total_recipients / registered_recipients / unregistered_recipients
+    """
+    source_owner = allocation.source_pool.wallet.owner
+    source_tag = allocation.source_pool.tag
+    is_org = isinstance(source_owner, Organization)
+    return {
+        "id": allocation.id,
+        "status": allocation.status,
+        "source_pool": {
+            "owner_type": "organization" if is_org else "user",
+            "owner_slug": source_owner.slug if is_org else None,
+            "owner_name": source_owner.name if is_org else source_owner.username,
+            "point_type": allocation.source_pool.point_type,
+            "tag": (
+                {"slug": source_tag.slug, "name": source_tag.name}
+                if source_tag
+                else None
+            ),
+        },
+        "project_scope": allocation.project_scope,
+        "user_scope": allocation.user_scope,
+        "start_month": allocation.start_month.isoformat(),
+        "end_month": allocation.end_month.isoformat(),
+        "adjustment_ratio": float(allocation.adjustment_ratio),
+        "created_at": allocation.created_at.isoformat(),
+        "executed_at": allocation.executed_at.isoformat()
+        if allocation.executed_at
+        else None,
+    }
+
+
 @router.get("/allocations/{allocation_id}")
 def allocation_detail_endpoint(request, allocation_id: int):
     """Return a single allocation record."""
@@ -1028,3 +1174,32 @@ def allocation_detail_endpoint(request, allocation_id: int):
             "You do not have permission to view this allocation.",
         )
     return _serialize_allocation(allocation)
+
+
+@router.get("/allocations/{allocation_id}/summary")
+def allocation_summary_endpoint(request, allocation_id: int):
+    """
+    Return limited allocation info visible to beneficiaries.
+
+    访问条件 (满足任一):
+    1. 该用户为分配发起者 / 积分池所有者 / 组织 OWNER|ADMIN (复用 _user_can_access_allocation)
+    2. 该用户为该次分配的受益人 (拥有 reference_id=allocation_{id} 的 EARN 交易)
+
+    返回字段刻意精简, 避免受益人看到他人收入或本次分配总额.
+    """
+    allocation = get_object_or_404(
+        PointAllocation.objects.select_related(
+            "source_pool__wallet__content_type", "source_pool__tag"
+        ),
+        id=allocation_id,
+    )
+    if not (
+        _user_can_access_allocation(request.auth, allocation)
+        or _user_is_allocation_beneficiary(request.auth, allocation)
+    ):
+        raise ApiError(
+            "forbidden",
+            403,
+            "You do not have permission to view this allocation.",
+        )
+    return _serialize_allocation_summary(allocation)

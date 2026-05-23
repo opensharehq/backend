@@ -359,6 +359,16 @@ class WithdrawalRequest(models.Model):
         verbose_name="处理时间",
     )
 
+    # 提现账号
+    withdrawal_account = models.ForeignKey(
+        "accounts.WithdrawalAccount",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="withdrawal_requests",
+        verbose_name="提现账号",
+    )
+
     # 关联交易记录
     transaction = models.OneToOneField(
         PointTransaction,
@@ -394,21 +404,29 @@ class PendingPointGrant(models.Model):
     设计要点:
     1. 每次向未注册用户发放积分都会创建一条记录
     2. 记录永久保留, 不会删除(即使已领取)
-    3. 用户注册后通过 GitHub ID/login/email 匹配并自动领取
-    4. 支持完整的历史追溯和审计
+    3. 用户注册后仅通过 platform + actor_id 匹配并自动领取
+    4. actor_login 和 email 用于记录/审计, 不作为领取时的回退匹配条件
+    5. 支持完整的历史追溯和审计
     """
 
     # 用户识别信息（至少一个）
-    github_id = models.CharField(
+    platform = models.CharField(
         max_length=50,
         blank=True,
-        verbose_name="GitHub ID",
+        verbose_name="平台",
+        db_index=True,
+        default="github",
+    )
+    actor_id = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name="平台用户ID",
         db_index=True,
     )
-    github_login = models.CharField(
+    actor_login = models.CharField(
         max_length=100,
         blank=True,
-        verbose_name="GitHub 用户名",
+        verbose_name="平台用户名",
         db_index=True,
     )
     email = models.EmailField(
@@ -492,16 +510,17 @@ class PendingPointGrant(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["is_claimed"]),
-            models.Index(fields=["github_id", "is_claimed"]),
-            models.Index(fields=["github_login", "is_claimed"]),
+            models.Index(fields=["actor_id", "is_claimed"]),
+            models.Index(fields=["actor_login", "is_claimed"]),
             models.Index(fields=["email", "is_claimed"]),
             models.Index(fields=["created_at"]),
+            models.Index(fields=["platform", "actor_id"], name="idx_pending_platform_actor"),
         ]
 
     def __str__(self):
         """Return string representation."""
         status = "已领取" if self.is_claimed else "待领取"
-        return f"{self.github_login or self.email}: {self.amount} ({status})"
+        return f"{self.actor_login or self.email}: {self.amount} ({status})"
 
 
 class PointAllocation(models.Model):

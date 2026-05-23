@@ -303,6 +303,10 @@ class RollbackPendingClaimsCommandTests(TestCase):
             email="claimuser@example.com",
             password="pass",
         )
+        # 绑定 GitHub 账号以支持基于 (platform, actor_id) 的认领匹配
+        UserSocialAuth.objects.create(
+            user=self.target_user, provider="github", uid="claim-uid-100"
+        )
 
         services.grant_points(
             owner=self.granter,
@@ -324,8 +328,9 @@ class RollbackPendingClaimsCommandTests(TestCase):
 
     def _create_and_claim_grant(self, amount=5000):
         pending_grant = PendingPointGrant.objects.create(
-            github_id="",
-            github_login=self.target_user.username,
+            platform="github",
+            actor_id="claim-uid-100",
+            actor_login=self.target_user.username,
             email=self.target_user.email,
             amount=amount,
             point_type=PointType.GIFT,
@@ -412,8 +417,9 @@ class RollbackPendingClaimsCommandTests(TestCase):
         )
 
         pending_grant = PendingPointGrant.objects.create(
-            github_id="",
-            github_login=self.target_user.username,
+            platform="github",
+            actor_id="claim-uid-100",
+            actor_login=self.target_user.username,
             email=self.target_user.email,
             amount=5000,
             point_type=PointType.GIFT,
@@ -549,10 +555,11 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             end_month=date(2024, 12, 1),
         )
 
-    def _create_pending_grant(self, user, amount=2000):
+    def _create_pending_grant(self, user, amount=2000, actor_id=""):
         return PendingPointGrant.objects.create(
-            github_id="",
-            github_login=user.username,
+            platform="github",
+            actor_id=actor_id,
+            actor_login=user.username,
             email=user.email,
             amount=amount,
             point_type=PointType.GIFT,
@@ -578,7 +585,8 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             email="single@example.com",
             password="pass",
         )
-        pending_grant = self._create_pending_grant(user, amount=3500)
+        UserSocialAuth.objects.create(user=user, provider="github", uid="single-uid")
+        pending_grant = self._create_pending_grant(user, amount=3500, actor_id="single-uid")
         out = StringIO()
 
         call_command(
@@ -612,7 +620,7 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             password="pass",
         )
 
-        github_grant = self._create_pending_grant(github_user, amount=2000)
+        github_grant = self._create_pending_grant(github_user, amount=2000, actor_id="10001")
         normal_grant = self._create_pending_grant(non_github_user, amount=1800)
 
         call_command("retrigger_pending_point_claims", all=True)
@@ -640,7 +648,7 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             password="pass",
         )
 
-        github_grant = self._create_pending_grant(github_user, amount=2200)
+        github_grant = self._create_pending_grant(github_user, amount=2200, actor_id="10002")
         normal_grant = self._create_pending_grant(non_github_user, amount=2100)
 
         call_command(
@@ -652,7 +660,8 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
         github_grant.refresh_from_db()
         normal_grant.refresh_from_db()
         self.assertTrue(github_grant.is_claimed)
-        self.assertTrue(normal_grant.is_claimed)
+        # 未绑定社交账号的用户无法按 (platform, actor_id) 匹配
+        self.assertFalse(normal_grant.is_claimed)
 
     def test_include_without_github_requires_all(self):
         """Test --include-without-github requires --all."""
@@ -679,7 +688,8 @@ class RetriggerPendingPointClaimsCommandTests(TestCase):
             email="dry-run@example.com",
             password="pass",
         )
-        pending_grant = self._create_pending_grant(user, amount=3200)
+        UserSocialAuth.objects.create(user=user, provider="github", uid="dry-uid")
+        pending_grant = self._create_pending_grant(user, amount=3200, actor_id="dry-uid")
         out = StringIO()
 
         call_command(

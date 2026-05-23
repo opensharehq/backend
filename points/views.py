@@ -194,6 +194,7 @@ def create_withdrawal_view(request):
             except (
                 services.InsufficientPointsError,
                 services.WithdrawalError,
+                ValueError,
             ) as e:
                 messages.error(request, str(e))
     else:
@@ -368,6 +369,7 @@ def org_create_withdrawal_view(request, slug):
             except (
                 services.InsufficientPointsError,
                 services.WithdrawalError,
+                ValueError,
             ) as e:
                 messages.error(request, str(e))
     else:
@@ -594,10 +596,28 @@ class ContributionPreviewAPIView(LoginRequiredMixin, View):
             # 预览
             preview = AllocationService.preview_allocation(allocation)
 
-            # 转换 Decimal 为 float 以便 JSON 序列化
+            # 转换 Decimal 为 float 并计算 calculated_points / adjusted_points
+            ratio = AllocationService.CONTRIBUTION_TO_POINTS_RATIO
+            adjustment_ratio = allocation_payload.get("adjustment_ratio", 1.0)
+            individual_adjustments = allocation_payload.get(
+                "individual_adjustments", {}
+            )
             for item in preview:
                 if "contribution_score" in item:
                     item["contribution_score"] = float(item["contribution_score"])
+                score = float(item.get("contribution_score", 0))
+                calculated = int(score * ratio)
+                item.setdefault("calculated_points", calculated)
+                # 使用 individual_adjustments 覆盖或应用全局 adjustment_ratio
+                actor_key = item.get("actor_login", item.get("actor_id", ""))
+                if actor_key and str(actor_key) in individual_adjustments:
+                    item.setdefault(
+                        "adjusted_points", individual_adjustments[str(actor_key)]
+                    )
+                else:
+                    item.setdefault(
+                        "adjusted_points", int(calculated * adjustment_ratio)
+                    )
 
             # 查询标签平台信息（如果有项目标签）
             label_platforms_info = {}
@@ -609,7 +629,9 @@ class ContributionPreviewAPIView(LoginRequiredMixin, View):
                 {
                     "contributions": preview,
                     "label_platforms_info": label_platforms_info,
-                    "total_points": sum(c["adjusted_points"] for c in preview),
+                    "total_points": sum(
+                        c.get("adjusted_points", 0) for c in preview
+                    ),
                     "total_recipients": len(preview),
                 }
             )
@@ -667,8 +689,48 @@ class AllocationExecuteAPIView(LoginRequiredMixin, View):
                 **allocation_payload,
             )
 
+            # 构造 allocations 列表：先获取 preview，再按贡献比例分配 amount
+            preview = AllocationService.preview_allocation(allocation)
+            total_amount = allocation_payload["total_amount"]
+            ratio = AllocationService.CONTRIBUTION_TO_POINTS_RATIO
+            adjustment_ratio = allocation_payload.get("adjustment_ratio", 1.0)
+            individual_adjustments = allocation_payload.get(
+                "individual_adjustments", {}
+            )
+
+            # 计算每个贡献者的 adjusted_points
+            for item in preview:
+                score = float(item.get("contribution_score", 0))
+                calculated = int(score * ratio)
+                actor_key = item.get("actor_login", item.get("actor_id", ""))
+                if actor_key and str(actor_key) in individual_adjustments:
+                    item["adjusted_points"] = individual_adjustments[str(actor_key)]
+                else:
+                    item["adjusted_points"] = int(calculated * adjustment_ratio)
+
+            # 缩放至 total_amount
+            AllocationService._scale_results_to_total_amount(preview, total_amount)
+
+            # 构建最终 allocations 数据，设置 amount 字段
+            allocations_data = []
+            for item in preview:
+                allocations_data.append({
+                    "actor_id": item.get("actor_id", ""),
+                    "actor_login": item.get("actor_login", ""),
+                    "platform": item.get("platform", ""),
+                    "email": item.get("email", ""),
+                    "is_registered": item.get("is_registered", False),
+                    "user_id": item.get("user_id"),
+                    "contribution_score": float(
+                        item.get("contribution_score", 0)
+                    ),
+                    "amount": item.get("adjusted_points", 0),
+                })
+
             # 执行
-            result = AllocationService.execute_allocation(allocation)
+            result = AllocationService.execute_allocation(
+                allocation, allocations_data
+            )
 
             return JsonResponse({"allocation_id": allocation.id, **result})
         except (

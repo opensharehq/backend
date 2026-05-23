@@ -83,8 +83,9 @@ class ClaimPendingPointsSignalIntegrationTests(TestCase):
 
     def test_social_auth_creation_claims_matching_pending_grant(self):
         grant = PendingPointGrant.objects.create(
-            github_id="123456",
-            github_login=self.claimant.username,
+            platform="github",
+            actor_id="123456",
+            actor_login=self.claimant.username,
             email=self.claimant.email,
             amount=800,
             point_type=PointType.CASH,
@@ -105,3 +106,68 @@ class ClaimPendingPointsSignalIntegrationTests(TestCase):
         self.assertEqual(grant.claimed_by, self.claimant)
         self.assertIsNotNone(grant.claimed_at)
         self.assertEqual(get_balance(self.claimant, PointType.CASH), 800)
+
+    def test_gitee_social_auth_claims_pending_grant(self):
+        """Gitee 用户绑定账号时能认领对应平台的待领取积分"""
+        grant = PendingPointGrant.objects.create(
+            platform="gitee",
+            actor_id="99999",
+            actor_login="gitee_user",
+            amount=500,
+            point_type=PointType.CASH,
+            reason="Gitee contribution reward",
+            granter_type=ContentType.objects.get_for_model(self.source),
+            granter_id=self.source.id,
+            allocation=self.allocation,
+        )
+        UserSocialAuth.objects.create(
+            user=self.claimant, provider="gitee", uid="99999",
+        )
+        grant.refresh_from_db()
+        assert grant.is_claimed is True
+        assert grant.claimed_by == self.claimant
+
+    def test_cross_platform_no_mismatch(self):
+        """GitHub 用户不应认领 Gitee 平台的同名/同ID待领取积分"""
+        grant = PendingPointGrant.objects.create(
+            platform="gitee",
+            actor_id="123456",  # 与 GitHub uid 相同但平台不同
+            actor_login="same_name",
+            amount=300,
+            point_type=PointType.CASH,
+            reason="Cross platform test",
+            granter_type=ContentType.objects.get_for_model(self.source),
+            granter_id=self.source.id,
+            allocation=self.allocation,
+        )
+        # 绑定 GitHub 账号（不是 Gitee）
+        UserSocialAuth.objects.create(
+            user=self.claimant, provider="github", uid="123456",
+        )
+        grant.refresh_from_db()
+        assert grant.is_claimed is False  # 不应被认领
+
+    def test_multi_platform_claims_all_matching(self):
+        """用户绑定多个平台账号后能认领所有匹配平台的待领取积分"""
+        # 创建两个不同平台的待领取记录
+        grant_gh = PendingPointGrant.objects.create(
+            platform="github", actor_id="111", actor_login="user1",
+            amount=100, point_type=PointType.CASH, reason="GH reward",
+            granter_type=ContentType.objects.get_for_model(self.source),
+            granter_id=self.source.id, allocation=self.allocation,
+        )
+        grant_gitee = PendingPointGrant.objects.create(
+            platform="gitee", actor_id="222", actor_login="user1",
+            amount=200, point_type=PointType.CASH, reason="Gitee reward",
+            granter_type=ContentType.objects.get_for_model(self.source),
+            granter_id=self.source.id, allocation=self.allocation,
+        )
+        # 绑定 GitHub
+        UserSocialAuth.objects.create(user=self.claimant, provider="github", uid="111")
+        grant_gh.refresh_from_db()
+        assert grant_gh.is_claimed is True
+
+        # 绑定 Gitee
+        UserSocialAuth.objects.create(user=self.claimant, provider="gitee", uid="222")
+        grant_gitee.refresh_from_db()
+        assert grant_gitee.is_claimed is True

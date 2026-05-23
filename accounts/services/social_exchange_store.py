@@ -1,4 +1,4 @@
-"""Redis-backed storage adapter for one-time social-login exchange codes."""
+"""Cache-backed storage adapter for one-time social-login exchange codes."""
 
 from __future__ import annotations
 
@@ -17,28 +17,84 @@ redis.call("DEL", KEYS[1])
 return value
 """
 
+SOCIAL_EXCHANGE_CACHE_ALIAS = "social_exchange"
+
 
 class SocialExchangeUnavailableError(RuntimeError):
     """Raised when one-time exchange code storage is unavailable."""
 
 
 def _default_cache():
-    """Return the configured default cache backend."""
-    return caches["default"]
+    """Return the configured cache backend for social exchange codes.
+
+    Falls back to the default cache when the dedicated ``social_exchange``
+    alias is not configured (older deployments).
+    """
+    try:
+        return caches[SOCIAL_EXCHANGE_CACHE_ALIAS]
+    except KeyError:
+        return caches["default"]
 
 
 class RedisSocialExchangeStore:
-    """Store exchange payloads using a Redis cache backend."""
+    """Store exchange payloads using the configured Django cache backend.
 
-    def __init__(self, cache_backend: RedisCache | None = None):
+    Prefers atomic Lua ``GET``/``DEL`` when backed by Redis. For other cache
+    backends (e.g. ``LocMemCache`` in local development without Redis) falls
+    back to the standard Django cache ``set``/``get``/``delete`` API. The
+    ``DummyCache`` backend is explicitly rejected because it silently
+    discards writes, which would make exchange codes unusable.
+    """
+
+    # Backends that silently discard writes and therefore cannot persist codes.
+    _UNSUPPORTED_BACKENDS = ("DummyCache",)
+
+    def __init__(self, cache_backend=None):
         """Allow tests to inject a cache backend while defaulting to Django cache."""
         self.cache_backend = (
             _default_cache() if cache_backend is None else cache_backend
         )
 
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def store(self, key: str, payload: dict[str, Any], timeout: int | None) -> None:
         """Persist a one-time payload under the given cache key."""
-        cache_backend = self._redis_cache()
+        serialized = self._serialize(payload)
+
+        if isinstance(self.cache_backend, RedisCache):
+            self._store_via_redis(key, serialized, timeout)
+            return
+
+        cache_backend = self._generic_cache()
+        if timeout == 0:
+            cache_backend.delete(key)
+            return
+        cache_backend.set(key, serialized, timeout)
+
+    def consume(self, key: str) -> dict[str, Any] | None:
+        """Atomically fetch and invalidate a one-time payload."""
+        if isinstance(self.cache_backend, RedisCache):
+            payload = self._consume_via_redis(key)
+        else:
+            cache_backend = self._generic_cache()
+            payload = cache_backend.get(key)
+            if payload is not None:
+                cache_backend.delete(key)
+
+        if payload in (None, False):
+            return None
+        return self._deserialize(payload)
+
+    # ------------------------------------------------------------------
+    # Redis-backed (atomic) path
+    # ------------------------------------------------------------------
+
+    def _store_via_redis(
+        self, key: str, serialized: bytes, timeout: int | None
+    ) -> None:
+        cache_backend = self.cache_backend
         redis_key = cache_backend.make_and_validate_key(key)
         redis_timeout = cache_backend.get_backend_timeout(timeout)
         redis_client = self._redis_client(
@@ -53,11 +109,10 @@ class RedisSocialExchangeStore:
             return
 
         set_kwargs = {} if redis_timeout is None else {"ex": redis_timeout}
-        redis_client.set(redis_key, self._serialize(payload), **set_kwargs)
+        redis_client.set(redis_key, serialized, **set_kwargs)
 
-    def consume(self, key: str) -> dict[str, Any] | None:
-        """Atomically fetch and invalidate a one-time payload."""
-        cache_backend = self._redis_cache()
+    def _consume_via_redis(self, key: str) -> Any:
+        cache_backend = self.cache_backend
         redis_key = cache_backend.make_and_validate_key(key)
         redis_client = self._redis_client(
             cache_backend,
@@ -65,17 +120,7 @@ class RedisSocialExchangeStore:
             write=True,
             required_methods=("eval",),
         )
-        payload = redis_client.eval(ATOMIC_GET_DELETE_SCRIPT, 1, redis_key)
-        if payload in (None, False):
-            return None
-        return self._deserialize(payload)
-
-    def _redis_cache(self) -> RedisCache:
-        """Require the default cache to expose Django's Redis backend."""
-        if not isinstance(self.cache_backend, RedisCache):
-            msg = "Social exchange codes require Redis-backed cache support."
-            raise SocialExchangeUnavailableError(msg)
-        return self.cache_backend
+        return redis_client.eval(ATOMIC_GET_DELETE_SCRIPT, 1, redis_key)
 
     def _redis_client(
         self,
@@ -112,6 +157,42 @@ class RedisSocialExchangeStore:
             raise SocialExchangeUnavailableError(msg)
 
         return redis_client
+
+    # ------------------------------------------------------------------
+    # Generic Django cache path
+    # ------------------------------------------------------------------
+
+    def _generic_cache(self):
+        """Validate and return a Django cache backend usable for persistence."""
+        cache_backend = self.cache_backend
+        backend_cls_name = type(cache_backend).__name__
+        if backend_cls_name in self._UNSUPPORTED_BACKENDS:
+            msg = (
+                "Social exchange codes cannot be stored in a "
+                f"{backend_cls_name} backend. Configure REDIS_URL or ensure "
+                "the 'social_exchange' cache alias points to a real cache "
+                "backend (e.g. LocMemCache)."
+            )
+            raise SocialExchangeUnavailableError(msg)
+
+        missing = [
+            method
+            for method in ("set", "get", "delete")
+            if not callable(getattr(cache_backend, method, None))
+        ]
+        if missing:
+            missing_list = ", ".join(sorted(missing))
+            msg = (
+                "Social exchange cache backend is missing required cache "
+                f"methods: {missing_list}."
+            )
+            raise SocialExchangeUnavailableError(msg)
+
+        return cache_backend
+
+    # ------------------------------------------------------------------
+    # Serialization helpers
+    # ------------------------------------------------------------------
 
     def _serialize(self, payload: dict[str, Any]) -> bytes:
         """Encode payloads without depending on the cache backend serializer."""

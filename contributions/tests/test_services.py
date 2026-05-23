@@ -96,6 +96,8 @@ class ContributionServiceTests(TestCase):
             [
                 {
                     "platform": "GitHub",
+                    "actor_id": "123456",
+                    "actor_login": "testuser1",
                     "github_id": "123456",
                     "github_login": "testuser1",
                     "email": "",
@@ -106,6 +108,8 @@ class ContributionServiceTests(TestCase):
                 },
                 {
                     "platform": "GitLab",
+                    "actor_id": "gl-42",
+                    "actor_login": "testuser2",
                     "gitlab_id": "gl-42",
                     "gitlab_login": "testuser2",
                     "email": "",
@@ -170,6 +174,8 @@ class ContributionServiceTests(TestCase):
             [
                 {
                     "platform": "GitHub",
+                    "actor_id": "123456",
+                    "actor_login": "testuser1",
                     "github_id": "123456",
                     "github_login": "testuser1",
                     "email": "",
@@ -179,6 +185,8 @@ class ContributionServiceTests(TestCase):
                 },
                 {
                     "platform": "GitLab",
+                    "actor_id": "gl-100",
+                    "actor_login": "testuser2",
                     "gitlab_id": "gl-100",
                     "gitlab_login": "testuser2",
                     "email": "",
@@ -189,6 +197,8 @@ class ContributionServiceTests(TestCase):
                 },
                 {
                     "platform": "GitLab",
+                    "actor_id": "987654",
+                    "actor_login": "unregistered-numeric-id",
                     "gitlab_id": 987654,
                     "gitlab_login": "unregistered-numeric-id",
                     "email": "",
@@ -199,7 +209,7 @@ class ContributionServiceTests(TestCase):
             ],
         )
 
-    def test_get_fake_contributions_synthesizes_github_id_without_social_auth(self):
+    def test_get_fake_contributions_synthesizes_actor_id_without_social_auth(self):
         """Registered users without GitHub auth should still get deterministic fake IDs."""
         user_without_social = User.objects.create_user(
             username="nosocial",
@@ -227,4 +237,51 @@ class ContributionServiceTests(TestCase):
                 project_identifiers=["repo:github:test"],
                 start_month=None,
                 end_month=None,
+            )
+
+    @patch("chdb.services.query_contributions")
+    def test_validate_platform_present_rejects_missing_platform(
+        self, mock_query_contributions
+    ):
+        """Contributions without a platform field should be rejected at the boundary."""
+        mock_query_contributions.return_value = [
+            {
+                "platform": "GitHub",
+                "actor_id": "111",
+                "actor_login": "valid-user",
+                "contribution_score": 10.0,
+            },
+            {
+                "actor_id": "222",
+                "actor_login": "no-platform-user",
+                "contribution_score": 5.0,
+            },
+        ]
+
+        with self.assertRaises(ContributionDataUnavailableError):
+            ContributionService.get_contributions(
+                project_identifiers=["repo:github:test"],
+                start_month=date(2024, 1, 1),
+                end_month=date(2024, 12, 1),
+            )
+
+    @patch("chdb.services.query_contributions")
+    def test_validate_platform_present_rejects_empty_string_platform(
+        self, mock_query_contributions
+    ):
+        """Empty string platform should be rejected."""
+        mock_query_contributions.return_value = [
+            {
+                "platform": "",
+                "actor_id": "333",
+                "actor_login": "empty-platform",
+                "contribution_score": 8.0,
+            },
+        ]
+
+        with self.assertRaises(ContributionDataUnavailableError):
+            ContributionService.get_contributions(
+                project_identifiers=["repo:github:test"],
+                start_month=date(2024, 1, 1),
+                end_month=date(2024, 12, 1),
             )

@@ -739,8 +739,8 @@ class ContributionPreviewAPIViewWithLabelsTests(TestCase):
         # Mock AllocationService.preview_allocation
         mock_preview = [
             {
-                "github_login": "alice",
-                "github_id": "123",
+                "actor_login": "alice",
+                "actor_id": "123",
                 "contribution_score": 250.5,
                 "calculated_points": 75150,
                 "adjusted_points": 75150,
@@ -778,7 +778,7 @@ class ContributionPreviewAPIViewWithLabelsTests(TestCase):
 
             # Verify contributions
             self.assertEqual(len(data["contributions"]), 1)
-            self.assertEqual(data["contributions"][0]["github_login"], "alice")
+            self.assertEqual(data["contributions"][0]["actor_login"], "alice")
 
             # Verify label_platforms_info
             self.assertIn("label_platforms_info", data)
@@ -791,8 +791,8 @@ class ContributionPreviewAPIViewWithLabelsTests(TestCase):
         """Successful preview responses should expose the documented top-level fields."""
         mock_preview = [
             {
-                "github_login": "alice",
-                "github_id": "123",
+                "actor_login": "alice",
+                "actor_id": "123",
                 "contribution_score": 250.5,
                 "calculated_points": 75150,
                 "adjusted_points": 75150,
@@ -834,15 +834,15 @@ class ContributionPreviewAPIViewWithLabelsTests(TestCase):
         """Preview serialization should only coerce contribution_score when present."""
         mock_preview = [
             {
-                "github_login": "alice",
-                "github_id": "123",
+                "actor_login": "alice",
+                "actor_id": "123",
                 "contribution_score": 250.5,
                 "calculated_points": 100,
                 "adjusted_points": 100,
             },
             {
-                "github_login": "bob",
-                "github_id": "456",
+                "actor_login": "bob",
+                "actor_id": "456",
                 "calculated_points": 80,
                 "adjusted_points": 80,
             },
@@ -1101,9 +1101,26 @@ class AllocationExecuteAPIViewTests(TestCase):
 
     def test_allocation_execute_api_creates_allocation_and_returns_result(self):
         """Test execute API creates an allocation before dispatching work."""
-        with patch(
-            "points.views.AllocationService.execute_allocation",
-            return_value={"success": 1, "pending": 0, "failed": 0, "total_points": 300},
+        mock_preview = [
+            {
+                "actor_id": "1",
+                "actor_login": "alice",
+                "platform": "github",
+                "email": "alice@example.com",
+                "is_registered": True,
+                "user_id": 1,
+                "contribution_score": 1.0,
+            }
+        ]
+        with (
+            patch(
+                "points.views.AllocationService.preview_allocation",
+                return_value=mock_preview,
+            ),
+            patch(
+                "points.views.AllocationService.execute_allocation",
+                return_value={"success": 1, "pending": 0, "failed": 0, "total_points": 300},
+            ),
         ):
             response = self.client.post(
                 reverse("points:api_allocation_execute"),

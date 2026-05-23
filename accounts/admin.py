@@ -13,6 +13,7 @@ from .models import (
     ShippingAddress,
     User,
     UserProfile,
+    WithdrawalAccount,
     WorkExperience,
 )
 
@@ -376,6 +377,16 @@ class OrganizationAdmin(admin.ModelAdmin):
         selected = queryset.values_list("id", flat=True)
         ids_param = ",".join(map(str, selected))
         return redirect(f"/admin/points/grant-to-orgs/?ids={ids_param}")
+
+
+@admin.register(WithdrawalAccount)
+class WithdrawalAccountAdmin(admin.ModelAdmin):
+    """Admin for WithdrawalAccount model."""
+
+    list_display = ["id", "user", "account_type", "real_name", "created_at"]
+    list_filter = ["account_type"]
+    search_fields = ["user__username", "real_name"]
+    readonly_fields = ["created_at"]
 
 
 @admin.register(OrganizationMembership)

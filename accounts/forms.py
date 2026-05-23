@@ -39,7 +39,7 @@ class SignUpForm(UserCreationForm):
         email = normalize_email_address(self.cleaned_data.get("email"))
         if email_in_use(email):
             msg = "该邮箱已被注册"
-            raise forms.ValidationError(msg)
+            raise forms.ValidationError(msg, code="email_already_registered")
         return email
 
 
@@ -264,11 +264,11 @@ class ChangeEmailForm(forms.Form):
 
         if email == normalize_email_address(self.user.email):
             msg = "新邮箱不能与当前邮箱相同"
-            raise forms.ValidationError(msg)
+            raise forms.ValidationError(msg, code="email_same_as_current")
 
         if email_in_use(email, exclude_user=self.user):
             msg = "该邮箱已被其他用户使用"
-            raise forms.ValidationError(msg)
+            raise forms.ValidationError(msg, code="email_already_in_use")
 
         return email
 
@@ -278,7 +278,7 @@ class ChangeEmailForm(forms.Form):
 
         if not self.user.check_password(password):
             msg = "密码不正确"
-            raise forms.ValidationError(msg)
+            raise forms.ValidationError(msg, code="password_incorrect")
 
         return password
 
@@ -418,7 +418,7 @@ class AccountMergeRequestForm(forms.Form):
 
         if not username and not email:
             msg = "请输入目标账号的邮箱或用户名（至少一项）"
-            raise forms.ValidationError(msg)
+            raise forms.ValidationError(msg, code="merge_target_required")
 
         UserModel = get_user_model()
         qs = UserModel.objects.filter(is_active=True)
@@ -433,24 +433,24 @@ class AccountMergeRequestForm(forms.Form):
             target = qs.get()
         except UserModel.DoesNotExist:
             msg = "未找到匹配的目标账号，请检查用户名或邮箱是否正确"
-            raise forms.ValidationError(msg) from None
+            raise forms.ValidationError(msg, code="merge_target_not_found") from None
         except UserModel.MultipleObjectsReturned:
             msg = "匹配到多个账号，请同时提供用户名和邮箱以精确匹配"
-            raise forms.ValidationError(msg) from None
+            raise forms.ValidationError(msg, code="merge_target_ambiguous") from None
 
         if self.user.is_staff or self.user.is_superuser:
             msg = "管理员账号不支持发起合并"
-            raise forms.ValidationError(msg)
+            raise forms.ValidationError(msg, code="merge_source_is_staff")
         if not self.user.is_active:
             msg = "当前账号已被停用，无法发起合并"
-            raise forms.ValidationError(msg)
+            raise forms.ValidationError(msg, code="merge_source_inactive")
 
         if target == self.user:
             msg = "不能合并到自己的账号"
-            raise forms.ValidationError(msg)
+            raise forms.ValidationError(msg, code="merge_target_is_self")
         if target.is_staff or target.is_superuser:
             msg = "目标账号为管理员，无法合并"
-            raise forms.ValidationError(msg)
+            raise forms.ValidationError(msg, code="merge_target_is_staff")
 
         # Only one pending request per source
         if AccountMergeRequest.objects.filter(
@@ -458,7 +458,7 @@ class AccountMergeRequestForm(forms.Form):
             status=AccountMergeRequest.Status.PENDING,
         ).exists():
             msg = "您已有待处理的合并申请，请等待处理后再尝试"
-            raise forms.ValidationError(msg)
+            raise forms.ValidationError(msg, code="merge_source_has_pending")
 
         # Cap pending requests per target
         pending_for_target = AccountMergeRequest.objects.filter(
@@ -467,7 +467,7 @@ class AccountMergeRequestForm(forms.Form):
         ).count()
         if pending_for_target >= 3:
             msg = "该目标账号待处理申请过多，请稍后再试"
-            raise forms.ValidationError(msg)
+            raise forms.ValidationError(msg, code="merge_target_pending_limit")
 
         self.target_user = target
         return cleaned

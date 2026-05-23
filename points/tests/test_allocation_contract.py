@@ -4,12 +4,13 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
-from django.urls import reverse
 from social_django.models import UserSocialAuth
 
 from accounts.models import User
+from accounts.services.jwt_tokens import create_access_token
 from points.allocation_services import AllocationService
-from points.models import PointAllocation
+from points.models import PointAllocation, PointType
+from points.services import grant_points
 
 
 class AllocationContractTests(TestCase):
@@ -32,7 +33,16 @@ class AllocationContractTests(TestCase):
             provider="github",
             uid="12345",
         )
-        self.client.login(username=self.operator.username, password="password123")
+        # Create a point pool for the operator to use with new API
+        grant_points(
+            owner=self.operator,
+            amount=10000,
+            point_type=PointType.GIFT,
+            reason="Contract test fixture",
+        )
+        self.headers = {
+            "HTTP_AUTHORIZATION": f"Bearer {create_access_token(self.operator)}"
+        }
 
     @staticmethod
     def _mock_clickhouse_query(sql, parameters=None):
@@ -73,42 +83,47 @@ class AllocationContractTests(TestCase):
         preview = AllocationService.preview_allocation(allocation)
 
         self.assertEqual(len(preview), 2)
-        self.assertEqual(preview[0]["github_login"], "registered-recipient")
+        # Preview now returns actor_login (not github_login) and contribution_score only
+        self.assertIn("actor_login", preview[0])
         self.assertTrue(preview[0]["is_registered"])
         self.assertEqual(preview[0]["user_id"], self.registered.id)
-        self.assertEqual(preview[0]["calculated_points"], 600)
-        self.assertEqual(preview[0]["adjusted_points"], 600)
-        self.assertEqual(preview[1]["github_login"], "guest-recipient")
+        self.assertIn("contribution_score", preview[0])
+        # Preview no longer returns calculated_points or adjusted_points
+        self.assertNotIn("calculated_points", preview[0])
+        self.assertNotIn("adjusted_points", preview[0])
         self.assertFalse(preview[1]["is_registered"])
-        self.assertEqual(preview[1]["adjusted_points"], 300)
+        self.assertNotIn("adjusted_points", preview[1])
 
     @patch("chdb.services.ClickHouseDB.query")
     def test_preview_api_serializes_real_chain_and_label_metadata(self, mock_query):
-        """The preview API should expose both contribution rows and label-user metadata."""
+        """The preview API should expose contribution rows with contribution_to_points_ratio."""
         mock_query.side_effect = self._mock_clickhouse_query
 
         response = self.client.post(
-            reverse("points:api_contribution_preview"),
+            "/api/v1/points/allocations/preview",
             data={
+                "source_selector": {
+                    "owner_type": "user",
+                    "point_type": "gift",
+                    "tag_slug": None,
+                },
                 "project_scope": {"tags": ["repo:github:test"]},
                 "start_month": "2024-01-01",
                 "end_month": "2024-01-31",
-                "total_amount": 900,
             },
             content_type="application/json",
+            **self.headers,
         )
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["total_points"], 900)
+        # New API returns contribution_to_points_ratio and preview list
+        self.assertEqual(
+            payload["contribution_to_points_ratio"],
+            AllocationService.CONTRIBUTION_TO_POINTS_RATIO,
+        )
         self.assertEqual(payload["total_recipients"], 2)
-        self.assertEqual(len(payload["contributions"]), 2)
-        self.assertIsInstance(payload["contributions"][0]["contribution_score"], float)
-        self.assertEqual(
-            payload["label_platforms_info"]["repo:github:test"]["platforms"],
-            ["github"],
-        )
-        self.assertEqual(
-            payload["label_platforms_info"]["repo:github:test"]["users"]["github"],
-            [[12345, 99999]],
-        )
+        self.assertEqual(len(payload["preview"]), 2)
+        self.assertIsInstance(payload["preview"][0]["contribution_score"], float)
+        # No longer returns total_points in preview response
+        self.assertNotIn("total_points", payload)

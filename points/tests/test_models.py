@@ -358,7 +358,8 @@ class ModelStrTests(TestCase):
     def test_pending_point_grant_str_uses_login_when_pending(self):
         allocation = self._create_allocation()
         grant = PendingPointGrant.objects.create(
-            github_login="git-user",
+            platform="github",
+            actor_login="git-user",
             email="user@example.com",
             amount=2000,
             point_type=PointType.GIFT,
@@ -375,7 +376,8 @@ class ModelStrTests(TestCase):
     def test_pending_point_grant_str_falls_back_to_email_and_claimed(self):
         allocation = self._create_allocation()
         grant = PendingPointGrant.objects.create(
-            github_login="",
+            platform="github",
+            actor_login="",
             email="no-login@example.com",
             amount=1000,
             point_type=PointType.GIFT,

@@ -7,6 +7,7 @@ from django.db.models import Prefetch
 from social_django.models import UserSocialAuth
 
 from accounts.models import User
+from common.constants import CODE_HOSTING_PROVIDERS
 from points.allocation_services import AllocationService
 
 logger = logging.getLogger(__name__)
@@ -237,14 +238,16 @@ class Command(BaseCommand):
         )
 
     def _with_github_social_auth_prefetch(self, queryset):
-        """Prefetch github social auth records into list attribute."""
+        """Prefetch code hosting social auth records into list attribute."""
         return queryset.prefetch_related(
             Prefetch(
                 "social_auth",
-                queryset=UserSocialAuth.objects.filter(provider="github")
-                .only("id", "user_id", "uid")
+                queryset=UserSocialAuth.objects.filter(
+                    provider__in=CODE_HOSTING_PROVIDERS
+                )
+                .only("id", "user_id", "provider", "uid")
                 .order_by("id"),
-                to_attr=AllocationService.GITHUB_SOCIAL_AUTH_PREFETCH_ATTR,
+                to_attr=AllocationService.SOCIAL_AUTH_PREFETCH_ATTR,
             )
         )
 

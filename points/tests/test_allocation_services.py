@@ -50,16 +50,18 @@ class AllocationServiceTests(TestCase):
 
         self.mock_contributions = [
             {
-                "github_id": "123456",
-                "github_login": self.user.username,
+                "platform": "GitHub",
+                "actor_id": "123456",
+                "actor_login": self.user.username,
                 "email": self.user.email,
                 "contribution_score": Decimal("100.0"),
                 "is_registered": True,
                 "user_id": self.user.id,
             },
             {
-                "github_id": "654321",
-                "github_login": "external-contributor",
+                "platform": "GitHub",
+                "actor_id": "654321",
+                "actor_login": "external-contributor",
                 "email": "external@example.com",
                 "contribution_score": Decimal("50.0"),
                 "is_registered": False,
@@ -107,7 +109,7 @@ class AllocationServiceTests(TestCase):
         )
 
     def test_preview_allocation_basic(self):
-        """Test basic allocation preview."""
+        """Test basic allocation preview returns contribution data only."""
         allocation = PointAllocation.objects.create(
             initiator_type=ContentType.objects.get_for_model(User),
             initiator_id=self.user.id,
@@ -123,13 +125,14 @@ class AllocationServiceTests(TestCase):
         # 应该返回一些贡献者
         self.assertTrue(len(preview) > 0)
 
-        # 检查数据结构
+        # 检查数据结构 - preview 仅返回原始贡献度数据
         for item in preview:
-            self.assertIn("github_login", item)
+            self.assertIn("actor_login", item)
             self.assertIn("contribution_score", item)
-            self.assertIn("calculated_points", item)
-            self.assertIn("adjusted_points", item)
             self.assertIn("is_registered", item)
+            # preview 不再包含 calculated_points 和 adjusted_points
+            self.assertNotIn("calculated_points", item)
+            self.assertNotIn("adjusted_points", item)
 
     def test_preview_allocation_raises_when_contribution_data_is_unavailable(self):
         """Test contribution backend failures propagate as structured availability errors."""
@@ -154,64 +157,54 @@ class AllocationServiceTests(TestCase):
         ):
             AllocationService.preview_allocation(allocation)
 
-    def test_preview_allocation_with_adjustment_ratio(self):
-        """Test allocation preview with global adjustment ratio."""
+    def test_preview_allocation_ignores_adjustment_ratio(self):
+        """Test preview no longer applies adjustment ratio - returns raw scores."""
         allocation = PointAllocation.objects.create(
             initiator_type=ContentType.objects.get_for_model(User),
             initiator_id=self.user.id,
             source_pool=self.source_pool,
-            total_amount=500000,  # 使用足够大的总额避免触发缩放
+            total_amount=500000,
             project_scope={"tags": ["test-repo"], "operation": "AND"},
             start_month=date(2024, 1, 1),
             end_month=date(2024, 12, 1),
-            adjustment_ratio=Decimal("0.5"),  # 减半
+            adjustment_ratio=Decimal("0.5"),
         )
 
         preview = AllocationService.preview_allocation(allocation)
 
-        # 检查调整比例是否生效（至少一个贡献者的比例应该正确）
+        # Preview 不再应用调整比例，仅返回原始 contribution_score
         for item in preview:
-            # 如果没有单独调整，全局比例应该生效
-            if (
-                str(item.get("user_id") or item["github_login"])
-                not in allocation.individual_adjustments
-            ):
-                expected_adjusted = int(item["calculated_points"] * 0.5)
-                self.assertEqual(item["adjusted_points"], expected_adjusted)
+            self.assertIn("contribution_score", item)
+            self.assertNotIn("calculated_points", item)
+            self.assertNotIn("adjusted_points", item)
 
-    def test_preview_allocation_with_individual_adjustments(self):
-        """Test allocation preview with individual adjustments."""
-        # 使用用户ID作为key（因为是已注册用户）
+    def test_preview_allocation_ignores_individual_adjustments(self):
+        """Test preview no longer applies individual adjustments."""
         allocation = PointAllocation.objects.create(
             initiator_type=ContentType.objects.get_for_model(User),
             initiator_id=self.user.id,
             source_pool=self.source_pool,
-            total_amount=500000,  # 使用足够大的总额避免触发缩放
+            total_amount=500000,
             project_scope={"tags": ["test-repo"], "operation": "AND"},
             start_month=date(2024, 1, 1),
             end_month=date(2024, 12, 1),
-            individual_adjustments={str(self.user.id): 10000},  # 用user_id作为key
+            individual_adjustments={str(self.user.id): 10000},
         )
 
         preview = AllocationService.preview_allocation(allocation)
 
-        # 检查单独调整是否生效
-        found_adjusted = False
+        # Preview 不再应用单独调整，仅返回原始数据
         for item in preview:
-            if item.get("user_id") == self.user.id:
-                self.assertEqual(item["adjusted_points"], 10000)
-                found_adjusted = True
-                break
+            self.assertNotIn("adjusted_points", item)
+            self.assertIn("contribution_score", item)
 
-        self.assertTrue(found_adjusted, "未找到被单独调整的用户")
-
-    def test_preview_allocation_exceeds_total_amount(self):
-        """Test allocation preview when total exceeds limit."""
+    def test_preview_allocation_no_longer_scales_to_total_amount(self):
+        """Test preview does not scale results - returns raw contribution scores."""
         allocation = PointAllocation.objects.create(
             initiator_type=ContentType.objects.get_for_model(User),
             initiator_id=self.user.id,
             source_pool=self.source_pool,
-            total_amount=1000,  # 设置一个很小的总额
+            total_amount=1000,
             project_scope={"tags": ["test-repo"], "operation": "AND"},
             start_month=date(2024, 1, 1),
             end_month=date(2024, 12, 1),
@@ -219,9 +212,10 @@ class AllocationServiceTests(TestCase):
 
         preview = AllocationService.preview_allocation(allocation)
 
-        # 检查总额是否被缩放到精确命中限制
-        total_points = sum(item["adjusted_points"] for item in preview)
-        self.assertEqual(total_points, allocation.total_amount)
+        # Preview 不再缩放，仅返回原始 contribution_score
+        for item in preview:
+            self.assertNotIn("adjusted_points", item)
+            self.assertIn("contribution_score", item)
 
     def test_execute_allocation_to_registered_users(self):
         """Test executing allocation to registered users."""
@@ -235,14 +229,38 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
 
+        allocations_data = [
+            {
+                "platform": "GitHub",
+                "actor_id": "123456",
+                "actor_login": self.user.username,
+                "email": self.user.email,
+                "contribution_score": 100.0,
+                "is_registered": True,
+                "user_id": self.user.id,
+                "amount": 30000,
+            },
+            {
+                "platform": "GitHub",
+                "actor_id": "654321",
+                "actor_login": "external-contributor",
+                "email": "external@example.com",
+                "contribution_score": 50.0,
+                "is_registered": False,
+                "user_id": None,
+                "amount": 20000,
+            },
+        ]
+
         initial_remaining = self.source_pool.remaining_amount
-        result = AllocationService.execute_allocation(allocation)
+        result = AllocationService.execute_allocation(allocation, allocations_data)
 
         # 检查执行结果
         self.assertIn("success", result)
         self.assertIn("pending", result)
         self.assertIn("failed", result)
         self.assertIn("total_points", result)
+        self.assertEqual(result["total_points"], 50000)
 
         # 检查分配记录状态
         allocation.refresh_from_db()
@@ -269,7 +287,30 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
 
-        result = AllocationService.execute_allocation(allocation)
+        allocations_data = [
+            {
+                "platform": "GitHub",
+                "actor_id": "123456",
+                "actor_login": self.user.username,
+                "email": self.user.email,
+                "contribution_score": 100.0,
+                "is_registered": True,
+                "user_id": self.user.id,
+                "amount": 30000,
+            },
+            {
+                "platform": "GitHub",
+                "actor_id": "654321",
+                "actor_login": "external-contributor",
+                "email": "external@example.com",
+                "contribution_score": 50.0,
+                "is_registered": False,
+                "user_id": None,
+                "amount": 20000,
+            },
+        ]
+
+        result = AllocationService.execute_allocation(allocation, allocations_data)
 
         # 检查是否创建了待领取记录
         pending_grants = PendingPointGrant.objects.filter(
@@ -277,9 +318,16 @@ class AllocationServiceTests(TestCase):
         )
         self.assertTrue(pending_grants.exists())
         self.assertEqual(pending_grants.count(), result["pending"])
+        self.assertEqual(pending_grants.first().amount, 20000)
 
     def test_claim_pending_points(self):
         """Test claiming pending points."""
+        # 创建新用户并绑定社交账号（先于待领取记录创建，避免信号自动认领）
+        new_user = User.objects.create_user(
+            username="newuser", email="newuser@example.com"
+        )
+        UserSocialAuth.objects.create(user=new_user, provider="github", uid="123456")
+
         # 创建待领取记录
         allocation = PointAllocation.objects.create(
             initiator_type=ContentType.objects.get_for_model(User),
@@ -292,8 +340,9 @@ class AllocationServiceTests(TestCase):
         )
 
         pending_grant = PendingPointGrant.objects.create(
-            github_id="123456",
-            github_login="newuser",
+            platform="github",
+            actor_id="123456",
+            actor_login="newuser",
             email="newuser@example.com",
             amount=5000,
             point_type=PointType.GIFT,
@@ -301,11 +350,6 @@ class AllocationServiceTests(TestCase):
             granter_type=ContentType.objects.get_for_model(User),
             granter_id=self.user.id,
             allocation=allocation,
-        )
-
-        # 创建新用户并领取
-        new_user = User.objects.create_user(
-            username="newuser", email="newuser@example.com"
         )
 
         result = AllocationService.claim_pending_points(new_user)
@@ -333,8 +377,9 @@ class AllocationServiceTests(TestCase):
         )
 
         pending_grant = PendingPointGrant.objects.create(
-            github_id="123456",
-            github_login="race-user",
+            platform="github",
+            actor_id="123456",
+            actor_login="race-user",
             email="race-user@example.com",
             amount=4200,
             point_type=PointType.GIFT,
@@ -370,6 +415,13 @@ class AllocationServiceTests(TestCase):
 
     def test_claim_pending_points_rolls_back_claim_flag_on_grant_failure(self):
         """Test claim flag is rolled back if grant_points fails inside transaction."""
+        # 先创建用户和 social_auth，避免信号自动认领
+        claimant = User.objects.create_user(
+            username="rollback-user",
+            email="rollback-user@example.com",
+        )
+        UserSocialAuth.objects.create(user=claimant, provider="github", uid="123456")
+
         allocation = PointAllocation.objects.create(
             initiator_type=ContentType.objects.get_for_model(User),
             initiator_id=self.user.id,
@@ -381,8 +433,9 @@ class AllocationServiceTests(TestCase):
         )
 
         pending_grant = PendingPointGrant.objects.create(
-            github_id="123456",
-            github_login="rollback-user",
+            platform="github",
+            actor_id="123456",
+            actor_login="rollback-user",
             email="rollback-user@example.com",
             amount=2600,
             point_type=PointType.GIFT,
@@ -390,10 +443,6 @@ class AllocationServiceTests(TestCase):
             granter_type=ContentType.objects.get_for_model(User),
             granter_id=self.user.id,
             allocation=allocation,
-        )
-        claimant = User.objects.create_user(
-            username="rollback-user",
-            email="rollback-user@example.com",
         )
 
         with (
@@ -443,10 +492,12 @@ class AllocationServiceTests(TestCase):
             username="continued-claim-user",
             email="continued-claim@example.com",
         )
+        UserSocialAuth.objects.create(user=claimant, provider="github", uid="cont-uid")
         for amount in (1000, 1800):
             PendingPointGrant.objects.create(
-                github_id="",
-                github_login=claimant.username,
+                platform="github",
+                actor_id="cont-uid",
+                actor_login=claimant.username,
                 email=claimant.email,
                 amount=amount,
                 point_type=PointType.GIFT,
@@ -477,31 +528,38 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
 
+        UserSocialAuth.objects.create(
+            user=self.user, provider="github", uid="777888"
+        )
+
         PendingPointGrant.objects.create(
-            github_id="",
-            github_login=self.user.username,
+            platform="github",
+            actor_id="777888",
+            actor_login=self.user.username,
             email="",
             amount=3000,
             point_type=PointType.GIFT,
-            reason="按用户名匹配",
+            reason="按 actor_id 匹配",
             granter_type=ContentType.objects.get_for_model(User),
             granter_id=self.user.id,
             allocation=allocation,
         )
         PendingPointGrant.objects.create(
-            github_id="",
-            github_login="",
+            platform="github",
+            actor_id="",
+            actor_login="",
             email=self.user.email,
             amount=2000,
             point_type=PointType.GIFT,
-            reason="按邮箱匹配",
+            reason="仅邮箱匹配（已下线兜底，不应被认领）",
             granter_type=ContentType.objects.get_for_model(User),
             granter_id=self.user.id,
             allocation=allocation,
         )
         PendingPointGrant.objects.create(
-            github_id="",
-            github_login="other-user",
+            platform="github",
+            actor_id="",
+            actor_login="other-user",
             email="other@example.com",
             amount=9999,
             point_type=PointType.GIFT,
@@ -513,8 +571,8 @@ class AllocationServiceTests(TestCase):
 
         summary = AllocationService.get_claimable_pending_points_summary(self.user)
 
-        self.assertEqual(summary["claimable_count"], 2)
-        self.assertEqual(summary["total_amount"], 5000)
+        self.assertEqual(summary["claimable_count"], 1)
+        self.assertEqual(summary["total_amount"], 3000)
 
     def test_claim_pending_points_ignores_empty_identifiers(self):
         """Test empty user identifiers will not match all blank pending grants."""
@@ -529,8 +587,9 @@ class AllocationServiceTests(TestCase):
         )
 
         pending_grant = PendingPointGrant.objects.create(
-            github_id="",
-            github_login="",
+            platform="github",
+            actor_id="",
+            actor_login="",
             email="",
             amount=3000,
             point_type=PointType.GIFT,
@@ -553,7 +612,7 @@ class AllocationServiceTests(TestCase):
         self.assertFalse(pending_grant.is_claimed)
 
     def test_build_pending_claim_query_uses_prefetched_github_social_auth(self):
-        """Test pending claim query uses prefetched GitHub social auth without DB query."""
+        """Test pending claim query uses prefetched social auth without DB query."""
         allocation = PointAllocation.objects.create(
             initiator_type=ContentType.objects.get_for_model(User),
             initiator_id=self.user.id,
@@ -570,17 +629,18 @@ class AllocationServiceTests(TestCase):
         )
         setattr(
             prefetched_user,
-            AllocationService.GITHUB_SOCIAL_AUTH_PREFETCH_ATTR,
-            [SimpleNamespace(uid="556677")],
+            AllocationService.SOCIAL_AUTH_PREFETCH_ATTR,
+            [SimpleNamespace(provider="github", uid="556677")],
         )
 
         PendingPointGrant.objects.create(
-            github_id="556677",
-            github_login="someone-else",
+            platform="github",
+            actor_id="556677",
+            actor_login="someone-else",
             email="someone-else@example.com",
             amount=2600,
             point_type=PointType.GIFT,
-            reason="按 github_id 匹配",
+            reason="按 actor_id 匹配",
             granter_type=ContentType.objects.get_for_model(User),
             granter_id=self.user.id,
             allocation=allocation,
@@ -592,7 +652,7 @@ class AllocationServiceTests(TestCase):
         self.assertEqual(PendingPointGrant.objects.filter(query).count(), 1)
 
     def test_build_pending_claim_query_matches_prefetched_uid_zero(self):
-        """Test prefetched github uid=0 is treated as a valid identifier."""
+        """Test prefetched uid=0 is treated as a valid identifier."""
         allocation = PointAllocation.objects.create(
             initiator_type=ContentType.objects.get_for_model(User),
             initiator_id=self.user.id,
@@ -609,17 +669,18 @@ class AllocationServiceTests(TestCase):
         )
         setattr(
             prefetched_user,
-            AllocationService.GITHUB_SOCIAL_AUTH_PREFETCH_ATTR,
-            [SimpleNamespace(uid=0)],
+            AllocationService.SOCIAL_AUTH_PREFETCH_ATTR,
+            [SimpleNamespace(provider="github", uid=0)],
         )
 
         PendingPointGrant.objects.create(
-            github_id="0",
-            github_login="someone-else",
+            platform="github",
+            actor_id="0",
+            actor_login="someone-else",
             email="someone-else@example.com",
             amount=1600,
             point_type=PointType.GIFT,
-            reason="按 github_id=0 匹配",
+            reason="按 actor_id=0 匹配",
             granter_type=ContentType.objects.get_for_model(User),
             granter_id=self.user.id,
             allocation=allocation,
@@ -643,8 +704,9 @@ class AllocationServiceTests(TestCase):
         )
 
         pending_grant = PendingPointGrant.objects.create(
-            github_id="",
-            github_login=self.user.username,
+            platform="github",
+            actor_id="",
+            actor_login=self.user.username,
             email=self.user.email,
             amount=1200,
             point_type=PointType.GIFT,
@@ -728,12 +790,12 @@ class AllocationServiceTests(TestCase):
         self.assertEqual(identifiers, ["repo", "123"])
 
     def test_filter_contributions_by_user_scope_matches_login_or_id(self):
-        """Test user scope matches either GitHub login or GitHub ID."""
+        """Test user scope matches either actor_login or actor_id."""
         allocation = SimpleNamespace(user_scope={"tags": ["scope"], "operation": "AND"})
         contributions = [
-            {"github_login": "alice", "github_id": "100"},
-            {"github_login": "bob", "github_id": "200"},
-            {"github_login": "charlie", "github_id": "300"},
+            {"actor_login": "alice", "actor_id": "100"},
+            {"actor_login": "bob", "actor_id": "200"},
+            {"actor_login": "charlie", "actor_id": "300"},
         ]
 
         with patch(
@@ -760,8 +822,8 @@ class AllocationServiceTests(TestCase):
         )
         contributions = [
             {
-                "github_login": "alice",
-                "github_id": "100",
+                "actor_login": "alice",
+                "actor_id": "100",
                 "email": "alice@example.com",
                 "contribution_score": Decimal("1.5"),
                 "is_registered": False,
@@ -795,8 +857,8 @@ class AllocationServiceTests(TestCase):
         )
         contributions = [
             {
-                "github_login": "alice",
-                "github_id": "100",
+                "actor_login": "alice",
+                "actor_id": "100",
                 "email": "alice@example.com",
                 "contribution_score": Decimal("0"),
                 "is_registered": False,
@@ -863,7 +925,7 @@ class AllocationServiceTests(TestCase):
         ):
             AllocationService._scale_results_to_total_amount(results, total_amount=5)
 
-    def test_execute_allocation_marks_failed_when_preview_raises(self):
+    def test_execute_allocation_marks_failed_when_apply_raises(self):
         """Test execute_allocation marks allocation failed on unexpected errors."""
         allocation = PointAllocation.objects.create(
             initiator_type=ContentType.objects.get_for_model(User),
@@ -875,12 +937,25 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
 
+        allocations_data = [
+            {
+                "platform": "GitHub",
+                "actor_id": "123456",
+                "actor_login": self.user.username,
+                "email": self.user.email,
+                "contribution_score": 100.0,
+                "is_registered": True,
+                "user_id": self.user.id,
+                "amount": 50000,
+            },
+        ]
+
         with (
             self.assertRaises(RuntimeError),
             patch.object(
                 AllocationService,
-                "preview_allocation",
-                side_effect=RuntimeError("preview failed"),
+                "_apply_allocation_items",
+                side_effect=RuntimeError("apply failed"),
             ),
             patch.object(
                 AllocationService,
@@ -888,7 +963,7 @@ class AllocationServiceTests(TestCase):
                 wraps=AllocationService._mark_allocation_failed,
             ) as mark_failed_mock,
         ):
-            AllocationService.execute_allocation(allocation)
+            AllocationService.execute_allocation(allocation, allocations_data)
 
         mark_failed_mock.assert_called_once_with(allocation)
 
@@ -898,7 +973,7 @@ class AllocationServiceTests(TestCase):
             initiator_type=ContentType.objects.get_for_model(User),
             initiator_id=self.user.id,
             source_pool=self.source_pool,
-            total_amount=50000,
+            total_amount=600,
             project_scope={"tags": ["test-repo"], "operation": "AND"},
             start_month=date(2024, 1, 1),
             end_month=date(2024, 12, 1),
@@ -907,26 +982,26 @@ class AllocationServiceTests(TestCase):
             username="late-failure-user",
             email="late-failure@example.com",
         )
-        preview = [
+        allocations_data = [
             {
-                "github_login": recipient.username,
-                "github_id": "1001",
+                "platform": "GitHub",
+                "actor_login": recipient.username,
+                "actor_id": "1001",
                 "email": recipient.email,
-                "contribution_score": Decimal("1"),
-                "calculated_points": 300,
-                "adjusted_points": 300,
+                "contribution_score": 1.0,
                 "is_registered": True,
                 "user_id": recipient.id,
+                "amount": 300,
             },
             {
-                "github_login": "pending-late-failure",
-                "github_id": "1002",
+                "platform": "GitHub",
+                "actor_login": "pending-late-failure",
+                "actor_id": "1002",
                 "email": "pending@example.com",
-                "contribution_score": Decimal("1"),
-                "calculated_points": 300,
-                "adjusted_points": 300,
+                "contribution_score": 1.0,
                 "is_registered": False,
                 "user_id": None,
+                "amount": 300,
             },
         ]
         initial_balance = get_balance(recipient, PointType.GIFT)
@@ -936,16 +1011,11 @@ class AllocationServiceTests(TestCase):
             self.assertRaises(RuntimeError),
             patch.object(
                 AllocationService,
-                "preview_allocation",
-                return_value=preview,
-            ),
-            patch.object(
-                AllocationService,
                 "_deduct_source_pool",
                 side_effect=RuntimeError("deduct failed"),
             ),
         ):
-            AllocationService.execute_allocation(allocation)
+            AllocationService.execute_allocation(allocation, allocations_data)
 
         allocation.refresh_from_db()
         self.assertEqual(allocation.status, "failed")
@@ -962,30 +1032,27 @@ class AllocationServiceTests(TestCase):
             initiator_type=ContentType.objects.get_for_model(User),
             initiator_id=self.user.id,
             source_pool=self.source_pool,
-            total_amount=50000,
+            total_amount=300,
             project_scope={"tags": ["test-repo"], "operation": "AND"},
             start_month=date(2024, 1, 1),
             end_month=date(2024, 12, 1),
         )
-        preview = [
+        allocations_data = [
             {
-                "github_login": self.user.username,
-                "github_id": "123456",
+                "actor_login": self.user.username,
+                "actor_id": "123456",
+                "platform": "GitHub",
                 "email": self.user.email,
-                "contribution_score": Decimal("1"),
-                "calculated_points": 300,
-                "adjusted_points": 300,
+                "contribution_score": 1.0,
                 "is_registered": True,
                 "user_id": self.user.id,
+                "amount": 300,
             }
         ]
 
-        with patch.object(
-            AllocationService, "preview_allocation", return_value=preview
-        ):
-            AllocationService.execute_allocation(allocation)
-            with self.assertRaises(RuntimeError):
-                AllocationService.execute_allocation(allocation)
+        AllocationService.execute_allocation(allocation, allocations_data)
+        with self.assertRaises(RuntimeError):
+            AllocationService.execute_allocation(allocation, allocations_data)
 
     def test_mark_allocation_failed_only_transitions_from_executing(self):
         """Failed marking should not overwrite non-executing allocation states."""
@@ -1101,8 +1168,9 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
         PendingPointGrant.objects.create(
-            github_id="",
-            github_login="",
+            platform="github",
+            actor_id="",
+            actor_login="",
             email="",
             amount=3000,
             point_type=PointType.GIFT,
@@ -1112,16 +1180,21 @@ class AllocationServiceTests(TestCase):
             allocation=allocation,
         )
         user = SimpleNamespace(username=" ", email=" ")
+        setattr(user, AllocationService.SOCIAL_AUTH_PREFETCH_ATTR, [])
 
-        with patch.object(
-            AllocationService, "_get_github_social_auth", return_value=None
-        ):
-            query = AllocationService._build_pending_claim_query(user)
+        query = AllocationService._build_pending_claim_query(user)
 
         self.assertEqual(PendingPointGrant.objects.filter(query).count(), 0)
 
     def test_claim_pending_points_retries_failed_claim_once(self):
         """A grant that fails once should remain claimable and succeed exactly once later."""
+        # 先创建用户和 social_auth，避免信号自动认领
+        claimant = User.objects.create_user(
+            username="retry-user",
+            email="retry-user@example.com",
+        )
+        UserSocialAuth.objects.create(user=claimant, provider="github", uid="retry-uid")
+
         allocation = PointAllocation.objects.create(
             initiator_type=ContentType.objects.get_for_model(User),
             initiator_id=self.user.id,
@@ -1132,8 +1205,9 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
         pending_grant = PendingPointGrant.objects.create(
-            github_id="",
-            github_login="retry-user",
+            platform="github",
+            actor_id="retry-uid",
+            actor_login="retry-user",
             email="retry-user@example.com",
             amount=3000,
             point_type=PointType.GIFT,
@@ -1141,10 +1215,6 @@ class AllocationServiceTests(TestCase):
             granter_type=ContentType.objects.get_for_model(User),
             granter_id=self.user.id,
             allocation=allocation,
-        )
-        claimant = User.objects.create_user(
-            username="retry-user",
-            email="retry-user@example.com",
         )
 
         with (
@@ -1178,9 +1248,13 @@ class AllocationServiceTests(TestCase):
             start_month=date(2024, 1, 1),
             end_month=date(2024, 12, 1),
         )
+        UserSocialAuth.objects.create(
+            user=self.user, provider="github", uid="expire-uid"
+        )
         PendingPointGrant.objects.create(
-            github_id="",
-            github_login=self.user.username,
+            platform="github",
+            actor_id="expire-uid",
+            actor_login=self.user.username,
             email=self.user.email,
             amount=1000,
             point_type=PointType.GIFT,
@@ -1191,8 +1265,9 @@ class AllocationServiceTests(TestCase):
             expires_at=timezone.now() - timezone.timedelta(days=1),
         )
         PendingPointGrant.objects.create(
-            github_id="",
-            github_login=self.user.username,
+            platform="github",
+            actor_id="expire-uid",
+            actor_login=self.user.username,
             email=self.user.email,
             amount=2000,
             point_type=PointType.GIFT,
@@ -1209,6 +1284,13 @@ class AllocationServiceTests(TestCase):
 
     def test_claim_pending_points_ignores_expired_grants(self):
         """Expired pending grants should not be claimed."""
+        # 先创建用户和 social_auth，避免信号自动认领
+        claimant = User.objects.create_user(
+            username="expired-user",
+            email="expired-user@example.com",
+        )
+        UserSocialAuth.objects.create(user=claimant, provider="github", uid="exp-uid")
+
         allocation = PointAllocation.objects.create(
             initiator_type=ContentType.objects.get_for_model(User),
             initiator_id=self.user.id,
@@ -1219,8 +1301,9 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
         expired_grant = PendingPointGrant.objects.create(
-            github_id="",
-            github_login="expired-user",
+            platform="github",
+            actor_id="exp-uid",
+            actor_login="expired-user",
             email="expired-user@example.com",
             amount=1000,
             point_type=PointType.GIFT,
@@ -1231,8 +1314,9 @@ class AllocationServiceTests(TestCase):
             expires_at=timezone.now() - timezone.timedelta(days=1),
         )
         active_grant = PendingPointGrant.objects.create(
-            github_id="",
-            github_login="expired-user",
+            platform="github",
+            actor_id="exp-uid",
+            actor_login="expired-user",
             email="expired-user@example.com",
             amount=2000,
             point_type=PointType.GIFT,
@@ -1241,10 +1325,6 @@ class AllocationServiceTests(TestCase):
             granter_id=self.user.id,
             allocation=allocation,
             expires_at=timezone.now() + timezone.timedelta(days=1),
-        )
-        claimant = User.objects.create_user(
-            username="expired-user",
-            email="expired-user@example.com",
         )
 
         result = AllocationService.claim_pending_points(claimant)
@@ -1288,8 +1368,9 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
         first_grant = PendingPointGrant.objects.create(
-            github_id="",
-            github_login=self.user.username,
+            platform="github",
+            actor_id="",
+            actor_login=self.user.username,
             email=self.user.email,
             amount=1000,
             point_type=PointType.GIFT,
@@ -1302,8 +1383,9 @@ class AllocationServiceTests(TestCase):
             claimed_at=timezone.now(),
         )
         PendingPointGrant.objects.create(
-            github_id="",
-            github_login=self.user.username,
+            platform="github",
+            actor_id="",
+            actor_login=self.user.username,
             email=self.user.email,
             amount=1200,
             point_type=PointType.GIFT,
@@ -1335,8 +1417,9 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
         grant = PendingPointGrant.objects.create(
-            github_id="",
-            github_login=self.user.username,
+            platform="github",
+            actor_id="",
+            actor_login=self.user.username,
             email=self.user.email,
             amount=1500,
             point_type=PointType.GIFT,
@@ -1379,8 +1462,9 @@ class AllocationServiceTests(TestCase):
             reason="rollback source",
         )
         first_grant = PendingPointGrant.objects.create(
-            github_id="",
-            github_login=claimant.username,
+            platform="github",
+            actor_id="",
+            actor_login=claimant.username,
             email=claimant.email,
             amount=200,
             point_type=PointType.GIFT,
@@ -1393,8 +1477,9 @@ class AllocationServiceTests(TestCase):
             claimed_at=timezone.now(),
         )
         second_grant = PendingPointGrant.objects.create(
-            github_id="",
-            github_login=claimant.username,
+            platform="github",
+            actor_id="",
+            actor_login=claimant.username,
             email=claimant.email,
             amount=300,
             point_type=PointType.GIFT,
@@ -1551,13 +1636,17 @@ class AllocationServiceThinIntegrationTests(TestCase):
             end_month=202401,
         )
         self.assertEqual(len(preview), 2)
-        by_login = {item["github_login"]: item for item in preview}
+        by_login = {item["actor_login"]: item for item in preview}
         self.assertTrue(by_login[registered.username]["is_registered"])
         self.assertEqual(by_login[registered.username]["user_id"], registered.id)
         self.assertFalse(by_login["pending-thin"]["is_registered"])
         self.assertIsNone(by_login["pending-thin"]["user_id"])
-        self.assertEqual(by_login[registered.username]["adjusted_points"], 600)
-        self.assertEqual(by_login["pending-thin"]["adjusted_points"], 300)
+        # Preview 不再返回 calculated_points/adjusted_points
+        self.assertNotIn("adjusted_points", by_login[registered.username])
+        self.assertNotIn("calculated_points", by_login[registered.username])
+        # 仅返回原始 contribution_score
+        self.assertIn("contribution_score", by_login[registered.username])
+        self.assertIn("contribution_score", by_login["pending-thin"])
 
     def test_execute_allocation_handles_registered_and_pending_recipients(self):
         """Execute should grant registered users and create pending grants together."""
@@ -1568,24 +1657,30 @@ class AllocationServiceThinIntegrationTests(TestCase):
         )
         initial_source_remaining = self.cash_source_pool.remaining_amount
 
-        with patch(
-            "chdb.services.query_contributions",
-            return_value=[
-                {
-                    "platform": "GitHub",
-                    "actor_id": "9002",
-                    "actor_login": registered.username,
-                    "contribution_score": 2.0,
-                },
-                {
-                    "platform": "GitHub",
-                    "actor_id": "9003",
-                    "actor_login": "pending-recipient-thin",
-                    "contribution_score": 1.0,
-                },
-            ],
-        ):
-            result = AllocationService.execute_allocation(allocation)
+        allocations_data = [
+            {
+                "platform": "GitHub",
+                "actor_id": "9002",
+                "actor_login": registered.username,
+                "email": registered.email,
+                "contribution_score": 2.0,
+                "is_registered": True,
+                "user_id": registered.id,
+                "amount": 600,
+            },
+            {
+                "platform": "GitHub",
+                "actor_id": "9003",
+                "actor_login": "pending-recipient-thin",
+                "email": "",
+                "contribution_score": 1.0,
+                "is_registered": False,
+                "user_id": None,
+                "amount": 300,
+            },
+        ]
+
+        result = AllocationService.execute_allocation(allocation, allocations_data)
 
         self.assertEqual(
             result,
@@ -1600,7 +1695,7 @@ class AllocationServiceThinIntegrationTests(TestCase):
         pending_grants = PendingPointGrant.objects.filter(
             allocation=allocation,
             is_claimed=False,
-            github_login="pending-recipient-thin",
+            actor_login="pending-recipient-thin",
         )
         self.assertEqual(pending_grants.count(), 1)
         self.assertEqual(pending_grants.first().amount, 300)
@@ -1626,53 +1721,60 @@ class AllocationServiceThinIntegrationTests(TestCase):
 
         matching_grants = [
             PendingPointGrant.objects.create(
-                github_id="claim-uid-1",
-                github_login="someone-else",
+                platform="github",
+                actor_id="claim-uid-1",
+                actor_login="someone-else",
                 email="x@example.com",
                 amount=100,
                 point_type=PointType.GIFT,
-                reason="match by github_id",
+                reason="match by actor_id",
                 granter_type=self.user_ct,
                 granter_id=self.initiator.id,
                 allocation=allocation,
             ),
             PendingPointGrant.objects.create(
-                github_id="",
-                github_login=claimant.username,
-                email="",
-                amount=200,
-                point_type=PointType.GIFT,
-                reason="match by github_login",
-                granter_type=self.user_ct,
-                granter_id=self.initiator.id,
-                allocation=allocation,
-            ),
-            PendingPointGrant.objects.create(
-                github_id="",
-                github_login="",
-                email=claimant.email,
-                amount=300,
-                point_type=PointType.GIFT,
-                reason="match by email",
-                granter_type=self.user_ct,
-                granter_id=self.initiator.id,
-                allocation=allocation,
-            ),
-            PendingPointGrant.objects.create(
-                github_id="claim-uid-1",
-                github_login=claimant.username,
+                platform="github",
+                actor_id="claim-uid-1",
+                actor_login=claimant.username,
                 email=claimant.email,
                 amount=400,
                 point_type=PointType.GIFT,
-                reason="match by all identifiers once",
+                reason="match by actor_id (all identifiers present)",
+                granter_type=self.user_ct,
+                granter_id=self.initiator.id,
+                allocation=allocation,
+            ),
+        ]
+        email_only_grants = [
+            PendingPointGrant.objects.create(
+                platform="github",
+                actor_id="",
+                actor_login=claimant.username,
+                email=claimant.email,
+                amount=200,
+                point_type=PointType.GIFT,
+                reason="email only (no longer matches after email fallback removal)",
+                granter_type=self.user_ct,
+                granter_id=self.initiator.id,
+                allocation=allocation,
+            ),
+            PendingPointGrant.objects.create(
+                platform="github",
+                actor_id="",
+                actor_login="",
+                email=claimant.email,
+                amount=300,
+                point_type=PointType.GIFT,
+                reason="email only",
                 granter_type=self.user_ct,
                 granter_id=self.initiator.id,
                 allocation=allocation,
             ),
         ]
         non_matching = PendingPointGrant.objects.create(
-            github_id="other-uid",
-            github_login="other-login",
+            platform="github",
+            actor_id="other-uid",
+            actor_login="other-login",
             email="other@example.com",
             amount=999,
             point_type=PointType.GIFT,
@@ -1684,13 +1786,16 @@ class AllocationServiceThinIntegrationTests(TestCase):
 
         result = AllocationService.claim_pending_points(claimant)
 
-        self.assertEqual(result["claimed_count"], 4)
-        self.assertEqual(result["total_amount"], 1000)
-        self.assertEqual(get_balance(claimant, PointType.GIFT), 1000)
+        self.assertEqual(result["claimed_count"], 2)
+        self.assertEqual(result["total_amount"], 500)
+        self.assertEqual(get_balance(claimant, PointType.GIFT), 500)
         for grant in matching_grants:
             grant.refresh_from_db()
             self.assertTrue(grant.is_claimed)
             self.assertEqual(grant.claimed_by, claimant)
+        for grant in email_only_grants:
+            grant.refresh_from_db()
+            self.assertFalse(grant.is_claimed)
         non_matching.refresh_from_db()
         self.assertFalse(non_matching.is_claimed)
 
@@ -1724,8 +1829,9 @@ class AllocationServiceThinIntegrationTests(TestCase):
 
         grants = [
             PendingPointGrant.objects.create(
-                github_id="",
-                github_login=claimant.username,
+                platform="github",
+                actor_id="",
+                actor_login=claimant.username,
                 email=claimant.email,
                 amount=200,
                 point_type=PointType.CASH,
@@ -1738,8 +1844,9 @@ class AllocationServiceThinIntegrationTests(TestCase):
                 claimed_at=timezone.now(),
             ),
             PendingPointGrant.objects.create(
-                github_id="",
-                github_login=claimant.username,
+                platform="github",
+                actor_id="",
+                actor_login=claimant.username,
                 email=claimant.email,
                 amount=300,
                 point_type=PointType.GIFT,
@@ -1753,8 +1860,9 @@ class AllocationServiceThinIntegrationTests(TestCase):
                 claimed_at=timezone.now(),
             ),
             PendingPointGrant.objects.create(
-                github_id="",
-                github_login=claimant.username,
+                platform="github",
+                actor_id="",
+                actor_login=claimant.username,
                 email=claimant.email,
                 amount=400,
                 point_type=PointType.GIFT,

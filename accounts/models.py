@@ -451,3 +451,64 @@ class AccountMergeLog(models.Model):
     def __str__(self):
         """Return readable summary."""
         return f"{self.table_name}: +{self.migrated_count}/~{self.conflict_count}"
+
+
+class WithdrawalAccount(models.Model):
+    """提现账号 - 支持中国境内和中国以外两种类型."""
+
+    ACCOUNT_TYPE_CHOICES = [
+        ("domestic", "中国境内"),
+        ("international", "中国以外"),
+    ]
+
+    CURRENCY_CHOICES = [
+        ("USD", "USD"),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="withdrawal_accounts",
+        verbose_name="用户",
+    )
+    account_type = models.CharField(
+        max_length=20, choices=ACCOUNT_TYPE_CHOICES, verbose_name="账号类型"
+    )
+
+    # 共用字段
+    real_name = models.CharField(max_length=100, verbose_name="姓名")
+
+    # 中国境内字段
+    id_card = models.CharField(
+        max_length=18, blank=True, default="", verbose_name="身份证号"
+    )
+    phone = models.CharField(
+        max_length=20, blank=True, default="", verbose_name="手机号"
+    )
+    bank_card = models.CharField(
+        max_length=50, blank=True, default="", verbose_name="银行卡号"
+    )
+
+    # 中国以外字段
+    currency = models.CharField(
+        max_length=10, blank=True, default="", choices=CURRENCY_CHOICES, verbose_name="币种"
+    )
+    swift_account = models.CharField(
+        max_length=100, blank=True, default="", verbose_name="SWIFT 账号"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        """Meta configuration for WithdrawalAccount."""
+
+        ordering = ["-created_at"]
+        verbose_name = "提现账号"
+        verbose_name_plural = verbose_name
+        indexes = [
+            models.Index(fields=["user", "account_type"]),
+        ]
+
+    def __str__(self):
+        """Return withdrawal account string representation."""
+        return f"{self.user.username} - {self.get_account_type_display()} - {self.real_name}"

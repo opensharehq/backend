@@ -48,7 +48,7 @@ mutmut-results:
     @uv run --python 3.12 --with mutmut --with pytest --with pytest-django mutmut results
 
 docker-build IMAGE='fullsite':
-    docker build --tag {{IMAGE}} .
+    docker build --network=host --tag {{IMAGE}} .
 
 docker-test IMAGE='fullsite': docker-build
-    docker run --rm --env-file .env.example {{IMAGE}} python manage.py test --parallel
+    docker run --network=host --rm --env-file .env.example {{IMAGE}} python manage.py test --parallel

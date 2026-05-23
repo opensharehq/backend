@@ -131,20 +131,19 @@ class PointsApiV1Tests(TestCase):
         self.assertIn("source_selector", user_gift_pool)
         self.assertEqual(user_gift_pool["source_selector"]["owner_type"], "user")
 
-        payload = {
+        # Preview request - simplified format without total_amount/adjustment_ratio
+        preview_payload = {
             "source_selector": user_gift_pool["source_selector"],
             "project_scope": {"tags": ["repo:test/example"], "operation": "AND"},
             "start_month": "2025-01-01",
             "end_month": "2025-01-01",
-            "total_amount": 300,
-            "adjustment_ratio": 1.0,
-            "individual_adjustments": {},
         }
 
         mocked_contributions = [
             {
-                "github_id": "123",
-                "github_login": self.other_user.username,
+                "platform": "GitHub",
+                "actor_id": "123",
+                "actor_login": self.other_user.username,
                 "email": self.other_user.email,
                 "contribution_score": Decimal("10.0"),
                 "is_registered": True,
@@ -158,20 +157,45 @@ class PointsApiV1Tests(TestCase):
         ):
             preview_response = self.client.post(
                 "/api/v1/points/allocations/preview",
-                payload,
+                preview_payload,
                 content_type="application/json",
                 **self.headers,
             )
             self.assertEqual(preview_response.status_code, 200)
-            self.assertEqual(preview_response.json()["total_points"], 300)
+            # New response format
+            self.assertIn("contribution_to_points_ratio", preview_response.json())
+            self.assertEqual(preview_response.json()["total_recipients"], 1)
+            self.assertIn("preview", preview_response.json())
             self.assertEqual(
                 preview_response.json()["source_selector"],
                 user_gift_pool["source_selector"],
             )
 
+            # Execute request - new format with allocations array
+            execute_payload = {
+                "source_selector": user_gift_pool["source_selector"],
+                "project_scope": {"tags": ["repo:test/example"], "operation": "AND"},
+                "start_month": "2025-01-01",
+                "end_month": "2025-01-01",
+                "adjustment_ratio": 1.0,
+                "total_amount": 300,
+                "allocations": [
+                    {
+                        "actor_id": "123",
+                        "actor_login": self.other_user.username,
+                        "platform": "GitHub",
+                        "email": self.other_user.email,
+                        "is_registered": True,
+                        "user_id": self.other_user.id,
+                        "contribution_score": 10.0,
+                        "amount": 300,
+                    }
+                ],
+            }
+
             execute_response = self.client.post(
                 "/api/v1/points/allocations",
-                payload,
+                execute_payload,
                 content_type="application/json",
                 **self.headers,
             )
@@ -254,9 +278,6 @@ class PointsApiV1Tests(TestCase):
             "project_scope": {"tags": ["repo:test/example"], "operation": "AND"},
             "start_month": "2025-01-01",
             "end_month": "2025-01-01",
-            "total_amount": 300,
-            "adjustment_ratio": 1.0,
-            "individual_adjustments": {},
         }
 
         response = self.client.post(
@@ -274,14 +295,8 @@ class PointsApiV1Tests(TestCase):
         )
         self.assertIsNone(response.json()["detail"])
 
-    @patch(
-        "points.allocation_services.ContributionService.get_contributions",
-        side_effect=ContributionDataUnavailableError(
-            "Contribution data is currently unavailable."
-        ),
-    )
-    def test_allocation_execute_rejects_unavailable_contribution_data(self, _mocked):
-        """Allocation execution should return the same stable 503 contract."""
+    def test_allocation_execute_rejects_mismatched_total_amount(self):
+        """Allocation execution should reject when sum of amounts != total_amount."""
         payload = {
             "source_selector": {
                 "owner_type": "user",
@@ -293,7 +308,17 @@ class PointsApiV1Tests(TestCase):
             "end_month": "2025-01-01",
             "total_amount": 300,
             "adjustment_ratio": 1.0,
-            "individual_adjustments": {},
+            "allocations": [
+                {
+                    "actor_id": "123",
+                    "actor_login": "someone",
+                    "platform": "GitHub",
+                    "email": "someone@example.com",
+                    "is_registered": False,
+                    "contribution_score": 10.0,
+                    "amount": 200,
+                }
+            ],
         }
 
         response = self.client.post(
@@ -303,12 +328,8 @@ class PointsApiV1Tests(TestCase):
             **self.headers,
         )
 
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["code"], "contribution_data_unavailable")
-        self.assertEqual(
-            response.json()["message"],
-            "Contribution data is currently unavailable.",
-        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["code"], "validation_error")
         self.assertEqual(PointAllocation.objects.count(), 0)
 
     def test_allocation_rejects_invalid_date_range(self):
@@ -322,9 +343,6 @@ class PointsApiV1Tests(TestCase):
             "project_scope": {"tags": ["repo:test/example"], "operation": "AND"},
             "start_month": "2025-02-01",
             "end_month": "2025-01-01",
-            "total_amount": 300,
-            "adjustment_ratio": 1.0,
-            "individual_adjustments": {},
         }
 
         response = self.client.post(
@@ -342,7 +360,7 @@ class PointsApiV1Tests(TestCase):
         create_response = self.client.post(
             f"/api/v1/points/organizations/{self.organization.slug}/withdrawals",
             {
-                "amount": 100,
+                "amount": 200,
                 "real_name": "Org Owner",
                 "phone": "13800138000",
                 "id_card": "11010519491231002X",

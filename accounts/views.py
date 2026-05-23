@@ -14,7 +14,7 @@ from django.contrib.auth import (
 )
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.tokens import default_token_generator
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.forms import inlineformset_factory
 from django.shortcuts import get_object_or_404, redirect, render
@@ -112,7 +112,12 @@ def sign_up_view(request):
             try:
                 user = form.save()
             except IntegrityError:
-                form.add_error("email", "该邮箱已被注册")
+                form.add_error(
+                    "email",
+                    DjangoValidationError(
+                        "该邮箱已被注册", code="email_already_registered"
+                    ),
+                )
             else:
                 login(
                     request,

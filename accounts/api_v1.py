@@ -8,8 +8,9 @@ from typing import Any
 from urllib.parse import urlencode
 
 from django.conf import settings
-from django.contrib.auth import get_user_model, logout
+from django.contrib.auth import get_user_model, login as django_login, logout
 from django.contrib.auth.tokens import default_token_generator
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
 from django.http import HttpRequest, HttpResponseRedirect
 from django.urls import reverse
@@ -69,6 +70,7 @@ SOCIAL_PROVIDERS = {
         "icon": "bi-github",
         "key": "SOCIAL_AUTH_GITHUB_KEY",
         "secret": "SOCIAL_AUTH_GITHUB_SECRET",
+        "profile_url_template": "https://github.com/{username}",
     },
     "google-oauth2": {
         "name": "Google",
@@ -81,24 +83,28 @@ SOCIAL_PROVIDERS = {
         "icon": "bi-git",
         "key": "SOCIAL_AUTH_BITBUCKET_OAUTH2_KEY",
         "secret": "SOCIAL_AUTH_BITBUCKET_OAUTH2_SECRET",
+        "profile_url_template": "https://bitbucket.org/{username}",
     },
     "docker": {
         "name": "Docker",
         "icon": "bi-box-seam",
         "key": "SOCIAL_AUTH_DOCKER_KEY",
         "secret": "SOCIAL_AUTH_DOCKER_SECRET",
+        "profile_url_template": "https://hub.docker.com/u/{username}",
     },
     "facebook": {
         "name": "Facebook",
         "icon": "bi-facebook",
         "key": "SOCIAL_AUTH_FACEBOOK_KEY",
         "secret": "SOCIAL_AUTH_FACEBOOK_SECRET",
+        "profile_url_template": "https://facebook.com/{username}",
     },
     "gitlab": {
         "name": "GitLab",
         "icon": "bi-gitlab",
         "key": "SOCIAL_AUTH_GITLAB_KEY",
         "secret": "SOCIAL_AUTH_GITLAB_SECRET",
+        "profile_url_template": "https://gitlab.com/{username}",
     },
     "gitea": {
         "name": "Gitea",
@@ -111,18 +117,21 @@ SOCIAL_PROVIDERS = {
         "icon": "git-branch",
         "key": "SOCIAL_AUTH_GITEE_KEY",
         "secret": "SOCIAL_AUTH_GITEE_SECRET",
+        "profile_url_template": "https://gitee.com/{username}",
     },
     "linkedin-oauth2": {
         "name": "LinkedIn",
         "icon": "bi-linkedin",
         "key": "SOCIAL_AUTH_LINKEDIN_OAUTH2_KEY",
         "secret": "SOCIAL_AUTH_LINKEDIN_OAUTH2_SECRET",
+        "profile_url_template": "https://www.linkedin.com/in/{username}",
     },
     "twitter-oauth2": {
         "name": "Twitter",
         "icon": "bi-twitter-x",
         "key": "SOCIAL_AUTH_TWITTER_OAUTH2_KEY",
         "secret": "SOCIAL_AUTH_TWITTER_OAUTH2_SECRET",
+        "profile_url_template": "https://twitter.com/{username}",
     },
     "huggingface": {
         "name": "HuggingFace",
@@ -253,6 +262,8 @@ class SocialConnectionSchema(Schema):
     icon: str
     is_connected: bool
     uid: str | None = None
+    username: str | None = None
+    profile_url: str | None = None
     social_auth_id: int | None = None
 
 
@@ -294,6 +305,32 @@ def _configured_providers() -> list[tuple[str, dict[str, str]]]:
         if key and secret:
             providers.append((provider, provider_info))
     return providers
+
+
+def _extract_social_username(social_auth: Any) -> str | None:
+    """Return a human-readable login/username from social auth extra_data."""
+    extra = getattr(social_auth, "extra_data", None) or {}
+    for key in ("username", "login", "preferred_username", "screen_name"):
+        value = extra.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def _extract_social_profile_url(
+    social_auth: Any, provider_info: dict[str, str]
+) -> str | None:
+    """Resolve a best-effort profile URL for a social connection."""
+    extra = getattr(social_auth, "extra_data", None) or {}
+    for key in ("profile_url", "html_url", "profile", "url"):
+        value = extra.get(key)
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+    template = provider_info.get("profile_url_template")
+    username = _extract_social_username(social_auth)
+    if template and username:
+        return template.format(username=username)
+    return None
 
 
 def _get_provider_or_error(provider: str) -> dict[str, str]:
@@ -390,7 +427,12 @@ def register_endpoint(request: HttpRequest, payload: RegisterRequestSchema):
     try:
         user = form.save()
     except IntegrityError:
-        form.add_error("email", "该邮箱已被注册")
+        form.add_error(
+            "email",
+            DjangoValidationError(
+                "该邮箱已被注册", code="email_already_registered"
+            ),
+        )
         raise ApiError(
             "validation_error",
             422,
@@ -501,7 +543,12 @@ def change_email_endpoint(request: HttpRequest, payload: EmailChangeRequestSchem
     try:
         request.auth.save(update_fields=["email"])
     except IntegrityError:
-        form.add_error("email", "该邮箱已被其他用户使用")
+        form.add_error(
+            "email",
+            DjangoValidationError(
+                "该邮箱已被其他用户使用", code="email_already_in_use"
+            ),
+        )
         raise ApiError(
             "validation_error",
             422,
@@ -649,6 +696,12 @@ def social_connections_endpoint(request: HttpRequest):
                 icon=provider_info["icon"],
                 is_connected=social_auth is not None,
                 uid=str(social_auth.uid) if social_auth else None,
+                username=_extract_social_username(social_auth) if social_auth else None,
+                profile_url=(
+                    _extract_social_profile_url(social_auth, provider_info)
+                    if social_auth
+                    else None
+                ),
                 social_auth_id=social_auth.id if social_auth else None,
             )
         )
@@ -706,10 +759,35 @@ def disconnect_social_account_endpoint(
 
 
 @router.get("/social/{provider}/start")
-def social_start_endpoint(request: HttpRequest, provider: str):
-    """Start a social-login flow that hands off to the frontend callback."""
+def social_start_endpoint(
+    request: HttpRequest,
+    provider: str,
+    access_token: str | None = None,
+):
+    """Start a social-login flow that hands off to the frontend callback.
+
+    When ``access_token`` is provided and resolves to an active user, promote
+    the JWT identity to a Django session so ``social_django`` can recognize
+    the current user and perform *binding* (attaching a new provider to the
+    existing account) instead of treating it as a new signup. SPA clients
+    must pass this query parameter when the user initiates a bind flow from
+    an authenticated page; omitting it yields the regular social-login flow.
+    """
     _get_provider_or_error(provider)
     _build_frontend_social_callback_url(provider)
+
+    if access_token:
+        authed_user = get_user_from_access_token(access_token)
+        if (
+            authed_user is not None
+            and authed_user.is_active
+            and not authed_user.merged_into_id
+        ):
+            django_login(
+                request,
+                authed_user,
+                backend="django.contrib.auth.backends.ModelBackend",
+            )
 
     query = urlencode({"next": _social_callback_url(provider)})
     return HttpResponseRedirect(f"{reverse('social:begin', args=[provider])}?{query}")

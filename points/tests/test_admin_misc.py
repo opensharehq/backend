@@ -128,8 +128,9 @@ class PointsAdminBehaviorTests(TestCase):
             status=AllocationStatus.COMPLETED,
         )
         self.pending_grant = PendingPointGrant.objects.create(
-            github_id="12345",
-            github_login="pending-user",
+            platform="github",
+            actor_id="12345",
+            actor_login="pending-user",
             email="pending@example.com",
             amount=60,
             point_type=PointType.GIFT,

@@ -81,6 +81,10 @@ class WithdrawalRequestForm(forms.ModelForm):
             msg = "提现金额必须大于 0"
             raise forms.ValidationError(msg)
 
+        if amount < services.MINIMUM_WITHDRAWAL_AMOUNT:
+            msg = f"提现金额不能少于 {services.MINIMUM_WITHDRAWAL_AMOUNT} 积分"
+            raise forms.ValidationError(msg)
+
         balance = services.get_balance(self.owner, PointType.CASH)
         if amount > balance:
             msg = f"现金积分不足，当前可用: {balance}"

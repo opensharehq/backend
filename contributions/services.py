@@ -10,6 +10,10 @@ from accounts.models import User
 
 logger = logging.getLogger(__name__)
 
+# SQLite 单条 SQL 中 ? 占位符的默认上限为 999 (旧版) / 32766 (新版),
+# 这里取保守值, 避免 uid__in=[...] 触发 "too many SQL variables".
+_SQL_IN_BATCH_SIZE = 900
+
 
 class ContributionDataUnavailableError(RuntimeError):
     """Raised when contribution data cannot be fetched from the backend."""
@@ -159,6 +163,8 @@ class ContributionService:
             logger.info("未查询到贡献度数据")
             return []
 
+        ContributionService._validate_platform_present(contributions)
+
         # 判断用户注册状态
         results = ContributionService._enrich_with_registration_status(contributions)
 
@@ -169,6 +175,23 @@ class ContributionService:
         )
 
         return results
+
+    @staticmethod
+    def _validate_platform_present(contributions: list[dict]) -> None:
+        """强制校验每条 ClickHouse 贡献数据都携带非空 platform 字段.
+
+        按设计，贡献者在代码托管平台上的身份以 (platform, actor_id) 为唯一键,
+        platform 缺失会导致下游待领取池存储 / 认领逻辑丢失身份区分能力.
+        这里只验证存在性（非空字符串），不对具体取值做限制.
+        """
+        for index, contrib in enumerate(contributions):
+            platform = contrib.get("platform") if isinstance(contrib, dict) else None
+            if not isinstance(platform, str) or not platform.strip():
+                msg = (
+                    f"ClickHouse 贡献数据第 {index} 条缺失 platform 字段,拒绝进入后续流程"
+                )
+                logger.error(msg)
+                raise ContributionDataUnavailableError(msg)
 
     @staticmethod
     def _enrich_with_registration_status(contributions: list[dict]) -> list[dict]:
@@ -193,17 +216,19 @@ class ContributionService:
                 platform_user_map[platform] = {}
             platform_user_map[platform][actor_id] = actor_login
 
-        # 查询已注册用户
+        # 查询已注册用户 (分批, 避免 SQLite "too many SQL variables" 限制)
         registered_users = {}  # {(platform, uid): user_id}
         for platform, actor_map in platform_user_map.items():
             actor_ids = list(actor_map.keys())
-            social_auths = UserSocialAuth.objects.filter(
-                provider=platform, uid__in=actor_ids
-            ).select_related("user")
+            for start in range(0, len(actor_ids), _SQL_IN_BATCH_SIZE):
+                batch = actor_ids[start : start + _SQL_IN_BATCH_SIZE]
+                social_auths = UserSocialAuth.objects.filter(
+                    provider=platform, uid__in=batch
+                ).select_related("user")
 
-            for social_auth in social_auths:
-                key = (platform, social_auth.uid)
-                registered_users[key] = social_auth.user.id
+                for social_auth in social_auths:
+                    key = (platform, social_auth.uid)
+                    registered_users[key] = social_auth.user.id
 
         # 构建结果
         results = []
@@ -222,6 +247,8 @@ class ContributionService:
 
             payload = {
                 "platform": contrib["platform"],
+                "actor_id": str(actor_id),
+                "actor_login": actor_login,
                 f"{platform}_id": actor_id,
                 f"{platform}_login": actor_login,
                 "email": "",  # ClickHouse 中没有 email

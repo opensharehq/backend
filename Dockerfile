@@ -6,7 +6,13 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
-    UV_PYTHON_PREFERENCE=system
+    UV_PYTHON_PREFERENCE=system \
+    HTTP_PROXY="" \
+    HTTPS_PROXY="" \
+    http_proxy="" \
+    https_proxy="" \
+    NO_PROXY="*" \
+    no_proxy="*"
 
 WORKDIR /app
 

@@ -8,7 +8,7 @@ from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 
-from accounts.models import Organization, User
+from accounts.models import Organization, User, WithdrawalAccount
 
 from .models import (
     PointSource,
@@ -125,12 +125,14 @@ def get_detailed_balance(owner: User | Organization) -> dict:
 
     gift_total = 0
     by_tag = defaultdict(int)
+    by_tag_names: dict[str, str] = {}
     no_tag_total = 0
 
     for source in gift_sources:
         gift_total += source.remaining_amount
         if source.tag:
             by_tag[source.tag.slug] += source.remaining_amount
+            by_tag_names.setdefault(source.tag.slug, source.tag.name)
         else:
             no_tag_total += source.remaining_amount
 
@@ -140,6 +142,7 @@ def get_detailed_balance(owner: User | Organization) -> dict:
         "gift": gift_total,
         "gift_no_tag": no_tag_total,
         "by_tag": dict(by_tag),
+        "by_tag_names": by_tag_names,
     }
 
 
@@ -153,6 +156,7 @@ def get_detailed_balance_or_zero(owner: User | Organization) -> dict:
             "gift": 0,
             "gift_no_tag": 0,
             "by_tag": {},
+            "by_tag_names": {},
         }
 
     # Mirror get_detailed_balance while keeping the call read-only.
@@ -164,12 +168,14 @@ def get_detailed_balance_or_zero(owner: User | Organization) -> dict:
 
     gift_total = 0
     by_tag = defaultdict(int)
+    by_tag_names: dict[str, str] = {}
     no_tag_total = 0
 
     for source in gift_sources:
         gift_total += source.remaining_amount
         if source.tag:
             by_tag[source.tag.slug] += source.remaining_amount
+            by_tag_names.setdefault(source.tag.slug, source.tag.name)
         else:
             no_tag_total += source.remaining_amount
 
@@ -179,6 +185,7 @@ def get_detailed_balance_or_zero(owner: User | Organization) -> dict:
         "gift": gift_total,
         "gift_no_tag": no_tag_total,
         "by_tag": dict(by_tag),
+        "by_tag_names": by_tag_names,
     }
 
 
@@ -434,16 +441,21 @@ def spend_points(  # noqa: PLR0913
     return transactions
 
 
+# 最低提现积分数量
+MINIMUM_WITHDRAWAL_AMOUNT = 200
+
+
 @transaction.atomic
 def create_withdrawal_request(  # noqa: PLR0913
     owner: User | Organization,
     amount: int,
-    real_name: str,
-    phone: str,
-    id_card: str,
-    bank_name: str,
-    bank_account: str,
+    real_name: str = "",
+    phone: str = "",
+    id_card: str = "",
+    bank_name: str = "",
+    bank_account: str = "",
     invoice_file=None,
+    withdrawal_account_id: int | None = None,
 ) -> WithdrawalRequest:
     """
     创建提现申请.
@@ -451,12 +463,13 @@ def create_withdrawal_request(  # noqa: PLR0913
     Args:
         owner: User 或 Organization 实例
         amount: 提现金额
-        real_name: 真实姓名
-        phone: 联系电话
-        id_card: 身份证号
-        bank_name: 银行名称
-        bank_account: 银行账号
+        real_name: 真实姓名 (直接传参方式)
+        phone: 联系电话 (直接传参方式)
+        id_card: 身份证号 (直接传参方式)
+        bank_name: 银行名称 (直接传参方式)
+        bank_account: 银行账号 (直接传参方式)
         invoice_file: 发票文件
+        withdrawal_account_id: 提现账号 ID (新流程)
 
     Returns:
         WithdrawalRequest: 提现申请记录
@@ -464,11 +477,16 @@ def create_withdrawal_request(  # noqa: PLR0913
     Raises:
         InsufficientPointsError: 如果现金积分不足
         WithdrawalError: 如果有待处理的提现申请
+        ValueError: 如果提现金额低于最低限制
 
     """
     if amount <= 0:
         msg = "提现金额必须大于 0"
         raise WithdrawalError(msg)
+
+    if amount < MINIMUM_WITHDRAWAL_AMOUNT:
+        msg = f"最低提现金额为{MINIMUM_WITHDRAWAL_AMOUNT}积分"
+        raise ValueError(msg)
 
     wallet = get_or_create_wallet(owner)
 
@@ -486,6 +504,23 @@ def create_withdrawal_request(  # noqa: PLR0913
         msg = "您有待处理的提现申请，请等待处理完成后再申请"
         raise WithdrawalError(msg)
 
+    # 如果传了 withdrawal_account_id，从账号中读取信息
+    withdrawal_account = None
+    if withdrawal_account_id is not None:
+        try:
+            withdrawal_account = WithdrawalAccount.objects.get(
+                id=withdrawal_account_id, user=owner
+            )
+        except WithdrawalAccount.DoesNotExist:
+            msg = "提现账号不存在或不属于当前用户"
+            raise ValueError(msg) from None
+        # 从提现账号读取信息
+        real_name = withdrawal_account.real_name
+        phone = withdrawal_account.phone
+        id_card = withdrawal_account.id_card
+        bank_name = ""  # 模型中无 bank_name 字段，留空
+        bank_account = withdrawal_account.bank_card or withdrawal_account.swift_account
+
     # 创建提现申请
     withdrawal = WithdrawalRequest.objects.create(
         wallet=wallet,
@@ -497,6 +532,7 @@ def create_withdrawal_request(  # noqa: PLR0913
         bank_name=bank_name,
         bank_account=bank_account,
         invoice_file=invoice_file,
+        withdrawal_account=withdrawal_account,
     )
 
     logger.info(

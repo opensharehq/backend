@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.conf import settings
+from django.core.cache.backends.locmem import LocMemCache
 from django.core.cache.backends.redis import RedisCache
 from django.test import SimpleTestCase
 
@@ -14,6 +15,7 @@ from accounts.services.social_exchange import (
     consume_exchange_code,
     create_exchange_code,
 )
+from accounts.services.social_exchange_store import RedisSocialExchangeStore
 
 
 class FakeRedisClient:
@@ -131,8 +133,8 @@ class SocialExchangeServiceTests(SimpleTestCase):
     @patch(
         "accounts.services.social_exchange_store._default_cache", return_value=object()
     )
-    def test_exchange_code_requires_redis_cache_backend(self, _cache_mock):
-        """Unsafe cache backends should be rejected instead of used non-atomically."""
+    def test_exchange_code_requires_usable_cache_backend(self, _cache_mock):
+        """Unsafe cache backends lacking the cache API should be rejected."""
         user = SimpleNamespace(pk=7)
 
         with self.assertRaises(SocialExchangeUnavailableError):
@@ -140,6 +142,34 @@ class SocialExchangeServiceTests(SimpleTestCase):
 
         with self.assertRaises(SocialExchangeUnavailableError):
             consume_exchange_code("missing-code")
+
+    def test_exchange_code_rejects_dummy_cache_backend(self):
+        """DummyCache silently drops writes and must be refused explicitly."""
+        from django.core.cache.backends.dummy import DummyCache
+
+        store = RedisSocialExchangeStore(cache_backend=DummyCache("dummy", {}))
+
+        with self.assertRaises(SocialExchangeUnavailableError):
+            store.store("any-key", {"user_id": 1, "provider": "github"}, 60)
+
+    def test_exchange_code_works_with_locmem_cache_backend(self):
+        """Local development without Redis should still round-trip codes."""
+        backend = LocMemCache(
+            "social-exchange-test", {"TIMEOUT": 60, "OPTIONS": {}}
+        )
+        user = SimpleNamespace(pk=21)
+
+        with patch(
+            "accounts.services.social_exchange_store._default_cache",
+            return_value=backend,
+        ):
+            code = create_exchange_code(user, "github")
+
+            self.assertEqual(
+                consume_exchange_code(code),
+                {"user_id": user.pk, "provider": "github"},
+            )
+            self.assertIsNone(consume_exchange_code(code))
 
     @patch(
         "accounts.services.social_exchange_store._default_cache",

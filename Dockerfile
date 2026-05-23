@@ -61,6 +61,7 @@ COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/pyproject.toml /app/pyproject.toml
 COPY --from=builder /app/uv.lock /app/uv.lock
 COPY --from=builder /app/.env.example /app/.env.example
+COPY --from=builder /app/shenbianyun /app/shenbianyun
 
 COPY docker-endpoint.sh /app/docker-endpoint.sh
 

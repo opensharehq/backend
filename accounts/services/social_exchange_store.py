@@ -25,7 +25,8 @@ class SocialExchangeUnavailableError(RuntimeError):
 
 
 def _default_cache():
-    """Return the configured cache backend for social exchange codes.
+    """
+    Return the configured cache backend for social exchange codes.
 
     Falls back to the default cache when the dedicated ``social_exchange``
     alias is not configured (older deployments).
@@ -37,7 +38,8 @@ def _default_cache():
 
 
 class RedisSocialExchangeStore:
-    """Store exchange payloads using the configured Django cache backend.
+    """
+    Store exchange payloads using the configured Django cache backend.
 
     Prefers atomic Lua ``GET``/``DEL`` when backed by Redis. For other cache
     backends (e.g. ``LocMemCache`` in local development without Redis) falls

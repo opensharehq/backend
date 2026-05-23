@@ -8,9 +8,8 @@ from django.db import connection, models, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
-from contributions.services import ContributionService
-
 from common.constants import CODE_HOSTING_PROVIDERS
+from contributions.services import ContributionService
 
 from .models import (
     AllocationStatus,
@@ -123,12 +122,8 @@ class AllocationService:
                 stats = AllocationService._apply_allocation_items(
                     allocation, allocations
                 )
-                AllocationService._deduct_source_pool(
-                    allocation, stats["total_points"]
-                )
-                AllocationService._finalize_allocation(
-                    allocation, allocations, stats
-                )
+                AllocationService._deduct_source_pool(allocation, stats["total_points"])
+                AllocationService._finalize_allocation(allocation, allocations, stats)
                 return stats
         except Exception:
             AllocationService._mark_allocation_failed(allocation)
@@ -541,9 +536,7 @@ class AllocationService:
             normalized_uid = str(uid).strip()
             if not normalized_uid:
                 continue
-            conditions.append(
-                models.Q(platform=provider, actor_id=normalized_uid)
-            )
+            conditions.append(models.Q(platform=provider, actor_id=normalized_uid))
 
         if not conditions:
             return models.Q(pk__isnull=True)

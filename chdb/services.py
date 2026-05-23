@@ -281,9 +281,11 @@ def _collect_user_ids(label_entities: dict[str, dict[str, Any]]) -> list[int]:
 
 
 def _parse_contribution_rows(rows: list[Any]) -> list[dict[str, Any]]:
-    """解析贡献度查询结果.
+    """
+    Parse contribution query result rows.
 
-    期望列顺序：(platform, actor_id, actor_login, contribution_score, details)。
+    Expected column order: platform, actor_id, actor_login,
+    contribution_score, details.
     """
     contributions = []
     for row in rows:
@@ -346,13 +348,13 @@ def search_tags(keyword: str, limit: int = 5) -> list[dict[str, Any]]:
 
 def search_name_info(keyword: str) -> list[dict[str, Any]]:
     """
-    搜索 name_info 表中的仓库和开发者信息。
+    Search repositories and developers in the name_info table.
 
     Args:
-        keyword: 搜索关键词（大小写不敏感的包含匹配）
+        keyword: Search keyword using case-insensitive containment matching.
 
     Returns:
-        结果列表, 每项包含 platform, id, name, type 字段
+        Result list where each item includes platform, id, name, and type.
 
     """
     keyword = _normalize_keyword(keyword)

@@ -17,6 +17,8 @@ from config.api_common import (
     validate_form,
 )
 from points import services as points_services
+from shenbianyun.models import SignedUser
+from shenbianyun.services import SIGN_STATE_SIGNED
 
 from .api_serializers import (
     serialize_account_merge_request,
@@ -43,8 +45,6 @@ from .models import (
 )
 from .services import AccountMergeError, perform_merge
 from .services.masking import mask_card, mask_name
-from shenbianyun.models import SignedUser
-from shenbianyun.services import SIGN_STATE_SIGNED
 from .views import (
     _build_asset_snapshot,
     _expire_request_if_needed,
@@ -502,16 +502,20 @@ def serialize_withdrawal_account(account):
         "created_at": account.created_at.isoformat(),
     }
     if account.account_type == "domestic":
-        data.update({
-            "id_card": mask_card(account.id_card),
-            "phone": mask_card(account.phone),
-            "bank_card": mask_card(account.bank_card),
-        })
+        data.update(
+            {
+                "id_card": mask_card(account.id_card),
+                "phone": mask_card(account.phone),
+                "bank_card": mask_card(account.bank_card),
+            }
+        )
     else:
-        data.update({
-            "currency": account.currency,
-            "swift_account": mask_card(account.swift_account),
-        })
+        data.update(
+            {
+                "currency": account.currency,
+                "swift_account": mask_card(account.swift_account),
+            }
+        )
     return data
 
 
@@ -530,9 +534,7 @@ def withdrawal_account_list_endpoint(request):
     "/withdrawal-accounts",
     response={201: dict, 422: ErrorResponseSchema},
 )
-def withdrawal_account_create_endpoint(
-    request, payload: WithdrawalAccountCreateSchema
-):
+def withdrawal_account_create_endpoint(request, payload: WithdrawalAccountCreateSchema):
     """Create a withdrawal account."""
     data = payload.model_dump()
     account_type = data.get("account_type", "")
@@ -549,19 +551,14 @@ def withdrawal_account_create_endpoint(
     # Validate required fields per type
     if account_type == "domestic":
         missing = [
-            f
-            for f in ("real_name", "id_card", "phone", "bank_card")
-            if not data.get(f)
+            f for f in ("real_name", "id_card", "phone", "bank_card") if not data.get(f)
         ]
         if missing:
             raise ApiError(
                 "validation_error",
                 422,
                 "Request validation failed.",
-                {
-                    field: [{"message": "This field is required."}]
-                    for field in missing
-                },
+                {field: [{"message": "This field is required."}] for field in missing},
             )
 
         # 银行卡号清洗：去除空格并校验纯数字
@@ -571,7 +568,11 @@ def withdrawal_account_create_endpoint(
                 "validation_error",
                 422,
                 "Request validation failed.",
-                {"bank_card": [{"message": "Bank card number must contain only digits."}]},
+                {
+                    "bank_card": [
+                        {"message": "Bank card number must contain only digits."}
+                    ]
+                },
             )
 
         # 校验身边云签约用户：姓名、手机号、身份证号三字段必须在已签约记录中匹配
@@ -589,19 +590,14 @@ def withdrawal_account_create_endpoint(
             )
     else:
         missing = [
-            f
-            for f in ("real_name", "currency", "swift_account")
-            if not data.get(f)
+            f for f in ("real_name", "currency", "swift_account") if not data.get(f)
         ]
         if missing:
             raise ApiError(
                 "validation_error",
                 422,
                 "Request validation failed.",
-                {
-                    field: [{"message": "This field is required."}]
-                    for field in missing
-                },
+                {field: [{"message": "This field is required."}] for field in missing},
             )
         # Validate currency
         if data.get("currency") and data["currency"] != "USD":
@@ -631,9 +627,7 @@ def withdrawal_account_create_endpoint(
 )
 def withdrawal_account_delete_endpoint(request, account_id: int):
     """Delete a withdrawal account."""
-    account = get_object_or_404(
-        WithdrawalAccount, id=account_id, user=request.auth
-    )
+    account = get_object_or_404(WithdrawalAccount, id=account_id, user=request.auth)
     account.delete()
     return 204, None
 

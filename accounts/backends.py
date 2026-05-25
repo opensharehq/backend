@@ -156,7 +156,7 @@ class AtomGitOAuth2(BaseOAuth2):
 
     name = "atomgit"
     AUTHORIZATION_URL = "https://atomgit.com/oauth/authorize"
-    ACCESS_TOKEN_URL = "https://atomgit.com/oauth/access_token"  # noqa: S105
+    ACCESS_TOKEN_URL = "https://atomgit.com/oauth/token"  # noqa: S105
     ACCESS_TOKEN_METHOD = "POST"  # noqa: S105
     REDIRECT_STATE = True
     USER_DATA_URL = "https://api.atomgit.com/api/v5/users/{username}"

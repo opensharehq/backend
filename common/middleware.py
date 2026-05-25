@@ -83,7 +83,8 @@ class ApiCorsMiddleware:
 
 
 class ApiNoCacheMiddleware:
-    """Prevent Django per-site cache middleware from caching API responses.
+    """
+    Prevent Django per-site cache middleware from caching API responses.
 
     The per-site cache middleware (UpdateCacheMiddleware / FetchFromCacheMiddleware)
     respects Cache-Control headers. By setting `no-cache, no-store` for all API

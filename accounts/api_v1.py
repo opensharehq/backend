@@ -680,7 +680,8 @@ def social_providers_endpoint(request: HttpRequest):
     response={200: SocialConnectionsResponseSchema, 401: ErrorResponseSchema},
 )
 def social_connections_endpoint(request: HttpRequest):
-    """Return the current user's configured social connections (flat list).
+    """
+    Return the current user's configured social connections (flat list).
 
     A user may bind multiple accounts of the same provider (e.g. two GitHub
     accounts), so we expand each ``UserSocialAuth`` row into its own entry

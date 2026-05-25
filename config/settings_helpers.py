@@ -11,11 +11,11 @@ def build_cache_settings(
     """
     Return Django cache configuration based on debug flag and Redis URL.
 
-    Always provides a ``social_exchange`` cache alias suitable for storing
-    short-lived one-time codes. When Redis is available it is shared with the
-    default cache; otherwise the alias falls back to an in-process LocMemCache
-    so local development without Redis still works (DummyCache would discard
-    the stored codes).
+    Always provides ``social_exchange`` and ``scheduler_lock`` cache aliases.
+    When Redis is available they are shared with the default cache; otherwise
+    they fall back to in-process LocMemCache so local development without
+    Redis still works (DummyCache.add() always returns True and would defeat
+    the distributed lock semantics).
     """
     if redis_url:
         # ``ssl_cert_reqs`` is only accepted by redis-py for TLS connections
@@ -33,6 +33,7 @@ def build_cache_settings(
         return {
             "default": redis_backend,
             "social_exchange": redis_backend,
+            "scheduler_lock": redis_backend,
         }
 
     # Use DummyCache for testing to avoid cache pollution in parallel tests
@@ -44,6 +45,10 @@ def build_cache_settings(
             "social_exchange": {
                 "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
                 "LOCATION": "social-exchange-testing",
+            },
+            "scheduler_lock": {
+                "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                "LOCATION": "scheduler-lock-testing",
             },
         }
 
@@ -59,6 +64,10 @@ def build_cache_settings(
         "social_exchange": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
             "LOCATION": "social-exchange",
+        },
+        "scheduler_lock": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "scheduler-lock",
         },
     }
 

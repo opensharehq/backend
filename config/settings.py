@@ -183,6 +183,7 @@ _BASE_MIDDLEWARE = [
     "django.middleware.http.ConditionalGetMiddleware",
     "django.middleware.common.CommonMiddleware",
     "common.middleware.ApiCorsMiddleware",
+    "common.middleware.ApiNoCacheMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",

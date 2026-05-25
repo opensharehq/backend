@@ -4,7 +4,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from django.conf import settings
 from django.http import HttpResponse, HttpResponsePermanentRedirect
-from django.utils.cache import patch_vary_headers
+from django.utils.cache import add_never_cache_headers, patch_vary_headers
 
 
 class CanonicalHostRedirectMiddleware:
@@ -80,3 +80,26 @@ class ApiCorsMiddleware:
         response["Access-Control-Max-Age"] = "86400"
         response.headers.pop("Access-Control-Allow-Credentials", None)
         patch_vary_headers(response, ["Origin"])
+
+
+class ApiNoCacheMiddleware:
+    """Prevent Django per-site cache middleware from caching API responses.
+
+    The per-site cache middleware (UpdateCacheMiddleware / FetchFromCacheMiddleware)
+    respects Cache-Control headers. By setting `no-cache, no-store` for all API
+    paths, those endpoints always return fresh data while other pages (homepage
+    search, static assets) can still benefit from caching.
+    """
+
+    api_prefixes = ("/api/",)
+
+    def __init__(self, get_response):
+        """Initialize middleware state once per process."""
+        self.get_response = get_response
+
+    def __call__(self, request):
+        """Add never-cache headers for API responses."""
+        response = self.get_response(request)
+        if any(request.path.startswith(prefix) for prefix in self.api_prefixes):
+            add_never_cache_headers(response)
+        return response

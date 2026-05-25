@@ -680,33 +680,43 @@ def social_providers_endpoint(request: HttpRequest):
     response={200: SocialConnectionsResponseSchema, 401: ErrorResponseSchema},
 )
 def social_connections_endpoint(request: HttpRequest):
-    """Return the current user's configured social connections."""
-    connected_providers = {
-        auth.provider: auth for auth in UserSocialAuth.objects.filter(user=request.auth)
-    }
+    """Return the current user's configured social connections (flat list).
 
-    connections = []
-    for provider, provider_info in _configured_providers():
-        social_auth = connected_providers.get(provider)
+    A user may bind multiple accounts of the same provider (e.g. two GitHub
+    accounts), so we expand each ``UserSocialAuth`` row into its own entry
+    instead of collapsing one-per-provider. Unconnected providers are not
+    included; the SPA's add-account dialog uses ``/auth/social/providers``
+    to discover bindable platforms.
+    """
+    configured = dict(_configured_providers())
+
+    connections: list[SocialConnectionSchema] = []
+    user_social_auths = UserSocialAuth.objects.filter(user=request.auth).order_by(
+        "provider", "id"
+    )
+    connected_count = 0
+    for social_auth in user_social_auths:
+        provider_info = configured.get(social_auth.provider)
+        if provider_info is None:
+            # Provider 不再启用时，不在绑定列表中展示，但仍计入认证方式总数
+            connected_count += 1
+            continue
         connections.append(
             SocialConnectionSchema(
-                provider=provider,
+                provider=social_auth.provider,
                 name=provider_info["name"],
                 icon=provider_info["icon"],
-                is_connected=social_auth is not None,
-                uid=str(social_auth.uid) if social_auth else None,
-                username=_extract_social_username(social_auth) if social_auth else None,
-                profile_url=(
-                    _extract_social_profile_url(social_auth, provider_info)
-                    if social_auth
-                    else None
-                ),
-                social_auth_id=social_auth.id if social_auth else None,
+                is_connected=True,
+                uid=str(social_auth.uid),
+                username=_extract_social_username(social_auth),
+                profile_url=_extract_social_profile_url(social_auth, provider_info),
+                social_auth_id=social_auth.id,
             )
         )
+        connected_count += 1
 
     has_password = request.auth.has_usable_password()
-    total_auth_methods = (1 if has_password else 0) + len(connected_providers)
+    total_auth_methods = (1 if has_password else 0) + connected_count
     return SocialConnectionsResponseSchema(
         has_password=has_password,
         can_disconnect=total_auth_methods > 1,

@@ -4,9 +4,11 @@ import logging
 import socket
 from contextlib import contextmanager
 
+from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from django.core.cache import cache
+from django.conf import settings
+from django.core.cache import caches
 from django_apscheduler.jobstores import DjangoJobStore
 
 logger = logging.getLogger(__name__)
@@ -20,12 +22,16 @@ _NODE_ID = socket.gethostname()
 @contextmanager
 def _distributed_lock(name: str, timeout: int):
     """
-    基于 Django Cache (生产环境为 Redis) 的跨节点互斥锁.
+    基于专用 ``scheduler_lock`` cache 的跨节点互斥锁.
 
     cache.add() 在 Redis 后端等价于 SET NX EX, 是原子操作, 多节点同时
     调用只会有一个返回 True. 拿到锁的节点执行任务, 其他节点直接跳过本轮.
     timeout 作为节点崩溃时的兜底自动释放, 应略小于任务调度间隔.
+
+    本地无 Redis 时该 alias 会回落到 LocMemCache (见 build_cache_settings),
+    避免使用 DummyCache 导致 add() 恒返回 True、锁形同虚设.
     """
+    cache = caches["scheduler_lock"]
     key = f"{_LOCK_PREFIX}{name}"
     acquired = cache.add(key, _NODE_ID, timeout)
     try:
@@ -95,11 +101,16 @@ def start_scheduler():
     """
     Initialize and start the APScheduler background scheduler.
 
-    Uses DjangoJobStore (database-backed) to ensure that only one node
-    in a multi-node deployment executes each scheduled job at a time.
+    在配置了 Redis 的环境 (生产) 使用 DjangoJobStore 持久化 Job 元数据,
+    便于 admin 可视与节点重启后恢复; 本地开发未配置 Redis 时使用
+    MemoryJobStore, 避免 SQLite 写锁竞争 (database is locked) 偶发
+    阻断后续触发. 多节点单点执行由 _distributed_lock 兜底.
     """
     scheduler = BackgroundScheduler()
-    scheduler.add_jobstore(DjangoJobStore(), "default")
+    if getattr(settings, "REDIS_URL", ""):
+        scheduler.add_jobstore(DjangoJobStore(), "default")
+    else:
+        scheduler.add_jobstore(MemoryJobStore(), "default")
 
     scheduler.add_job(
         sync_signed_users_job,

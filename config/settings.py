@@ -67,6 +67,9 @@ env = environ.Env(
     SOCIAL_AUTH_HUGGINGFACE_KEY=(str, ""),
     SOCIAL_AUTH_HUGGINGFACE_SECRET=(str, ""),
     SOCIAL_AUTH_HUGGINGFACE_SCOPE=(list, ["openid", "profile"]),
+    SOCIAL_AUTH_ATOMGIT_KEY=(str, ""),
+    SOCIAL_AUTH_ATOMGIT_SECRET=(str, ""),
+    SOCIAL_AUTH_ATOMGIT_SCOPE=(list, ["user"]),
     MAILGUN_API_KEY=(str, "PLACEHOLDER_MAILGUN_API_KEY"),
     MAILGUN_SENDER_DOMAIN=(str, "PLACEHOLDER_MAILGUN_SENDER_DOMAIN"),
     REDIS_URL=(str, ""),
@@ -331,6 +334,7 @@ AUTHENTICATION_BACKENDS = (
     "social_core.backends.gitlab.GitLabOAuth2",
     "social_core.backends.gitea.GiteaOAuth2",
     "accounts.backends.GiteeOAuth2",
+    "accounts.backends.AtomGitOAuth2",
     "social_core.backends.linkedin.LinkedinOAuth2",
     "social_core.backends.twitter.TwitterOAuth",
     "accounts.backends.HuggingFaceOAuth2",
@@ -397,6 +401,10 @@ SOCIAL_AUTH_TWITTER_OAUTH2_SECRET = env("SOCIAL_AUTH_TWITTER_OAUTH2_SECRET")
 SOCIAL_AUTH_HUGGINGFACE_KEY = env("SOCIAL_AUTH_HUGGINGFACE_KEY")
 SOCIAL_AUTH_HUGGINGFACE_SECRET = env("SOCIAL_AUTH_HUGGINGFACE_SECRET")
 SOCIAL_AUTH_HUGGINGFACE_SCOPE = env("SOCIAL_AUTH_HUGGINGFACE_SCOPE")
+
+SOCIAL_AUTH_ATOMGIT_KEY = env("SOCIAL_AUTH_ATOMGIT_KEY")
+SOCIAL_AUTH_ATOMGIT_SECRET = env("SOCIAL_AUTH_ATOMGIT_SECRET")
+SOCIAL_AUTH_ATOMGIT_SCOPE = env("SOCIAL_AUTH_ATOMGIT_SCOPE")
 
 # Social Auth Pipeline
 # Custom pipeline to update user profile from social auth providers

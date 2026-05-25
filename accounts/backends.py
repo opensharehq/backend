@@ -149,3 +149,51 @@ class HuggingFaceOAuth2(BaseOAuth2):
             self.USER_DATA_URL,
             headers={"Authorization": f"Bearer {access_token}"},
         )
+
+
+class AtomGitOAuth2(BaseOAuth2):
+    """AtomGit OAuth2 authentication backend."""
+
+    name = "atomgit"
+    AUTHORIZATION_URL = "https://atomgit.com/login/oauth/authorize"
+    ACCESS_TOKEN_URL = "https://api.atomgit.com/login/oauth/access_token"  # noqa: S105
+    ACCESS_TOKEN_METHOD = "POST"  # noqa: S105
+    REDIRECT_STATE = True
+    USER_DATA_URL = "https://api.atomgit.com/user/info"
+
+    DEFAULT_SCOPE = ["user"]
+    SCOPE_SEPARATOR = ","
+    ID_KEY = "id"
+
+    EXTRA_DATA = [
+        ("id", "id"),
+        ("login", "username"),
+        ("name", "name"),
+        ("email", "email"),
+        ("avatar_url", "avatar_url"),
+        ("html_url", "profile_url"),
+        ("bio", "bio"),
+    ]
+
+    def get_user_details(self, response):
+        """Return user details from AtomGit API response."""
+        name = response.get("name", "")
+        return {
+            "username": response.get("login", ""),
+            "email": response.get("email", ""),
+            "first_name": name.split()[0] if name else "",
+            "last_name": " ".join(name.split()[1:])
+            if name and len(name.split()) > 1
+            else "",
+        }
+
+    def user_data(self, access_token, *args, **kwargs):
+        """Fetch user profile using Bearer token."""
+        return self.get_json(
+            self.USER_DATA_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+    def get_user_id(self, details, response):
+        """AtomGit uses string IDs (MongoDB ObjectId)."""
+        return str(response.get(self.ID_KEY, ""))

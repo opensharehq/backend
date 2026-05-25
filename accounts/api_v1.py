@@ -120,6 +120,13 @@ SOCIAL_PROVIDERS = {
         "secret": "SOCIAL_AUTH_GITEE_SECRET",
         "profile_url_template": "https://gitee.com/{username}",
     },
+    "atomgit": {
+        "name": "AtomGit",
+        "icon": "git-branch",
+        "key": "SOCIAL_AUTH_ATOMGIT_KEY",
+        "secret": "SOCIAL_AUTH_ATOMGIT_SECRET",
+        "profile_url_template": "https://atomgit.com/{username}",
+    },
     "linkedin-oauth2": {
         "name": "LinkedIn",
         "icon": "bi-linkedin",

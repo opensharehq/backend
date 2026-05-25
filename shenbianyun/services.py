@@ -344,7 +344,7 @@ def batch_payment():  # noqa: PLR0915
                 "idCard": id_card,
                 "mobile": mobile,
                 "paymentType": 0,  # 银行卡
-                "memo": f"OpenShare {datetime.now().strftime('%Y%m%d %H:%M:%S')}",
+                "memo": "OpenShare",
             }
         )
 
@@ -390,6 +390,10 @@ def batch_payment():  # noqa: PLR0915
                 wr.status = WithdrawalStatus.REJECTED
                 wr.admin_note = "付款失败: 请求失败"
                 wr.save(update_fields=["status", "admin_note", "updated_at"])
+                # 退回已扣除的积分
+                from points.services import refund_withdrawal
+
+                refund_withdrawal(wr, reason="付款失败: 请求失败")
         return {"batched": 0, "error": "请求失败"}
 
     # 7. 解析响应，更新预创建的 PaymentRecord
@@ -529,10 +533,15 @@ def check_payment_status():  # noqa: PLR0915, PLR0912
                 with transaction.atomic():
                     record.save()
                     wr.status = WithdrawalStatus.REJECTED
-                    wr.admin_note = (
+                    fail_reason = (
                         f"付款失败: {record.res_msg}" if record.res_msg else "付款失败"
                     )
+                    wr.admin_note = fail_reason
                     wr.save(update_fields=["status", "admin_note", "updated_at"])
+                    # 退回已扣除的积分
+                    from points.services import refund_withdrawal
+
+                    refund_withdrawal(wr, reason=fail_reason)
                 total_updated += 1
             else:
                 # 非终态 (PAYING / PENDING_CONFIRM) 仅保存状态变更

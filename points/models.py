@@ -37,6 +37,7 @@ class TransactionType(models.TextChoices):
 
     EARN = "earn", "获取"
     SPEND = "spend", "消费"
+    REFUND = "refund", "退回"
     WITHDRAW = "withdraw", "提现"
     EXPIRE = "expire", "过期"
 

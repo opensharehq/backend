@@ -707,6 +707,61 @@ def reject_withdrawal(
 
 
 @transaction.atomic
+def refund_withdrawal(withdrawal: WithdrawalRequest, reason: str = "") -> None:
+    """
+    提现付款失败时退回已扣除的积分.
+
+    仅适用于已批准(积分已扣除)但付款失败的提现申请.
+    通过创建新的 PointSource 将积分退回用户钱包,并记录 REFUND 类型的交易.
+
+    Args:
+        withdrawal: WithdrawalRequest 实例(必须是 APPROVED 状态)
+        reason: 退回原因
+
+    """
+    wallet = withdrawal.wallet
+    amount = withdrawal.amount
+    refund_reason = reason or f"提现付款失败退回 (#{withdrawal.id})"
+
+    # 创建新的积分来源，将积分退回钱包
+    source = PointSource.objects.create(
+        wallet=wallet,
+        point_type=PointType.CASH,
+        tag=None,
+        original_amount=amount,
+        remaining_amount=amount,
+        reason=refund_reason,
+        reference_id=f"refund:withdrawal:{withdrawal.id}",
+        expires_at=None,
+        created_by=None,
+    )
+
+    # 获取新余额
+    balance_after = wallet.get_cash_balance()
+
+    # 创建 REFUND 类型的交易记录
+    PointTransaction.objects.create(
+        wallet=wallet,
+        transaction_type=TransactionType.REFUND,
+        point_type=PointType.CASH,
+        amount=amount,
+        balance_after=balance_after,
+        description=refund_reason,
+        reference_id=f"refund:withdrawal:{withdrawal.id}",
+        source=source,
+        tag=None,
+        created_by=None,
+    )
+
+    logger.info(
+        "提现退款成功: withdrawal_id=%s, amount=%s, wallet_id=%s",
+        withdrawal.id,
+        amount,
+        wallet.id,
+    )
+
+
+@transaction.atomic
 def cancel_withdrawal(
     withdrawal_id: int,
     user: User,

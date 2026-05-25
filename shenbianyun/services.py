@@ -344,7 +344,7 @@ def batch_payment():  # noqa: PLR0915
                 "idCard": id_card,
                 "mobile": mobile,
                 "paymentType": 0,  # 银行卡
-                "memo": "OpenShare",
+                "memo": f"OpenShare {datetime.now().year}",
             }
         )
 

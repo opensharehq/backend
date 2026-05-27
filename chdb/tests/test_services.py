@@ -2,7 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase
+from django.core.cache import cache
+from django.test import TestCase, override_settings
 
 from chdb import services
 
@@ -645,3 +646,128 @@ class HelperFunctionsTests(TestCase):
             with self.assertLogs("chdb.services", level="ERROR") as cm:
                 self.assertEqual(services.get_label_entities(["foo"]), {})
         self.assertIn("查询标签实体失败", cm.output[0])
+
+
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "chdb-search-cache-tests-default",
+        },
+        "search_results": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "chdb-search-cache-tests",
+        },
+    }
+)
+class SearchCacheTests(TestCase):
+    """Verify Redis-style TTL caching for ClickHouse search endpoints."""
+
+    def setUp(self):
+        from django.core.cache import caches
+
+        caches["search_results"].clear()
+        cache.clear()
+
+    def tearDown(self):
+        from django.core.cache import caches
+
+        caches["search_results"].clear()
+        cache.clear()
+
+    @patch("chdb.services.ClickHouseDB.query")
+    def test_search_tags_uses_cache_on_repeat_query(self, mock_query):
+        """Repeat queries should hit the cache and skip ClickHouse."""
+        mock_result = MagicMock()
+        mock_result.result_rows = [
+            ["github-vscode", "repo", "microsoft/vscode", "", ["github"], None],
+        ]
+        mock_query.return_value = mock_result
+
+        first = services.search_tags("VSCode")
+        second = services.search_tags("vscode")
+        third = services.search_tags("  VsCode  ")
+
+        self.assertEqual(first, second)
+        self.assertEqual(second, third)
+        # Case/whitespace variants share a single cache key, so only one DB hit.
+        mock_query.assert_called_once()
+
+    @patch("chdb.services.ClickHouseDB.query")
+    def test_search_tags_cache_key_varies_by_limit(self, mock_query):
+        """Different limits must not collide on the same cache key."""
+        mock_result = MagicMock()
+        mock_result.result_rows = [
+            ["github-vscode", "repo", "microsoft/vscode", "", ["github"], None],
+        ]
+        mock_query.return_value = mock_result
+
+        services.search_tags("vscode", limit=5)
+        services.search_tags("vscode", limit=10)
+
+        self.assertEqual(mock_query.call_count, 2)
+
+    @patch("chdb.services.ClickHouseDB.query")
+    def test_search_tags_does_not_cache_empty_results(self, mock_query):
+        """Empty results should not be cached so transient failures self-heal."""
+        mock_result = MagicMock()
+        mock_result.result_rows = []
+        mock_query.return_value = mock_result
+
+        services.search_tags("nope")
+        services.search_tags("nope")
+
+        self.assertEqual(mock_query.call_count, 2)
+
+    @patch("chdb.services.ClickHouseDB.query")
+    def test_search_tags_failure_skips_cache(self, mock_query):
+        """Backend exceptions should not poison the cache."""
+        from django.core.cache import caches
+
+        mock_query.side_effect = Exception("boom")
+
+        with self.assertLogs("chdb.services", level="ERROR"):
+            self.assertEqual(services.search_tags("vscode"), [])
+
+        cache_key = services._build_search_cache_key(
+            services.SEARCH_TAGS_CACHE_PREFIX, "vscode", 5
+        )
+        self.assertIsNone(caches["search_results"].get(cache_key))
+
+    @patch("chdb.services.ClickHouseDB.query")
+    def test_search_name_info_uses_cache_on_repeat_query(self, mock_query):
+        """search_name_info should also reuse cached payloads."""
+        mock_result = MagicMock()
+        mock_result.result_rows = [
+            ("github", "123", "repo", "Repo", "repo"),
+        ]
+        mock_query.return_value = mock_result
+
+        first = services.search_name_info("Demo")
+        second = services.search_name_info("demo")
+
+        self.assertEqual(first, second)
+        mock_query.assert_called_once()
+
+    @patch("chdb.services.ClickHouseDB.query")
+    def test_search_name_info_does_not_cache_empty_results(self, mock_query):
+        """Empty name_info results should not be cached."""
+        mock_result = MagicMock()
+        mock_result.result_rows = []
+        mock_query.return_value = mock_result
+
+        services.search_name_info("missing")
+        services.search_name_info("missing")
+
+        self.assertEqual(mock_query.call_count, 2)
+
+    def test_build_search_cache_key_lowercases_keyword(self):
+        """Cache key must normalize whitespace and case."""
+        key_a = services._build_search_cache_key(
+            services.SEARCH_TAGS_CACHE_PREFIX, "  VSCode ", 5
+        )
+        key_b = services._build_search_cache_key(
+            services.SEARCH_TAGS_CACHE_PREFIX, "vscode", 5
+        )
+        self.assertEqual(key_a, key_b)
+        self.assertTrue(key_a.startswith("chdb:search_tags:vscode"))

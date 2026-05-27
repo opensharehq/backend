@@ -11,11 +11,16 @@ def build_cache_settings(
     """
     Return Django cache configuration based on debug flag and Redis URL.
 
-    Always provides ``social_exchange`` and ``scheduler_lock`` cache aliases.
-    When Redis is available they are shared with the default cache; otherwise
-    they fall back to in-process LocMemCache so local development without
-    Redis still works (DummyCache.add() always returns True and would defeat
-    the distributed lock semantics).
+    Always provides ``social_exchange``, ``scheduler_lock`` and
+    ``search_results`` cache aliases. When Redis is available they are shared
+    with the default cache; otherwise they fall back to in-process LocMemCache
+    so local development without Redis still works (DummyCache.add() always
+    returns True and would defeat the distributed lock semantics).
+
+    ``search_results`` is intentionally separated from ``default`` so the
+    application-level search cache stays effective even when ``default`` is
+    DummyCache (used in DEBUG to keep Django's site-wide cache middleware
+    from polluting API GET responses).
     """
     if redis_url:
         # ``ssl_cert_reqs`` is only accepted by redis-py for TLS connections
@@ -34,6 +39,7 @@ def build_cache_settings(
             "default": redis_backend,
             "social_exchange": redis_backend,
             "scheduler_lock": redis_backend,
+            "search_results": redis_backend,
         }
 
     # Use DummyCache for testing to avoid cache pollution in parallel tests
@@ -49,6 +55,9 @@ def build_cache_settings(
             "scheduler_lock": {
                 "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
                 "LOCATION": "scheduler-lock-testing",
+            },
+            "search_results": {
+                "BACKEND": "django.core.cache.backends.dummy.DummyCache",
             },
         }
 
@@ -68,6 +77,10 @@ def build_cache_settings(
         "scheduler_lock": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
             "LOCATION": "scheduler-lock",
+        },
+        "search_results": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "search-results",
         },
     }
 

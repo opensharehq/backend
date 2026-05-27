@@ -131,10 +131,18 @@ class ConfigSettingsHelpersTests(SimpleTestCase):
             redis_cache["default"]["BACKEND"],
             "django.core.cache.backends.redis.RedisCache",
         )
+        self.assertEqual(
+            redis_cache["search_results"]["BACKEND"],
+            "django.core.cache.backends.redis.RedisCache",
+        )
 
         testing_cache = build_cache_settings(debug=False, redis_url="", testing=True)
         self.assertEqual(
             testing_cache["default"]["BACKEND"],
+            "django.core.cache.backends.dummy.DummyCache",
+        )
+        self.assertEqual(
+            testing_cache["search_results"]["BACKEND"],
             "django.core.cache.backends.dummy.DummyCache",
         )
 
@@ -143,9 +151,18 @@ class ConfigSettingsHelpersTests(SimpleTestCase):
             debug_cache["default"]["BACKEND"],
             "django.core.cache.backends.dummy.DummyCache",
         )
+        # 本地 DEBUG 下 search_results 必须是 LocMemCache, 否则应用层缓存会失效
+        self.assertEqual(
+            debug_cache["search_results"]["BACKEND"],
+            "django.core.cache.backends.locmem.LocMemCache",
+        )
         prod_cache = build_cache_settings(debug=False, redis_url="")
         self.assertEqual(
             prod_cache["default"]["BACKEND"],
+            "django.core.cache.backends.locmem.LocMemCache",
+        )
+        self.assertEqual(
+            prod_cache["search_results"]["BACKEND"],
             "django.core.cache.backends.locmem.LocMemCache",
         )
 

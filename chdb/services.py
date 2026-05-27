@@ -4,12 +4,48 @@ import json
 import logging
 from typing import Any
 
+from django.core.cache import cache, caches
+
 from chdb.clickhousedb import ClickHouseDB
 
 logger = logging.getLogger(__name__)
 
 
 OPENRANK_KEYS = ("openrank", "open_rank", "openRank")
+
+# ClickHouse 搜索接口 Redis 缓存策略：
+# - key 以小写、去空后的 query 作为主要变量，避免大小写与多余空格导致 key 分裂
+# - 数据来自外部同步作业，更新频率低，选择 TTL 过期策略而非总条数限制
+# - 仅缓存非空结果，避免 ClickHouse 短暂故障期间把空列表包裹进缓存
+# - 使用独立的 ``search_results`` cache alias，避开本地 ``default`` 为 DummyCache
+#   （防止全站 cache middleware 在 DEBUG 下缓存 GET 响应）导致应用层缓存失效
+SEARCH_CACHE_TTL_SECONDS = 1800  # 30 分钟
+SEARCH_TAGS_CACHE_PREFIX = "chdb:search_tags"
+SEARCH_NAME_INFO_CACHE_PREFIX = "chdb:search_name_info"
+SEARCH_CACHE_ALIAS = "search_results"
+
+
+def _get_search_cache():
+    """
+    返回专用的搜索缓存后端, 避开本地 default DummyCache.
+
+    如果运行环境未配置 ``search_results`` alias (如部分测试下的
+    override_settings), 则回退到默认 ``cache``.
+    """
+    try:
+        return caches[SEARCH_CACHE_ALIAS]
+    except Exception:  # pragma: no cover - 防御式分支
+        return cache
+
+
+def _build_search_cache_key(prefix: str, keyword: str, *parts: Any) -> str:
+    """构造搜索缓存 key, keyword 统一 lower() 归一化."""
+    normalized = keyword.strip().lower()
+    suffix = ":".join(str(part) for part in parts)
+    if suffix:
+        return f"{prefix}:{normalized}:{suffix}"
+    return f"{prefix}:{normalized}"
+
 
 SEARCH_TAGS_SQL = """
     SELECT
@@ -333,12 +369,20 @@ def search_tags(keyword: str, limit: int = 5) -> list[dict[str, Any]]:
         logger.warning("空关键词搜索被拒绝")
         return []
 
+    cache_key = _build_search_cache_key(SEARCH_TAGS_CACHE_PREFIX, keyword, limit)
+    search_cache = _get_search_cache()
+    cached = search_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         result = ClickHouseDB.query(
             SEARCH_TAGS_SQL, parameters={"keyword": f"%{keyword}%", "limit": limit}
         )
         tags = [_format_search_tag_row(row) for row in _get_result_rows(result)]
         logger.info("搜索关键词 '%s' 返回 %s 个标签", keyword, len(tags))
+        if tags:
+            search_cache.set(cache_key, tags, SEARCH_CACHE_TTL_SECONDS)
         return tags
 
     except Exception as e:
@@ -360,6 +404,12 @@ def search_name_info(keyword: str) -> list[dict[str, Any]]:
     keyword = _normalize_keyword(keyword)
     if not keyword:
         return []
+
+    cache_key = _build_search_cache_key(SEARCH_NAME_INFO_CACHE_PREFIX, keyword)
+    search_cache = _get_search_cache()
+    cached = search_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     try:
         result = ClickHouseDB.query(
@@ -386,6 +436,8 @@ def search_name_info(keyword: str) -> list[dict[str, Any]]:
                     "type": row[4],
                 }
             )
+        if items:
+            search_cache.set(cache_key, items, SEARCH_CACHE_TTL_SECONDS)
         return items
     except Exception as e:
         logger.error("搜索name_info失败 (关键词: %s): %s", keyword, e)

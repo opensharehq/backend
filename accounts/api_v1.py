@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from typing import Any
 from urllib.parse import urlencode
 
@@ -304,15 +305,22 @@ def _auth_error_message(exc: PasswordLoginError) -> str:
     return "Invalid username, email, or password."
 
 
-def _configured_providers() -> list[tuple[str, dict[str, str]]]:
-    """Return providers configured in settings."""
+@lru_cache(maxsize=1)
+def _configured_providers() -> tuple[tuple[str, dict[str, str]], ...]:
+    """
+    Return providers configured in settings (process-local lazy cache).
+
+    Provider configuration is determined by settings at startup and never
+    changes during the process lifetime, so we cache the result permanently.
+    Call ``_configured_providers.cache_clear()`` in tests if needed.
+    """
     providers: list[tuple[str, dict[str, str]]] = []
     for provider, provider_info in SOCIAL_PROVIDERS.items():
         key = getattr(settings, provider_info["key"], "")
         secret = getattr(settings, provider_info["secret"], "")
         if key and secret:
             providers.append((provider, provider_info))
-    return providers
+    return tuple(providers)
 
 
 def _extract_social_username(social_auth: Any) -> str | None:

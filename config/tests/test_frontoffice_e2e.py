@@ -33,6 +33,7 @@ User = get_user_model()
     SESSION_COOKIE_SECURE=False,
     CSRF_COOKIE_SECURE=False,
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    FRONTEND_APP_URL="",
     STORAGES={
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
         "staticfiles": {

@@ -14,6 +14,7 @@ from accounts.tasks import _build_password_reset_url
 User = get_user_model()
 
 
+@override_settings(FRONTEND_APP_URL="")
 class PasswordResetTaskTests(TestCase):
     """Test cases for password reset email task."""
 
@@ -107,6 +108,7 @@ class PasswordResetTaskTests(TestCase):
 # Additional comprehensive tests for edge cases and security
 
 
+@override_settings(FRONTEND_APP_URL="")
 class TestPasswordResetEmailTask(TestCase):
     """Comprehensive test cases for password reset email task."""
 

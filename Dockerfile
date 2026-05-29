@@ -32,7 +32,7 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 # xdb file at runtime. The build aborts if the download fails or the file is
 # empty so we never ship a broken image. Local development can still override
 # IP2REGION_XDB_PATH via .env.
-ARG IP2REGION_XDB_URL="https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region.xdb"
+ARG IP2REGION_XDB_URL="https://github.com/lionsoul2014/ip2region/raw/refs/heads/master/data/ip2region_v4.xdb"
 RUN mkdir -p /app/data \
     && python -c "import urllib.request; urllib.request.urlretrieve('${IP2REGION_XDB_URL}', '/app/data/ip2region_v4.xdb')" \
     && test -s /app/data/ip2region_v4.xdb

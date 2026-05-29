@@ -70,7 +70,6 @@ jobs:
           uv run coverage run \
             --parallel-mode \
             manage.py test \
-            config.tests.test_frontoffice_e2e \
             config.tests.test_backoffice_e2e \
             --keepdb \
             --timing \

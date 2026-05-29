@@ -193,6 +193,10 @@ _BASE_MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    # 兜底处理 social-django 流程中第三方平台引发的网络/HTTP 异常，
+    # 必须排在 SocialAuthExceptionMiddleware 之前，让 social-django 自家中间件
+    # 优先处理 SocialAuthBaseException，剩余的未知异常由本中间件兜底重定向。
+    "accounts.social_auth.SocialAuthGenericExceptionMiddleware",
     "social_django.middleware.SocialAuthExceptionMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.contrib.redirects.middleware.RedirectFallbackMiddleware",

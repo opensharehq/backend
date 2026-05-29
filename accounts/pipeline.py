@@ -1,32 +1,86 @@
 """Social auth pipeline functions for accounts app."""
 
 import logging
+import secrets
 
-from accounts.email_addresses import email_in_use, normalize_email_address
-from accounts.social_auth import EmailConflictRequiresBinding
+from django.contrib.auth import get_user_model
 
 logger = logging.getLogger(__name__)
 
+# AtomGit 用户名前缀；为避免与本地 GitHub 用户名冲突，AtomGit 用户名一律带前缀
+ATOMGIT_USERNAME_PREFIX = "ag-"
+# 冲突时追加的随机数字位数（严格 3 位）
+RANDOM_SUFFIX_DIGITS = 3
 
-def prevent_duplicate_email_signup(
-    backend,
+
+def _extract_base_username(details, response, backend) -> str:
+    """Pick the source username from social-auth details/response."""
+    candidates = (
+        details.get("username") if details else None,
+        (response or {}).get("login") if response else None,
+        (response or {}).get("preferred_username") if response else None,
+        (response or {}).get("screen_name") if response else None,
+    )
+    for value in candidates:
+        if value:
+            text = str(value).strip()
+            if text:
+                return text
+    # Fallback：使用 backend 名称 + 随机后缀，理论上不会触发
+    return backend.name
+
+
+def _build_candidate_username(base: str, backend_name: str) -> str:
+    """Apply provider-specific naming rules to the raw username."""
+    if backend_name == "atomgit":
+        return f"{ATOMGIT_USERNAME_PREFIX}{base}"
+    return base
+
+
+def _random_suffix() -> str:
+    """Generate a strict 3-digit random numeric suffix (100-999)."""
+    return f"{secrets.randbelow(900) + 100}"
+
+
+def assign_social_username(
+    strategy,
     details,
-    response,
+    backend,
     user=None,
-    new_association=False,
     *args,
     **kwargs,
 ):
-    """Block social-auth account creation when the email is already owned."""
-    if not new_association:
-        return
+    """
+    Assign the new account's username based on provider-specific rules.
 
-    email = normalize_email_address(details.get("email") or response.get("email"))
-    if not email:
-        return
+    - GitHub: directly use GitHub login; on conflict append ``-NNN`` (3 digits).
+    - AtomGit: use ``ag-<login>``; on conflict append ``-NNN`` (3 digits).
+    - Other providers: use the raw login; on conflict append ``-NNN``.
 
-    if email_in_use(email, exclude_user=user):
-        raise EmailConflictRequiresBinding(backend)
+    Existing users (binding/relogin) keep their current username.
+    """
+    if user is not None:
+        # 已有用户走绑定/复登流程，不再重新分配 username
+        return None
+
+    base = _extract_base_username(details, response=kwargs.get("response"), backend=backend)
+    candidate = _build_candidate_username(base, backend.name)
+
+    UserModel = get_user_model()
+    if not UserModel.objects.filter(username=candidate).exists():
+        return {"username": candidate}
+
+    # 冲突时严格使用 3 位随机数字后缀，循环重试直到无冲突
+    while True:
+        attempt = f"{candidate}-{_random_suffix()}"
+        if not UserModel.objects.filter(username=attempt).exists():
+            logger.info(
+                "Resolved social username conflict for provider %s: %s -> %s",
+                backend.name,
+                candidate,
+                attempt,
+            )
+            return {"username": attempt}
 
 
 def update_user_profile_from_github(

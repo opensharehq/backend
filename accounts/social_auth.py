@@ -1,25 +1,14 @@
-"""Helpers for social-auth conflict handling and frontend handoff URLs."""
+"""Helpers for social-auth frontend handoff URLs."""
 
 from __future__ import annotations
 
 from urllib.parse import urlencode, urlparse
 
 from django.conf import settings
-from social_core.exceptions import AuthForbidden
-
-EMAIL_CONFLICT_ERROR_CODE = "email_conflict_requires_binding"
 
 
 class FrontendSocialCallbackNotConfigured(RuntimeError):
     """Raised when the frontend social callback URL cannot be built."""
-
-
-class EmailConflictRequiresBinding(AuthForbidden):
-    """Raised when social login returns an email owned by another account."""
-
-    def __str__(self) -> str:
-        """Return the stable frontend error code for this conflict."""
-        return EMAIL_CONFLICT_ERROR_CODE
 
 
 def social_api_callback_path(provider: str) -> str:

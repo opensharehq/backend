@@ -3,7 +3,6 @@
 from datetime import date
 
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
 from django.test import TestCase
 
 from accounts.models import (
@@ -38,27 +37,27 @@ class UserModelTests(TestCase):
         self.assertEqual(user.email, "mixed@example.com")
 
     def test_multiple_blank_emails_are_allowed(self):
-        """The unique constraint should ignore blank email addresses."""
+        """Multiple users may share a blank email after dropping uniqueness."""
         first = get_user_model().objects.create_user(username="blank-one", email="")
         second = get_user_model().objects.create_user(username="blank-two", email="")
 
         self.assertEqual(first.email, "")
         self.assertEqual(second.email, "")
 
-    def test_non_empty_emails_are_unique_case_insensitively(self):
-        """Two non-empty emails should collide even when only the case differs."""
-        get_user_model().objects.create_user(
+    def test_emails_are_no_longer_unique(self):
+        """Email field is no longer enforced as unique after social-only refactor."""
+        first = get_user_model().objects.create_user(
             username="existing-email",
             email="taken@example.com",
-            password="password123",
+        )
+        second = get_user_model().objects.create_user(
+            username="duplicate-email",
+            email="Taken@Example.com",
         )
 
-        with self.assertRaises(IntegrityError):
-            get_user_model().objects.create_user(
-                username="duplicate-email",
-                email="Taken@Example.com",
-                password="password123",
-            )
+        # Both users coexist; emails are normalized to lowercase but not unique
+        self.assertEqual(first.email, "taken@example.com")
+        self.assertEqual(second.email, "taken@example.com")
 
 
 class UserProfileModelTests(TestCase):

@@ -1,15 +1,10 @@
-"""Forms for user authentication and profile management."""
+"""Forms for user profile management and account merging."""
 
 from django import forms
 from django.contrib.auth import get_user_model
-from django.contrib.auth.forms import (
-    PasswordChangeForm,
-    SetPasswordForm,
-    UserCreationForm,
-)
 from django.utils import timezone
 
-from .email_addresses import email_in_use, normalize_email_address
+from .email_addresses import normalize_email_address
 from .models import (
     AccountMergeRequest,
     Education,
@@ -17,30 +12,6 @@ from .models import (
     UserProfile,
     WorkExperience,
 )
-
-
-class SignUpForm(UserCreationForm):
-    """User registration form."""
-
-    email = forms.EmailField(
-        max_length=254,
-        required=True,
-        help_text="请输入有效的邮箱地址",
-    )
-
-    class Meta:
-        """Meta configuration for SignUpForm."""
-
-        model = get_user_model()
-        fields = ("username", "email", "password1", "password2")
-
-    def clean_email(self):
-        """Validate email is unique."""
-        email = normalize_email_address(self.cleaned_data.get("email"))
-        if email_in_use(email):
-            msg = "该邮箱已被注册"
-            raise forms.ValidationError(msg, code="email_already_registered")
-        return email
 
 
 class ProfileForm(forms.ModelForm):
@@ -194,137 +165,6 @@ class EducationForm(forms.ModelForm):
             raise forms.ValidationError(msg)
 
         return cleaned_data
-
-
-class CustomPasswordChangeForm(PasswordChangeForm):
-    """Custom password change form with Bootstrap styling."""
-
-    old_password = forms.CharField(
-        label="当前密码",
-        widget=forms.PasswordInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请输入当前密码",
-            },
-        ),
-    )
-    new_password1 = forms.CharField(
-        label="新密码",
-        widget=forms.PasswordInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请输入新密码",
-            },
-        ),
-        help_text="密码至少8位，不能全是数字",
-    )
-    new_password2 = forms.CharField(
-        label="确认新密码",
-        widget=forms.PasswordInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请再次输入新密码",
-            },
-        ),
-    )
-
-
-class ChangeEmailForm(forms.Form):
-    """Email change form."""
-
-    email = forms.EmailField(
-        label="新邮箱",
-        max_length=254,
-        widget=forms.EmailInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请输入新邮箱地址",
-            },
-        ),
-    )
-    password = forms.CharField(
-        label="当前密码",
-        widget=forms.PasswordInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请输入当前密码以确认",
-            },
-        ),
-        help_text="为了安全，需要验证您的当前密码",
-    )
-
-    def __init__(self, user, *args, **kwargs):
-        """Initialize form with user instance."""
-        self.user = user
-        super().__init__(*args, **kwargs)
-
-    def clean_email(self):
-        """Validate email is unique and different from current."""
-        email = normalize_email_address(self.cleaned_data.get("email"))
-
-        if email == normalize_email_address(self.user.email):
-            msg = "新邮箱不能与当前邮箱相同"
-            raise forms.ValidationError(msg, code="email_same_as_current")
-
-        if email_in_use(email, exclude_user=self.user):
-            msg = "该邮箱已被其他用户使用"
-            raise forms.ValidationError(msg, code="email_already_in_use")
-
-        return email
-
-    def clean_password(self):
-        """Validate password is correct."""
-        password = self.cleaned_data.get("password")
-
-        if not self.user.check_password(password):
-            msg = "密码不正确"
-            raise forms.ValidationError(msg, code="password_incorrect")
-
-        return password
-
-
-class PasswordResetRequestForm(forms.Form):
-    """Password reset request form."""
-
-    email = forms.EmailField(
-        label="邮箱地址",
-        max_length=254,
-        widget=forms.EmailInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请输入注册时使用的邮箱",
-            },
-        ),
-        help_text="我们将向此邮箱发送密码重置链接",
-    )
-
-    def clean_email(self):
-        """Normalize the entered email before downstream lookups."""
-        return normalize_email_address(self.cleaned_data.get("email"))
-
-
-class PasswordResetConfirmForm(SetPasswordForm):
-    """Password reset confirmation form."""
-
-    new_password1 = forms.CharField(
-        label="新密码",
-        widget=forms.PasswordInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请输入新密码",
-            },
-        ),
-        help_text="密码至少8位，不能全是数字",
-    )
-    new_password2 = forms.CharField(
-        label="确认新密码",
-        widget=forms.PasswordInput(
-            attrs={
-                "class": "form-control",
-                "placeholder": "请再次输入新密码",
-            },
-        ),
-    )
 
 
 class ShippingAddressForm(forms.ModelForm):

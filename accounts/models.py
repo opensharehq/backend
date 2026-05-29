@@ -5,7 +5,6 @@ import uuid
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.db.models import Q
-from django.db.models.functions import Lower
 
 from .email_addresses import normalize_email_address
 
@@ -28,13 +27,6 @@ class User(AbstractUser):
 
         verbose_name = "用户"
         verbose_name_plural = verbose_name
-        constraints = [
-            models.UniqueConstraint(
-                Lower("email"),
-                condition=~Q(email=""),
-                name="accounts_user_email_ci_unique_non_empty",
-            )
-        ]
 
     def save(self, *args, **kwargs):
         """Normalize non-empty emails before persisting the user record."""

@@ -11,13 +11,8 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.contrib.auth import get_user_model, logout
 from django.contrib.auth import login as django_login
-from django.contrib.auth.tokens import default_token_generator
-from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import IntegrityError
 from django.http import HttpRequest, HttpResponseRedirect
 from django.urls import reverse
-from django.utils.encoding import force_str
-from django.utils.http import urlsafe_base64_decode
 from ninja import Router, Schema
 from ninja.security import HttpBearer
 from social_django.models import UserSocialAuth
@@ -25,27 +20,11 @@ from social_django.models import UserSocialAuth
 from config.api_common import (
     ApiError,
     ErrorResponseSchema,
-    form_error_detail,
-    validate_form,
 )
 
-from .email_addresses import select_password_reset_user
-from .forms import (
-    ChangeEmailForm as ChangeEmailDjangoForm,
-)
-from .forms import (
-    CustomPasswordChangeForm,
-    PasswordResetConfirmForm,
-    SignUpForm,
-)
-from .forms import (
-    PasswordResetRequestForm as PasswordResetRequestDjangoForm,
-)
-from .services.authentication import PasswordLoginError, authenticate_by_login_id
 from .services.jwt_tokens import (
     get_user_from_access_token,
     issue_token_pair,
-    revoke_all_refresh_tokens_for_user,
     revoke_refresh_token,
     rotate_refresh_token,
 )
@@ -61,7 +40,6 @@ from .social_auth import (
 from .social_auth import (
     build_frontend_social_callback_url as build_social_callback_url,
 )
-from .tasks import send_password_reset_email
 
 router = Router(tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -160,22 +138,6 @@ class AuthenticatedUserSchema(Schema):
     is_active: bool
 
 
-class LoginRequestSchema(Schema):
-    """Login request payload."""
-
-    account: str
-    password: str
-
-
-class RegisterRequestSchema(Schema):
-    """Sign-up request payload."""
-
-    username: str
-    email: str
-    password1: str
-    password2: str
-
-
 class RefreshRequestSchema(Schema):
     """Refresh request payload."""
 
@@ -186,36 +148,6 @@ class SocialExchangeRequestSchema(Schema):
     """One-time social-login exchange payload."""
 
     exchange_code: str
-
-
-class PasswordChangeRequestSchema(Schema):
-    """Password change payload."""
-
-    old_password: str
-    new_password1: str
-    new_password2: str
-
-
-class EmailChangeRequestSchema(Schema):
-    """Email change payload."""
-
-    email: str
-    password: str
-
-
-class PasswordResetRequestSchema(Schema):
-    """Password reset request payload."""
-
-    email: str
-
-
-class PasswordResetConfirmRequestSchema(Schema):
-    """Password reset confirm payload."""
-
-    uidb64: str
-    token: str
-    new_password1: str
-    new_password2: str
 
 
 class TokenResponseSchema(Schema):
@@ -279,7 +211,6 @@ class SocialConnectionSchema(Schema):
 class SocialConnectionsResponseSchema(Schema):
     """Current user's social connection state."""
 
-    has_password: bool
     can_disconnect: bool
     connections: list[SocialConnectionSchema]
 
@@ -298,11 +229,6 @@ def _build_token_response(user: Any) -> TokenResponseSchema:
     """Return the common token payload shape."""
     token_pair = issue_token_pair(user)
     return TokenResponseSchema(user=_serialize_user(user), **token_pair)
-
-
-def _auth_error_message(exc: PasswordLoginError) -> str:
-    """Map shared auth service errors to API-facing English messages."""
-    return "Invalid username, email, or password."
 
 
 @lru_cache(maxsize=1)
@@ -404,59 +330,6 @@ jwt_bearer_auth = JWTBearerAuth()
 
 
 @router.post(
-    "/login",
-    response={
-        200: TokenResponseSchema,
-        401: ErrorResponseSchema,
-    },
-)
-def login_endpoint(request: HttpRequest, payload: LoginRequestSchema):
-    """Authenticate a user and issue a JWT token pair."""
-    try:
-        user = authenticate_by_login_id(
-            payload.account, payload.password, request=request
-        )
-    except PasswordLoginError as exc:
-        return 401, ErrorResponseSchema(
-            code="invalid_credentials",
-            message=_auth_error_message(exc),
-        )
-
-    return _build_token_response(user)
-
-
-@router.post(
-    "/register",
-    response={201: TokenResponseSchema, 422: ErrorResponseSchema},
-)
-def register_endpoint(request: HttpRequest, payload: RegisterRequestSchema):
-    """Register a new user and immediately issue a JWT token pair."""
-    form = SignUpForm(payload.model_dump())
-    if not validate_form(form):
-        raise ApiError(
-            "validation_error",
-            422,
-            "Request validation failed.",
-            form_error_detail(form),
-        )
-
-    try:
-        user = form.save()
-    except IntegrityError:
-        form.add_error(
-            "email",
-            DjangoValidationError("该邮箱已被注册", code="email_already_registered"),
-        )
-        raise ApiError(
-            "validation_error",
-            422,
-            "Request validation failed.",
-            form_error_detail(form),
-        ) from None
-    return 201, _build_token_response(user)
-
-
-@router.post(
     "/refresh",
     response={200: TokenResponseSchema, 401: ErrorResponseSchema},
 )
@@ -509,166 +382,6 @@ def verify_endpoint(request: HttpRequest):
 def me_endpoint(request: HttpRequest):
     """Return the authenticated API user."""
     return _serialize_user(request.auth)
-
-
-@router.post(
-    "/password/change",
-    auth=jwt_bearer_auth,
-    response={200: StatusResponseSchema, 422: ErrorResponseSchema},
-)
-def change_password_endpoint(
-    request: HttpRequest, payload: PasswordChangeRequestSchema
-):
-    """Change the authenticated user's password."""
-    form = CustomPasswordChangeForm(
-        user=request.auth,
-        data=payload.model_dump(),
-    )
-    if not validate_form(form):
-        raise ApiError(
-            "validation_error",
-            422,
-            "Request validation failed.",
-            form_error_detail(form),
-        )
-
-    form.save()
-    revoke_all_refresh_tokens_for_user(request.auth)
-    return StatusResponseSchema(message="Your password has been changed successfully.")
-
-
-@router.post(
-    "/email/change",
-    auth=jwt_bearer_auth,
-    response={200: AuthenticatedUserSchema, 422: ErrorResponseSchema},
-)
-def change_email_endpoint(request: HttpRequest, payload: EmailChangeRequestSchema):
-    """Change the authenticated user's email."""
-    form = ChangeEmailDjangoForm(user=request.auth, data=payload.model_dump())
-    if not validate_form(form):
-        raise ApiError(
-            "validation_error",
-            422,
-            "Request validation failed.",
-            form_error_detail(form),
-        )
-
-    request.auth.email = form.cleaned_data["email"]
-    try:
-        request.auth.save(update_fields=["email"])
-    except IntegrityError:
-        form.add_error(
-            "email",
-            DjangoValidationError(
-                "该邮箱已被其他用户使用", code="email_already_in_use"
-            ),
-        )
-        raise ApiError(
-            "validation_error",
-            422,
-            "Request validation failed.",
-            form_error_detail(form),
-        ) from None
-    return _serialize_user(request.auth)
-
-
-@router.post(
-    "/password/reset/request",
-    response={200: StatusResponseSchema, 422: ErrorResponseSchema},
-)
-def password_reset_request_endpoint(
-    request: HttpRequest,
-    payload: PasswordResetRequestSchema,
-):
-    """Queue a password-reset email."""
-    form = PasswordResetRequestDjangoForm(payload.model_dump())
-    if not validate_form(form):
-        raise ApiError(
-            "validation_error",
-            422,
-            "Request validation failed.",
-            form_error_detail(form),
-        )
-
-    email = form.cleaned_data["email"]
-    generic_response = StatusResponseSchema(
-        message="If the email is registered, a reset link will be sent."
-    )
-    user, matching_users = select_password_reset_user(email)
-    if not matching_users:
-        return generic_response
-
-    if len(matching_users) > 1:
-        logger.warning(
-            "Password reset requested for duplicate email %s across user ids %s",
-            email,
-            ",".join(str(user.pk) for user in matching_users),
-        )
-
-    if user is None:
-        social_user = matching_users[0]
-        providers = list(
-            UserSocialAuth.objects.filter(user=social_user).values_list(
-                "provider", flat=True
-            )[:3]
-        )
-        if providers:
-            logger.warning(
-                "Password reset requested for passwordless social account: %s (%s)",
-                social_user.pk,
-                ",".join(providers),
-            )
-        return generic_response
-
-    send_password_reset_email.enqueue(user.id, request.get_host(), request.is_secure())
-    return generic_response
-
-
-@router.post(
-    "/password/reset/confirm",
-    response={
-        200: StatusResponseSchema,
-        400: ErrorResponseSchema,
-        422: ErrorResponseSchema,
-    },
-)
-def password_reset_confirm_endpoint(
-    request: HttpRequest,
-    payload: PasswordResetConfirmRequestSchema,
-):
-    """Reset a password using the emailed token."""
-    UserModel = get_user_model()
-
-    try:
-        uid = force_str(urlsafe_base64_decode(payload.uidb64))
-        user = UserModel.objects.get(pk=uid)
-    except (TypeError, ValueError, OverflowError, UserModel.DoesNotExist):
-        user = None
-
-    if user is None or not default_token_generator.check_token(user, payload.token):
-        return 400, ErrorResponseSchema(
-            code="invalid_token",
-            message="The password reset link is invalid or has expired.",
-        )
-
-    form = PasswordResetConfirmForm(
-        user,
-        {
-            "new_password1": payload.new_password1,
-            "new_password2": payload.new_password2,
-        },
-    )
-    if not validate_form(form):
-        raise ApiError(
-            "validation_error",
-            422,
-            "Request validation failed.",
-            form_error_detail(form),
-        )
-
-    form.save()
-    revoke_all_refresh_tokens_for_user(user)
-    return StatusResponseSchema(message="Your password has been reset successfully.")
 
 
 @router.get(
@@ -731,11 +444,9 @@ def social_connections_endpoint(request: HttpRequest):
         )
         connected_count += 1
 
-    has_password = request.auth.has_usable_password()
-    total_auth_methods = (1 if has_password else 0) + connected_count
+    # 仅 OAuth 鉴权：保留至少 1 个社交绑定即可断开其它绑定
     return SocialConnectionsResponseSchema(
-        has_password=has_password,
-        can_disconnect=total_auth_methods > 1,
+        can_disconnect=connected_count > 1,
         connections=connections,
     )
 
@@ -766,11 +477,10 @@ def disconnect_social_account_endpoint(
             message="The requested social connection was not found.",
         )
 
-    has_password = request.auth.has_usable_password()
     other_social_auths = UserSocialAuth.objects.filter(user=request.auth).exclude(
         id=association_id
     )
-    if not has_password and not other_social_auths.exists():
+    if not other_social_auths.exists():
         return 400, ErrorResponseSchema(
             code="last_auth_method",
             message="You must keep at least one active sign-in method.",

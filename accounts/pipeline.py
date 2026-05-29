@@ -63,7 +63,9 @@ def assign_social_username(
         # 已有用户走绑定/复登流程，不再重新分配 username
         return None
 
-    base = _extract_base_username(details, response=kwargs.get("response"), backend=backend)
+    base = _extract_base_username(
+        details, response=kwargs.get("response"), backend=backend
+    )
     candidate = _build_candidate_username(base, backend.name)
 
     UserModel = get_user_model()

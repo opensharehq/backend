@@ -128,9 +128,7 @@ class AssignSocialUsernameTests(TestCase):
         username = result["username"]
         self.assertNotEqual(username, "alice")
         self.assertFalse(
-            User.objects.filter(username=username)
-            .exclude(username=username)
-            .exists(),
+            User.objects.filter(username=username).exclude(username=username).exists(),
             "Allocated username must not collide with existing accounts",
         )
 

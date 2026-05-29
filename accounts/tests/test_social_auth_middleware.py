@@ -23,7 +23,9 @@ class SocialAuthHelperTests(TestCase):
     def test_is_api_social_callback_target_matches_path(self):
         """The helper should detect both bare paths and full URLs."""
         self.assertTrue(
-            is_api_social_callback_target("/api/v1/auth/social/github/callback", "github"),
+            is_api_social_callback_target(
+                "/api/v1/auth/social/github/callback", "github"
+            ),
         )
         self.assertTrue(
             is_api_social_callback_target(

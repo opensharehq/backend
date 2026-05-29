@@ -96,6 +96,7 @@ env = environ.Env(
     SBY_API_VERSION=(str, "V1.0"),
     SBY_PROVIDER_ID=(str, ""),
     SBY_FU_URL=(str, ""),
+    IP2REGION_XDB_PATH=(str, ""),
 )
 
 TESTING = "test" in sys.argv or "PYTEST_VERSION" in os.environ
@@ -145,6 +146,9 @@ SBY_TASK_ID = env("SBY_TASK_ID")
 SBY_API_VERSION = env("SBY_API_VERSION")
 SBY_PROVIDER_ID = env("SBY_PROVIDER_ID")
 SBY_FU_URL = env("SBY_FU_URL")
+
+# IP 归属地 xdb 文件路径（可选）。未配置或文件不存在时，IP 区域判定接口返回 None。
+IP2REGION_XDB_PATH = env("IP2REGION_XDB_PATH")
 
 INSTALLED_APPS = [
     # Use the GitHub OAuth-backed admin site instead of the stock one.

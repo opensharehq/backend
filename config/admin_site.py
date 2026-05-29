@@ -1,4 +1,5 @@
-"""Custom Django Admin site backed by GitHub OAuth login.
+"""
+Custom Django Admin site backed by GitHub OAuth login.
 
 The default admin login form (username/password) is disabled. Any unauthenticated
 visitor to the admin is redirected to the GitHub OAuth begin endpoint that
@@ -22,7 +23,8 @@ class GitHubAdminSite(AdminSite):
     index_title = "欢迎使用 OpenShare 管理后台"
 
     def login(self, request, extra_context=None):
-        """Replace the username/password form with a GitHub OAuth redirect.
+        """
+        Replace the username/password form with a GitHub OAuth redirect.
 
         - Already-authenticated staff users are sent to the admin index.
         - Authenticated non-staff users see ``admin/no_permission.html``.
@@ -31,18 +33,14 @@ class GitHubAdminSite(AdminSite):
         """
         if request.user.is_authenticated:
             if self.has_permission(request):
-                index_path = reverse(
-                    f"{self.name}:index", current_app=self.name
-                )
+                index_path = reverse(f"{self.name}:index", current_app=self.name)
                 return HttpResponseRedirect(index_path)
             context = {
                 "site_header": self.site_header,
                 "site_title": self.site_title,
                 "user": request.user,
             }
-            return render(
-                request, "admin/no_permission.html", context, status=403
-            )
+            return render(request, "admin/no_permission.html", context, status=403)
 
         next_url = (
             request.GET.get("next")

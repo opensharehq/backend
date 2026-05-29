@@ -30,6 +30,7 @@ dependencies = [
     "django-apscheduler>=0.7.0",
     "redis>=5.0",
     "gunicorn>=23.0.0",
+    "py-ip2region>=3.0.4",
 ]
 
 [tool.djlint]

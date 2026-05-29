@@ -162,7 +162,8 @@ class BrowserE2ETestCase(CacheClearMixin, StaticLiveServerTestCase):
         )
 
     def login_admin_via_ui(self, username, password=None):
-        """Authenticate as an admin user without going through the login form.
+        """
+        Authenticate as an admin user without going through the login form.
 
         The admin login page now redirects to GitHub OAuth, so we cannot drive
         a username/password form in tests. Instead we authenticate via Django's

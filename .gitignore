@@ -1,4 +1,6 @@
 staticfiles/
+# Offline IP geolocation data (ip2region xdb files)
+data/*.xdb
 # Python-generated files
 __pycache__/
 *.py[oc]

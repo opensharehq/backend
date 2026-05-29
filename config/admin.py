@@ -1,4 +1,5 @@
-"""Admin site customization for OpenShare.
+"""
+Admin site customization for OpenShare.
 
 The site header/title/index title are configured directly on
 :class:`config.admin_site.GitHubAdminSite`. This module is intentionally kept

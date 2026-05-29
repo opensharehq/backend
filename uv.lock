@@ -541,6 +541,7 @@ dependencies = [
     { name = "pillow" },
     { name = "pre-commit" },
     { name = "psycopg2-binary" },
+    { name = "py-ip2region" },
     { name = "pycryptodome" },
     { name = "pyjwt" },
     { name = "redis" },
@@ -577,6 +578,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=12.0.0" },
     { name = "pre-commit", specifier = ">=4.3.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.11" },
+    { name = "py-ip2region", specifier = ">=3.0.4" },
     { name = "pycryptodome", specifier = ">=3.20.0" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "redis", specifier = ">=5.0" },
@@ -942,6 +944,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/97/77/21b0ea2e1a73aa5fa9222b2a6b8ba325c43c3a8d54272839c991f2345656/psycopg2_binary-2.9.11-cp314-cp314-musllinux_1_2_riscv64.whl", hash = "sha256:32770a4d666fbdafab017086655bcddab791d7cb260a16679cc5a7338b64343b", size = 3044737, upload-time = "2025-10-30T02:55:35.69Z" },
     { url = "https://files.pythonhosted.org/packages/67/69/f36abe5f118c1dca6d3726ceae164b9356985805480731ac6712a63f24f0/psycopg2_binary-2.9.11-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:c3cb3a676873d7506825221045bd70e0427c905b9c8ee8d6acd70cfcbd6e576d", size = 3347643, upload-time = "2025-10-10T11:13:53.499Z" },
     { url = "https://files.pythonhosted.org/packages/e1/36/9c0c326fe3a4227953dfb29f5d0c8ae3b8eb8c1cd2967aa569f50cb3c61f/psycopg2_binary-2.9.11-cp314-cp314-win_amd64.whl", hash = "sha256:4012c9c954dfaccd28f94e84ab9f94e12df76b4afb22331b1f0d3154893a6316", size = 2803913, upload-time = "2025-10-10T11:13:57.058Z" },
+]
+
+[[package]]
+name = "py-ip2region"
+version = "3.0.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/60/b8/c8b934effe827e5d159b51912dc8366f5a490d7383943e982a801f5c3591/py_ip2region-3.0.4.tar.gz", hash = "sha256:a8b818ed502a17feb998bdcf7c7748466aff368bcc75592c443aedf4eb6987f7", size = 16794, upload-time = "2026-03-03T05:27:03.73Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/86/04/ef28263025ef08ec581875468f7ba08df6803fc729a0d464c3ad2161c1c7/py_ip2region-3.0.4-py3-none-any.whl", hash = "sha256:7668e3756bc941045cf317a2116fe8359b0a70d88cee326decb836caa14bd77d", size = 13287, upload-time = "2026-03-03T05:27:01.994Z" },
 ]
 
 [[package]]

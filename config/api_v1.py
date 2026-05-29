@@ -8,6 +8,7 @@ from ninja.errors import AuthenticationError, ValidationError
 from accounts.api_me_v1 import router as accounts_me_router
 from accounts.api_orgs_v1 import router as organizations_router
 from accounts.api_v1 import router as accounts_auth_router
+from common.api_v1 import router as common_router
 from homepage.api_v1 import router as homepage_router
 from messages.api_v1 import router as messages_router
 from points.api_v1 import router as points_router
@@ -80,6 +81,7 @@ api_v1.add_exception_handler(Http404, _not_found_handler)
 api_v1.add_exception_handler(PermissionDenied, _permission_denied_handler)
 api_v1.add_exception_handler(ValidationError, _validation_error_handler)
 api_v1.add_router("/auth/", accounts_auth_router)
+api_v1.add_router("/common/", common_router)
 api_v1.add_router("/me/", accounts_me_router)
 api_v1.add_router("/organizations/", organizations_router)
 api_v1.add_router("/public/", homepage_router)

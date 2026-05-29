@@ -65,7 +65,6 @@ COPY --from=builder /app/homepage /app/homepage
 COPY --from=builder /app/messages /app/messages
 COPY --from=builder /app/points /app/points
 COPY --from=builder /app/shop /app/shop
-COPY --from=builder /app/static /app/static
 COPY --from=builder /app/staticfiles /app/staticfiles
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/pyproject.toml /app/pyproject.toml

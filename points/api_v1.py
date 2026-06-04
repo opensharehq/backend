@@ -64,6 +64,7 @@ class AllocationPreviewRequestSchema(Schema):
     user_scope: AllocationScopeSchema | None = None
     start_month: date
     end_month: date
+    top_n: int = -1  # -1 表示不限制(使用后端 30 万上限); >0 取 min(top_n, 300000)
 
 
 class AllocationItemSchema(Schema):
@@ -1017,7 +1018,7 @@ def allocation_preview_endpoint(request, payload: AllocationPreviewRequestSchema
     allocation = _build_unsaved_preview_allocation(payload, source_pool)
     try:
         preview = _normalize_preview_items(
-            AllocationService.preview_allocation(allocation)
+            AllocationService.preview_allocation(allocation, top_n=payload.top_n)
         )
     except ContributionDataUnavailableError as exc:
         raise ApiError(

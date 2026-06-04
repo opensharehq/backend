@@ -40,9 +40,15 @@ class AllocationService:
     PENDING_GRANT_BULK_BATCH_SIZE = 500
 
     @staticmethod
-    def preview_allocation(allocation: PointAllocation) -> list[dict]:
+    def preview_allocation(
+        allocation: PointAllocation, *, top_n: int = -1
+    ) -> list[dict]:
         """
         预览积分分配.
+
+        Args:
+            allocation: PointAllocation 记录
+            top_n: 返回开发者数量限制, -1 表示不限制(使用后端 30 万上限)
 
         Returns:
             [
@@ -70,6 +76,12 @@ class AllocationService:
         )
         if not contributions:
             return []
+
+        # 应用 Top N 截断: 取用户指定的 top_n 和后端 30 万上限中较小的一个
+        max_limit = 300000
+        if top_n > 0:
+            effective_limit = min(top_n, max_limit)
+            contributions = contributions[:effective_limit]
 
         total_contribution = AllocationService._total_contribution(contributions)
         if total_contribution == 0:

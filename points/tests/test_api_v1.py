@@ -355,6 +355,87 @@ class PointsApiV1Tests(TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["code"], "validation_error")
 
+    def test_preview_operators_length_mismatch(self):
+        """operators 长度与 tags 不匹配时返回 422."""
+        payload = {
+            "source_selector": {
+                "owner_type": "user",
+                "point_type": PointType.GIFT,
+                "tag_slug": None,
+            },
+            "project_scope": {
+                "tags": ["A", "B", "C"],
+                "operators": ["OR"],  # 应为2个，只给了1个
+                "operation": "OR",
+            },
+            "start_month": "2024-01-01",
+            "end_month": "2024-02-01",
+        }
+
+        response = self.client.post(
+            "/api/v1/points/allocations/preview",
+            payload,
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_preview_operators_invalid_value(self):
+        """operators 中包含无效值时返回 422."""
+        payload = {
+            "source_selector": {
+                "owner_type": "user",
+                "point_type": PointType.GIFT,
+                "tag_slug": None,
+            },
+            "project_scope": {
+                "tags": ["A", "B"],
+                "operators": ["INVALID"],
+                "operation": "OR",
+            },
+            "start_month": "2024-01-01",
+            "end_month": "2024-02-01",
+        }
+
+        response = self.client.post(
+            "/api/v1/points/allocations/preview",
+            payload,
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    @patch(
+        "points.allocation_services.ContributionService.get_contributions",
+        return_value=[],
+    )
+    def test_preview_without_operators_backward_compatible(self, _mocked):
+        """不传 operators 字段时走旧逻辑（向后兼容）."""
+        payload = {
+            "source_selector": {
+                "owner_type": "user",
+                "point_type": PointType.GIFT,
+                "tag_slug": None,
+            },
+            "project_scope": {
+                "tags": ["repo:test/example"],
+                "operation": "AND",
+            },
+            "start_month": "2025-01-01",
+            "end_month": "2025-01-01",
+        }
+
+        response = self.client.post(
+            "/api/v1/points/allocations/preview",
+            payload,
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertNotEqual(response.status_code, 422)
+
     def test_organization_cancel_requires_withdrawal_to_match_slug(self):
         """Organization withdrawal cancellation should enforce the slug-resource binding."""
         create_response = self.client.post(

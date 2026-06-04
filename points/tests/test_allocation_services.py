@@ -1879,6 +1879,60 @@ class AllocationServiceThinIntegrationTests(TestCase):
         self.assertIn("contribution_score", by_login[registered.username])
         self.assertIn("contribution_score", by_login["pending-thin"])
 
+    @patch("chdb.services.query_contributions_with_operators")
+    def test_get_contributions_with_operators(self, mock_query):
+        """有 AND/NOT operators 时走动态 SQL 路径."""
+        mock_query.return_value = [
+            {
+                "platform": "GitHub",
+                "actor_id": "9001",
+                "actor_login": "test-user",
+                "contribution_score": 5.0,
+            }
+        ]
+        allocation = PointAllocation.objects.create(
+            initiator_type=self.user_ct,
+            initiator_id=self.initiator.id,
+            source_pool=self.cash_source_pool,
+            total_amount=1200,
+            project_scope={
+                "tags": ["A", "B", "C"],
+                "operators": ["OR", "NOT"],
+                "operation": "OR",
+            },
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 2, 1),
+        )
+
+        AllocationService.preview_allocation(allocation)
+
+        mock_query.assert_called_once()
+
+    def test_get_contributions_all_or_uses_original_path(self):
+        """全 OR operators 时走原有路径."""
+        allocation = PointAllocation.objects.create(
+            initiator_type=self.user_ct,
+            initiator_id=self.initiator.id,
+            source_pool=self.cash_source_pool,
+            total_amount=1200,
+            project_scope={
+                "tags": ["A", "B"],
+                "operators": ["OR"],
+                "operation": "OR",
+            },
+            start_month=date(2024, 1, 1),
+            end_month=date(2024, 2, 1),
+        )
+
+        with patch(
+            "chdb.services.query_contributions_with_operators"
+        ) as mock_operators_query, patch(
+            "chdb.services.query_contributions",
+            return_value=[],
+        ):
+            AllocationService.preview_allocation(allocation)
+            mock_operators_query.assert_not_called()
+
     def test_execute_allocation_handles_registered_and_pending_recipients(self):
         """Execute should grant registered users and create pending grants together."""
         registered = self._create_registered_contributor(uid="9002")

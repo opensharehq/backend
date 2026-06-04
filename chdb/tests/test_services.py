@@ -771,3 +771,45 @@ class SearchCacheTests(TestCase):
         )
         self.assertEqual(key_a, key_b)
         self.assertTrue(key_a.startswith("chdb:search_tags:vscode"))
+
+
+class BuildTagExpressionSqlTests(TestCase):
+    """Tests for _build_tag_expression_sql helper."""
+
+    def test_single_tag(self):
+        """单个标签生成正确条件."""
+        result = services._build_tag_expression_sql(["tag-A"], [])
+        self.assertIn("id = 'tag-A'", result)
+        self.assertIn("entity_type='Repo'", result)
+        self.assertIn("entity_type='Org'", result)
+
+    def test_two_tags_or(self):
+        """两个标签 OR 运算."""
+        result = services._build_tag_expression_sql(["A", "B"], ["OR"])
+        self.assertIn(" OR ", result)
+        self.assertIn("id = 'A'", result)
+        self.assertIn("id = 'B'", result)
+
+    def test_two_tags_and(self):
+        """两个标签 AND 运算."""
+        result = services._build_tag_expression_sql(["A", "B"], ["AND"])
+        self.assertIn(") AND (", result)
+
+    def test_two_tags_not(self):
+        """两个标签 NOT 运算（差集）."""
+        result = services._build_tag_expression_sql(["A", "B"], ["NOT"])
+        self.assertIn("AND NOT", result)
+
+    def test_three_tags_mixed(self):
+        """三个标签混合运算: (A OR B) AND NOT C."""
+        result = services._build_tag_expression_sql(["A", "B", "C"], ["OR", "NOT"])
+        self.assertIn("AND NOT", result)
+        self.assertIn("id = 'A'", result)
+        self.assertIn("id = 'B'", result)
+        self.assertIn("id = 'C'", result)
+
+    def test_special_characters_escaped(self):
+        """含单引号的标签ID被正确转义."""
+        result = services._build_tag_expression_sql(["tag'inject"], [])
+        self.assertIn("tag\\'inject", result)
+        self.assertNotIn("tag'inject", result)

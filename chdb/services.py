@@ -598,3 +598,102 @@ def query_contributions(
     except Exception as e:
         logger.error("查询贡献度数据失败: %s", e)
         return []
+
+
+def _build_tag_expression_sql(tag_ids: list[str], operators: list[str]) -> str:
+    """
+    构建标签运算 WHERE 子句.
+
+    左到右累积拼接:
+    tag_ids=['A','B','C'], operators=['OR','NOT']
+    → ((condition_A OR condition_B) AND NOT condition_C)
+    """
+
+    def tag_condition(tag_id: str) -> str:
+        escaped = tag_id.replace("'", "\\'")
+        return (
+            f"((platform, repo_id) IN "  # noqa: S608
+            f"(SELECT platform, entity_id FROM flatten_labels "
+            f"WHERE entity_type='Repo' AND id = '{escaped}') "
+            f"OR (platform, org_id) IN "
+            f"(SELECT platform, entity_id FROM flatten_labels "
+            f"WHERE entity_type='Org' AND id = '{escaped}'))"
+        )
+
+    result = tag_condition(tag_ids[0])
+    for i, op in enumerate(operators):
+        next_cond = tag_condition(tag_ids[i + 1])
+        if op == "OR":
+            result = f"({result} OR {next_cond})"
+        elif op == "AND":
+            result = f"({result} AND {next_cond})"
+        elif op == "NOT":
+            result = f"({result} AND NOT {next_cond})"
+    return result
+
+
+def query_contributions_with_operators(
+    tag_ids: list[str],
+    operators: list[str],
+    start_month: int,
+    end_month: int,
+) -> list[dict[str, Any]]:
+    """
+    使用标签运算符查询贡献度数据.
+
+    通过动态构建 SQL WHERE 子句实现标签间的集合运算:
+    - AND → 交集
+    - OR  → 并集
+    - NOT → 差集 (AND NOT)
+
+    Args:
+        tag_ids: 标签 ID 列表
+        operators: 运算符列表, 长度为 len(tag_ids) - 1
+        start_month: 起始月份 (格式: 202401)
+        end_month: 结束月份 (格式: 202412)
+
+    Returns:
+        贡献者列表, 结构同 query_contributions
+
+    """
+    if not tag_ids:
+        return []
+
+    where_clause = _build_tag_expression_sql(tag_ids, operators)
+    sql = f"""
+        SELECT
+            platform,
+            actor_id,
+            argMax(actor_login, created_at) AS login,
+            SUM(openrank) AS or,
+            groupArray((repo_name, openrank, yyyymm)) AS details
+        FROM normalized_community_openrank
+        WHERE {where_clause}
+          AND toYYYYMM(created_at) >= {{start_month:UInt32}}
+          AND toYYYYMM(created_at) <= {{end_month:UInt32}}
+        GROUP BY platform, actor_id
+        ORDER BY or DESC
+        LIMIT 300000
+    """  # noqa: S608
+
+    try:
+        result = ClickHouseDB.query(
+            sql,
+            parameters={
+                "start_month": start_month,
+                "end_month": end_month,
+            },
+        )
+        logger.info(
+            "标签运算查询贡献度: %s 个标签, 运算符 %s, 月份 %s-%s",
+            len(tag_ids),
+            operators,
+            start_month,
+            end_month,
+        )
+        contributions = _parse_contribution_rows(_get_result_rows(result))
+        logger.info("查询到 %s 个贡献者", len(contributions))
+        return contributions
+    except Exception as e:
+        logger.error("标签运算查询贡献度失败: %s", e)
+        return []

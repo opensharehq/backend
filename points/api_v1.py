@@ -54,7 +54,8 @@ class SourceSelectorSchema(Schema):
 
 class AllocationScopeSchema(Schema):
     tags: list[str]
-    operation: str = "AND"
+    operation: str = "AND"  # 保留向后兼容
+    operators: list[str] | None = None  # 新增：每对标签间的运算符
 
 
 class AllocationPreviewRequestSchema(Schema):
@@ -421,6 +422,29 @@ def _validate_allocation_scope(
                 'Operation must be one of "AND", "OR", "NOT", or "XOR".',
             ),
         )
+    if scope.operators is not None and len(scope.operators) > 0:
+        if len(scope.operators) != len(scope.tags) - 1:
+            raise ApiError(
+                "validation_error",
+                422,
+                "Request validation failed.",
+                _validation_detail(
+                    f"{name}.operators",
+                    "operators length must equal tags length minus 1",
+                ),
+            )
+        valid_operators = {"AND", "OR", "NOT"}
+        for op in scope.operators:
+            if op not in valid_operators:
+                raise ApiError(
+                    "validation_error",
+                    422,
+                    "Request validation failed.",
+                    _validation_detail(
+                        f"{name}.operators",
+                        'Each operator must be one of "AND", "OR", "NOT".',
+                    ),
+                )
     return scope.model_dump()
 
 

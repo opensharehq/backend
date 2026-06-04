@@ -1924,11 +1924,14 @@ class AllocationServiceThinIntegrationTests(TestCase):
             end_month=date(2024, 2, 1),
         )
 
-        with patch(
-            "chdb.services.query_contributions_with_operators"
-        ) as mock_operators_query, patch(
-            "chdb.services.query_contributions",
-            return_value=[],
+        with (
+            patch(
+                "chdb.services.query_contributions_with_operators"
+            ) as mock_operators_query,
+            patch(
+                "chdb.services.query_contributions",
+                return_value=[],
+            ),
         ):
             AllocationService.preview_allocation(allocation)
             mock_operators_query.assert_not_called()

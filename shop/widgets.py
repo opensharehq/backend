@@ -1,6 +1,7 @@
 """Image crop widget using Cropper.js for Django Admin."""
 
 from django.forms.widgets import ClearableFileInput
+from django.utils.html import conditional_escape
 from django.utils.safestring import mark_safe
 
 
@@ -8,14 +9,10 @@ class ImageCropWidget(ClearableFileInput):
     """A widget that allows image cropping with a fixed aspect ratio using Cropper.js."""
 
     class Media:
-        """Widget media assets."""
+        """Widget media assets (vendored Cropper.js 1.6.2)."""
 
-        css = {
-            "all": (
-                "https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css",
-            )
-        }
-        js = ("https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js",)
+        css = {"all": ("shop/vendor/cropperjs/cropper.min.css",)}
+        js = ("shop/vendor/cropperjs/cropper.min.js",)
 
     def __init__(self, aspect_ratio=1, crop_width=800, crop_height=400, attrs=None):
         """Initialize with crop dimensions and aspect ratio."""
@@ -29,17 +26,18 @@ class ImageCropWidget(ClearableFileInput):
         # Get the base widget HTML (file input + clear checkbox)
         base_html = super().render(name, value, attrs, renderer)
 
-        widget_id = attrs.get("id", name) if attrs else name
-        crop_data_input_name = f"{name}_crop_data"
+        widget_id = conditional_escape(attrs.get("id", name) if attrs else name)
+        crop_data_input_name = conditional_escape(f"{name}_crop_data")
         crop_data_input_id = f"{widget_id}_crop_data"
 
         # Current image preview
         current_preview = ""
         if value and hasattr(value, "url"):
+            escaped_url = conditional_escape(value.url)
             current_preview = f"""
             <div id="{widget_id}_current_preview" style="margin-bottom: 10px;">
                 <p style="font-weight: bold; margin-bottom: 5px;">当前图片:</p>
-                <img src="{value.url}" style="max-width: 300px; max-height: 150px;
+                <img src="{escaped_url}" style="max-width: 300px; max-height: 150px;
                      border: 1px solid #ddd; border-radius: 4px;" />
             </div>
             """

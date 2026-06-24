@@ -68,8 +68,18 @@ def send_redemption_message(item, user, coupon, lang="zh"):
     if not title_template and not content_template:
         return  # 无模板则不发送
 
-    title = title_template.format(**params) if title_template else ""
-    content = content_template.format(**params) if content_template else ""
+    try:
+        title = title_template.format(**params) if title_template else ""
+        content = content_template.format(**params) if content_template else ""
+    except (KeyError, ValueError, IndexError) as err:
+        logger.error(
+            "Message template format error for item %s (ID=%s): %s",
+            item.name_zh,
+            item.id,
+            err,
+        )
+        msg = f"站内信模板格式错误: {err}"
+        raise RedemptionError(msg) from err
 
     send_message(
         title=title,

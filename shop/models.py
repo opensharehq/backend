@@ -97,7 +97,12 @@ class ShopItem(models.Model):
 
     def has_message_template(self):
         """Check if message template is configured."""
-        return bool(self.message_title_template_zh or self.message_content_template_zh)
+        return bool(
+            self.message_title_template_zh
+            or self.message_content_template_zh
+            or self.message_title_template_en
+            or self.message_content_template_en
+        )
 
 
 class ShopItemAllowedTags(models.Model):

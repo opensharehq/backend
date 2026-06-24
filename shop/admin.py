@@ -1,6 +1,7 @@
 """Django admin configuration for shop application."""
 
 from django.contrib import admin
+from django.core.exceptions import PermissionDenied
 from django.shortcuts import render
 from django.urls import path
 from django.utils.html import format_html
@@ -76,6 +77,9 @@ class CouponCodeAdmin(admin.ModelAdmin):
 
     def bulk_import_view(self, request):
         """批量导入兑换码视图."""
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+
         existing_types = (
             CouponCode.objects.values_list("code_type", flat=True)
             .distinct()

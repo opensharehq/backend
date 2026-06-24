@@ -1,6 +1,7 @@
 """Admin forms for shop application."""
 
 import base64
+import binascii
 import uuid
 
 from django import forms
@@ -68,7 +69,7 @@ class ShopItemAdminForm(forms.ModelForm):
                 file_data = base64.b64decode(encoded)
                 filename = f"{uuid.uuid4().hex}.{ext}"
                 return ContentFile(file_data, name=filename)
-            except (ValueError, IndexError):
+            except (ValueError, IndexError, binascii.Error):
                 pass
         return None
 

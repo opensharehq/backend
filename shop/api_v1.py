@@ -113,7 +113,43 @@ def _get_dynamic_stock(item: ShopItem) -> int | None:
     return item.stock
 
 
-def _serialize_shop_item(item: ShopItem) -> dict:
+def _batch_coupon_stock(items: list[ShopItem]) -> dict[str, int]:
+    """
+    Batch-fetch available coupon counts grouped by code_type.
+
+    Returns a mapping of code_type -> available count. Only queries once
+    for all distinct coupon_types in the given items list, avoiding N+1.
+    """
+    coupon_types = {item.coupon_type for item in items if item.coupon_type}
+    if not coupon_types:
+        return {}
+    from django.db.models import Count
+
+    counts = (
+        CouponCode.objects.filter(
+            code_type__in=coupon_types,
+            status=CouponCode.Status.AVAILABLE,
+        )
+        .values("code_type")
+        .annotate(available=Count("id"))
+    )
+    return {row["code_type"]: row["available"] for row in counts}
+
+
+def _serialize_shop_item(
+    item: ShopItem, stock_map: dict[str, int] | None = None
+) -> dict:
+    """
+    Serialize a ShopItem to dict.
+
+    If stock_map is provided, use it to resolve coupon-based stock
+    instead of issuing a per-item query.
+    """
+    if stock_map is not None and item.coupon_type:
+        stock = stock_map.get(item.coupon_type, 0)
+    else:
+        stock = _get_dynamic_stock(item)
+
     allowed_tags = list(item.allowed_tags.all())
     return {
         "id": item.id,
@@ -124,7 +160,7 @@ def _serialize_shop_item(item: ShopItem) -> dict:
         "description_zh": item.description_zh,
         "description_en": item.description_en,
         "cost": item.cost,
-        "stock": _get_dynamic_stock(item),
+        "stock": stock,
         "is_active": item.is_active,
         "image_card_url": item.image_card.url if item.image_card else None,
         "image_detail_url": item.image_detail.url if item.image_detail else None,
@@ -143,14 +179,16 @@ def _serialize_shop_item(item: ShopItem) -> dict:
 
 
 def _serialize_redemption(
-    redemption: Redemption, coupon_code: str | None = None
+    redemption: Redemption,
+    coupon_code: str | None = None,
+    stock_map: dict[str, int] | None = None,
 ) -> dict:
     return {
         "id": redemption.id,
         "status": redemption.status,
         "points_cost": redemption.points_cost_at_redemption,
         "created_at": redemption.created_at.isoformat(),
-        "item": _serialize_shop_item(redemption.item),
+        "item": _serialize_shop_item(redemption.item, stock_map=stock_map),
         "shipping_address": (
             serialize_shipping_address(redemption.shipping_address)
             if redemption.shipping_address
@@ -218,9 +256,11 @@ def shop_item_list_endpoint(request, page: int = 1, page_size: int = 20):
     page_obj = paginate_queryset(
         items_qs, page=page, page_size=page_size, max_page_size=100
     )
+    page_items = list(page_obj.object_list)
+    stock_map = _batch_coupon_stock(page_items)
     response = build_paginated_response(
         page_obj,
-        [_serialize_shop_item(item) for item in page_obj.object_list],
+        [_serialize_shop_item(item, stock_map=stock_map) for item in page_items],
     )
     response["balance"] = points_services.get_detailed_balance_or_zero(request.auth)
     return response
@@ -265,9 +305,11 @@ def redemption_list_endpoint(request, page: int = 1, page_size: int = 20):
     page_obj = paginate_queryset(
         redemptions, page=page, page_size=page_size, max_page_size=100
     )
+    page_redemptions = list(page_obj.object_list)
+    stock_map = _batch_coupon_stock([r.item for r in page_redemptions])
     return build_paginated_response(
         page_obj,
-        [_serialize_redemption(item) for item in page_obj.object_list],
+        [_serialize_redemption(item, stock_map=stock_map) for item in page_redemptions],
     )
 
 

@@ -305,9 +305,11 @@ class RedeemItemServiceTests(TestCase):
 
         mock_get_balance.side_effect = fake_balance
 
-        redemption = redeem_item(user=self.user, item_id=item.id)
+        result = redeem_item(user=self.user, item_id=item.id)
+        redemption = result["redemption"]
 
         self.assertIsNotNone(redemption)
+        self.assertIsInstance(redemption, Redemption)
         mock_spend_points.assert_called_once()
         _, kwargs = mock_spend_points.call_args
         self.assertEqual(kwargs["tag_slug"], tag_b.slug)

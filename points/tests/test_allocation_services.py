@@ -69,7 +69,7 @@ class AllocationServiceTests(TestCase):
             },
         ]
         self.contribution_patcher = patch(
-            "points.allocation_services.ContributionService.get_contributions",
+            "points.allocation_services.AllocationService._get_contributions",
             return_value=self.mock_contributions,
         )
         self.contribution_patcher.start()
@@ -146,9 +146,10 @@ class AllocationServiceTests(TestCase):
             end_month=date(2024, 12, 1),
         )
 
+        self.contribution_patcher.stop()
         with (
             patch(
-                "points.allocation_services.ContributionService.get_contributions",
+                "chdb.services.query_contributions_with_operators",
                 side_effect=ContributionDataUnavailableError(
                     "Contribution data is currently unavailable."
                 ),
@@ -156,6 +157,7 @@ class AllocationServiceTests(TestCase):
             self.assertRaises(ContributionDataUnavailableError),
         ):
             AllocationService.preview_allocation(allocation)
+        self.contribution_patcher.start()
 
     def test_preview_allocation_ignores_adjustment_ratio(self):
         """Test preview no longer applies adjustment ratio - returns raw scores."""
@@ -1838,12 +1840,12 @@ class AllocationServiceThinIntegrationTests(TestCase):
         return user
 
     def test_preview_allocation_uses_contribution_service_success_path(self):
-        """Preview should flow through ContributionService enrichment logic."""
+        """Preview should flow through query_contributions_with_operators."""
         registered = self._create_registered_contributor(uid="9001")
         allocation = self._create_allocation(source_pool=self.cash_source_pool)
 
         with patch(
-            "chdb.services.query_contributions",
+            "chdb.services.query_contributions_with_operators",
             return_value=[
                 {
                     "platform": "GitHub",
@@ -1862,7 +1864,8 @@ class AllocationServiceThinIntegrationTests(TestCase):
             preview = AllocationService.preview_allocation(allocation)
 
         query_mock.assert_called_once_with(
-            label_ids=["repo:github:acme/repo"],
+            tag_ids=["repo:github:acme/repo"],
+            operators=[],
             start_month=202401,
             end_month=202401,
         )
@@ -1908,8 +1911,8 @@ class AllocationServiceThinIntegrationTests(TestCase):
 
         mock_query.assert_called_once()
 
-    def test_get_contributions_all_or_uses_original_path(self):
-        """全 OR operators 时走原有路径."""
+    def test_get_contributions_all_or_uses_operators_path(self):
+        """全 OR operators 时同样走 query_contributions_with_operators."""
         allocation = PointAllocation.objects.create(
             initiator_type=self.user_ct,
             initiator_id=self.initiator.id,
@@ -1924,17 +1927,17 @@ class AllocationServiceThinIntegrationTests(TestCase):
             end_month=date(2024, 2, 1),
         )
 
-        with (
-            patch(
-                "chdb.services.query_contributions_with_operators"
-            ) as mock_operators_query,
-            patch(
-                "chdb.services.query_contributions",
-                return_value=[],
-            ),
-        ):
+        with patch(
+            "chdb.services.query_contributions_with_operators",
+            return_value=[],
+        ) as mock_operators_query:
             AllocationService.preview_allocation(allocation)
-            mock_operators_query.assert_not_called()
+            mock_operators_query.assert_called_once_with(
+                tag_ids=["A", "B"],
+                operators=["OR"],
+                start_month=202401,
+                end_month=202402,
+            )
 
     def test_execute_allocation_handles_registered_and_pending_recipients(self):
         """Execute should grant registered users and create pending grants together."""

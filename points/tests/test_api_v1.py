@@ -152,7 +152,7 @@ class PointsApiV1Tests(TestCase):
         ]
 
         with patch(
-            "contributions.services.ContributionService.get_contributions",
+            "chdb.services.query_contributions_with_operators",
             return_value=mocked_contributions,
         ):
             preview_response = self.client.post(
@@ -262,7 +262,7 @@ class PointsApiV1Tests(TestCase):
         self.assertFalse(self._wallet_exists(empty_org))
 
     @patch(
-        "points.allocation_services.ContributionService.get_contributions",
+        "chdb.services.query_contributions_with_operators",
         side_effect=ContributionDataUnavailableError(
             "Contribution data is currently unavailable."
         ),
@@ -408,11 +408,11 @@ class PointsApiV1Tests(TestCase):
         self.assertEqual(response.status_code, 422)
 
     @patch(
-        "points.allocation_services.ContributionService.get_contributions",
+        "chdb.services.query_contributions_with_operators",
         return_value=[],
     )
     def test_preview_without_operators_backward_compatible(self, _mocked):
-        """不传 operators 字段时走旧逻辑（向后兼容）."""
+        """不传 operators 字段时统一走 query_contributions_with_operators."""
         payload = {
             "source_selector": {
                 "owner_type": "user",

@@ -9,7 +9,6 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from common.constants import CODE_HOSTING_PROVIDERS
-from contributions.services import ContributionService
 
 from .models import (
     AllocationStatus,
@@ -216,26 +215,23 @@ class AllocationService:
     def _get_contributions(
         allocation: PointAllocation, projects: list[str]
     ) -> list[dict]:
+        from chdb import services as chdb_services
+        from contributions.services import ContributionService
+
         project_scope = allocation.project_scope or {}
-        operators = project_scope.get("operators")
+        operators = project_scope.get("operators") or []
 
-        # 有 operators 字段且包含 AND/NOT → 使用动态 SQL 路径
-        if operators and any(op in ("AND", "NOT") for op in operators):
-            from chdb import services as chdb_services
-
-            return chdb_services.query_contributions_with_operators(
-                tag_ids=projects,
-                operators=operators,
-                start_month=int(allocation.start_month.strftime("%Y%m")),
-                end_month=int(allocation.end_month.strftime("%Y%m")),
-            )
-
-        # 单标签或全 OR → 走原有高效路径
-        return ContributionService.get_contributions(
-            project_identifiers=projects,
-            start_month=allocation.start_month,
-            end_month=allocation.end_month,
+        raw = chdb_services.query_contributions_with_operators(
+            tag_ids=projects,
+            operators=operators,
+            start_month=int(allocation.start_month.strftime("%Y%m")),
+            end_month=int(allocation.end_month.strftime("%Y%m")),
         )
+        if not raw:
+            return []
+
+        ContributionService._validate_platform_present(raw)
+        return ContributionService._enrich_with_registration_status(raw)
 
     @staticmethod
     def _filter_contributions_by_user_scope(

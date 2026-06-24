@@ -99,45 +99,6 @@ SEARCH_NAME_INFO_SQL = """
     AND (name ILIKE {keyword:String} OR name_zh ILIKE {keyword:String}))
 """
 
-CONTRIBUTIONS_SQL = """
-    SELECT
-        platform,
-        actor_id,
-        argMax(actor_login, created_at) AS login,
-        SUM(openrank) AS total_or,
-        groupArray((repo_name, openrank, yyyymm)) AS details,
-        arraySlice(
-            arrayReverseSort(
-                x -> x.2,
-                arrayZip(
-                    mapKeys(sumMap(map(repo_name, toFloat64(openrank)))),
-                    mapValues(sumMap(map(repo_name, toFloat64(openrank))))
-                )
-            ),
-            1, 3
-        ) AS top_repos
-    FROM normalized_community_openrank
-    WHERE (
-        (platform, repo_id) IN (
-            SELECT platform, entity_id
-            FROM flatten_labels
-            WHERE entity_type = 'Repo'
-              AND id IN {label_ids:Array(String)}
-        )
-        OR (platform, org_id) IN (
-            SELECT platform, entity_id
-            FROM flatten_labels
-            WHERE entity_type = 'Org'
-              AND id IN {label_ids:Array(String)}
-        )
-    )
-      AND toYYYYMM(created_at) >= {start_month:UInt32}
-      AND toYYYYMM(created_at) <= {end_month:UInt32}
-    GROUP BY platform, actor_id
-    ORDER BY total_or DESC
-    LIMIT 300000
-"""
-
 
 def _get_result_rows(result: Any) -> list[Any]:
     """兼容 clickhouse-connect 不同结果对象的行访问方式."""
@@ -573,55 +534,6 @@ def get_label_entities(label_ids: list[Any]) -> dict[str, dict[str, Any]]:
         return {}
 
 
-def query_contributions(
-    label_ids: list[str], start_month: int, end_month: int
-) -> list[dict[str, Any]]:
-    """
-    查询标签关联项目的贡献度数据.
-
-    Args:
-    label_ids: 标签 ID 列表 (来自 opensource.labels.id)
-    start_month: 起始月份 (格式: 202401)
-    end_month: 结束月份 (格式: 202412)
-
-    Returns:
-        贡献者列表, 每个贡献者包含:
-        - platform: 平台 (GitHub/Gitee 等)
-        - actor_id: 贡献者平台 ID
-        - actor_login: 贡献者登录名
-        - contribution_score: 贡献度分数 (sum of openrank)
-        - details: 贡献度明细 (repo_name, openrank, yyyymm)
-
-    """
-    normalized_ids = _prepare_label_ids(label_ids)
-    if not normalized_ids:
-        return []
-
-    try:
-        result = ClickHouseDB.query(
-            CONTRIBUTIONS_SQL,
-            parameters={
-                "label_ids": normalized_ids,
-                "start_month": start_month,
-                "end_month": end_month,
-            },
-        )
-        logger.info(
-            "查询贡献度数据: %s 个标签, 月份范围 %s - %s",
-            len(normalized_ids),
-            start_month,
-            end_month,
-        )
-
-        contributions = _parse_contribution_rows(_get_result_rows(result))
-        logger.info("查询到 %s 个贡献者", len(contributions))
-        return contributions
-
-    except Exception as e:
-        logger.error("查询贡献度数据失败: %s", e)
-        return []
-
-
 def _build_tag_expression_sql(tag_ids: list[str], operators: list[str]) -> str:
     """
     构建标签运算 WHERE 子句.
@@ -675,7 +587,8 @@ def query_contributions_with_operators(
         end_month: 结束月份 (格式: 202412)
 
     Returns:
-        贡献者列表, 结构同 query_contributions
+        贡献者列表, 每个贡献者包含 platform, actor_id, actor_login,
+        contribution_score, details, top_repos
 
     """
     if not tag_ids:
@@ -703,6 +616,7 @@ def query_contributions_with_operators(
         WHERE {where_clause}
           AND toYYYYMM(created_at) >= {{start_month:UInt32}}
           AND toYYYYMM(created_at) <= {{end_month:UInt32}}
+          AND (platform, actor_id) NOT IN (SELECT platform, entity_id FROM flatten_labels WHERE entity_type='User' AND id=':bot')
         GROUP BY platform, actor_id
         ORDER BY total_or DESC
         LIMIT 300000

@@ -1,9 +1,12 @@
 """Django admin configuration for shop application."""
 
 from django.contrib import admin
+from django.shortcuts import render
+from django.urls import path
 from django.utils.html import format_html
 
-from .models import Redemption, ShopItem
+from .forms import ShopItemAdminForm
+from .models import CouponCode, Redemption, ShopItem
 
 
 class RedemptionInline(admin.TabularInline):
@@ -24,13 +27,121 @@ class RedemptionInline(admin.TabularInline):
         return False
 
 
+@admin.register(CouponCode)
+class CouponCodeAdmin(admin.ModelAdmin):
+    """Admin for CouponCode model."""
+
+    list_display = [
+        "id",
+        "code_type",
+        "masked_code",
+        "status_display",
+        "redeemed_by",
+        "redeemed_at",
+        "created_at",
+    ]
+    list_filter = ["status", "code_type"]
+    search_fields = ["code", "code_type"]
+    readonly_fields = ["redeemed_by", "redeemed_at", "created_at"]
+
+    def masked_code(self, obj):
+        """部分遮掩兑换码."""
+        code = obj.code
+        if len(code) > 8:
+            return f"{code[:4]}{'*' * (len(code) - 8)}{code[-4:]}"
+        return code[:2] + "*" * max(0, len(code) - 2)
+
+    masked_code.short_description = "兑换码"
+
+    def status_display(self, obj):
+        """彩色状态显示."""
+        colors = {"available": "green", "used": "gray", "disabled": "red"}
+        color = colors.get(obj.status, "black")
+        return format_html(
+            '<span style="color: {};">{}</span>', color, obj.get_status_display()
+        )
+
+    status_display.short_description = "状态"
+
+    def get_urls(self):
+        """Add bulk import URL."""
+        custom_urls = [
+            path(
+                "bulk-import/",
+                self.admin_site.admin_view(self.bulk_import_view),
+                name="shop_couponcode_bulk_import",
+            ),
+        ]
+        return custom_urls + super().get_urls()
+
+    def bulk_import_view(self, request):
+        """批量导入兑换码视图."""
+        existing_types = (
+            CouponCode.objects.values_list("code_type", flat=True)
+            .distinct()
+            .order_by("code_type")
+        )
+
+        context = {
+            "existing_types": list(existing_types),
+            "title": "批量导入兑换码",
+            "opts": self.model._meta,
+            "has_view_permission": self.has_view_permission(request),
+        }
+
+        if request.method == "POST":
+            code_type = request.POST.get("code_type", "").strip()
+            codes_text = request.POST.get("codes", "")
+
+            if not code_type:
+                context["error"] = "请填写兑换码类型"
+                return render(
+                    request, "admin/shop/couponcode/bulk_import.html", context
+                )
+
+            # 按换行切分，strip 每行，去除空行
+            codes = [line.strip() for line in codes_text.splitlines() if line.strip()]
+
+            if not codes:
+                context["error"] = "请输入至少一个兑换码"
+                return render(
+                    request, "admin/shop/couponcode/bulk_import.html", context
+                )
+
+            # 去重（输入内部去重）
+            unique_codes = list(dict.fromkeys(codes))
+
+            # 批量创建，ignore_conflicts=True 跳过数据库中已存在的
+            objs = [CouponCode(code_type=code_type, code=code) for code in unique_codes]
+            created = CouponCode.objects.bulk_create(objs, ignore_conflicts=True)
+            created_count = len(created)
+            skipped_count = len(unique_codes) - created_count
+
+            context["success"] = f"成功导入 {created_count} 个兑换码" + (
+                f"，跳过 {skipped_count} 个重复" if skipped_count > 0 else ""
+            )
+            context["code_type"] = code_type
+
+        return render(request, "admin/shop/couponcode/bulk_import.html", context)
+
+    def changelist_view(self, request, extra_context=None):
+        """Add bulk import button to changelist."""
+        extra_context = extra_context or {}
+        extra_context["show_bulk_import_button"] = True
+        return super().changelist_view(request, extra_context=extra_context)
+
+    change_list_template = "admin/shop/couponcode/change_list.html"
+
+
 @admin.register(ShopItem)
 class ShopItemAdmin(admin.ModelAdmin):
     """Admin for ShopItem model."""
 
+    form = ShopItemAdminForm
+
     list_display = (
         "id",
-        "name",
+        "name_zh",
         "cost",
         "stock_display",
         "is_active",
@@ -46,7 +157,7 @@ class ShopItemAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
-    search_fields = ("name", "description")
+    search_fields = ("name_zh", "name_en", "description_zh")
     readonly_fields = ("created_at", "updated_at", "redemption_count")
     ordering = ("-created_at",)
     date_hierarchy = "created_at"
@@ -54,15 +165,44 @@ class ShopItemAdmin(admin.ModelAdmin):
 
     fieldsets = (
         (
-            "基本信息",
+            "基本信息(中文)",
             {
-                "fields": ("name", "description", "cost", "image"),
+                "fields": ("name_zh", "brief_zh", "description_zh"),
             },
         ),
         (
-            "库存和状态",
+            "基本信息(英文)",
             {
-                "fields": ("stock", "is_active", "requires_shipping"),
+                "fields": ("name_en", "brief_en", "description_en"),
+            },
+        ),
+        (
+            "图片",
+            {
+                "fields": ("image_card", "image_detail"),
+            },
+        ),
+        (
+            "站内信模板",
+            {
+                "fields": (
+                    "message_title_template_zh",
+                    "message_title_template_en",
+                    "message_content_template_zh",
+                    "message_content_template_en",
+                ),
+            },
+        ),
+        (
+            "兑换设置",
+            {
+                "fields": (
+                    "cost",
+                    "stock",
+                    "is_active",
+                    "requires_shipping",
+                    "coupon_type",
+                ),
             },
         ),
         (
@@ -81,7 +221,17 @@ class ShopItemAdmin(admin.ModelAdmin):
 
     @admin.display(description="库存")
     def stock_display(self, obj):
-        """Display stock with color."""
+        """Display stock with color, showing coupon availability if applicable."""
+        if obj.coupon_type:
+            available_count = CouponCode.objects.filter(
+                code_type=obj.coupon_type, status=CouponCode.Status.AVAILABLE
+            ).count()
+            return format_html(
+                '<span style="color: {};">{} (券库: {})</span>',
+                "green" if available_count > 0 else "red",
+                obj.stock if obj.stock is not None else "♾️",
+                available_count,
+            )
         if obj.stock is None:
             return format_html('<span style="color: green;">♾️ 无限</span>')
         if obj.stock == 0:
@@ -95,7 +245,7 @@ class ShopItemAdmin(admin.ModelAdmin):
     @admin.display(boolean=True, description="有图片")
     def has_image(self, obj):
         """Check if item has an image."""
-        return bool(obj.image)
+        return bool(obj.image_card)
 
     @admin.display(description="兑换次数")
     def redemption_count(self, obj):
@@ -121,7 +271,7 @@ class RedemptionAdmin(admin.ModelAdmin):
     search_fields = (
         "user_profile__username",
         "user_profile__email",
-        "item__name",
+        "item__name_zh",
         "shipping_address__receiver_name",
         "shipping_address__phone",
     )

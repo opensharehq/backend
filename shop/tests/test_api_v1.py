@@ -45,8 +45,9 @@ class ShopApiV1Tests(TestCase):
             created_by=self.user,
         )
         self.item = ShopItem.objects.create(
-            name="Sticker Pack",
-            description="A small reward",
+            name_zh="Sticker Pack",
+            name_en="Sticker Pack",
+            description_zh="A small reward",
             cost=100,
             is_active=True,
             requires_shipping=False,
@@ -99,7 +100,9 @@ class ShopApiV1Tests(TestCase):
         history_response = self.client.get("/api/v1/shop/redemptions", **self.headers)
         self.assertEqual(history_response.status_code, 200)
         history_payload = history_response.json()
-        self.assertEqual(history_payload["items"][0]["item"]["name"], self.item.name)
+        self.assertEqual(
+            history_payload["items"][0]["item"]["name_zh"], self.item.name_zh
+        )
         self.assertEqual(history_payload["pagination"]["total_items"], 1)
 
     def test_item_detail_for_non_shipping_item_omits_addresses(self):
@@ -115,8 +118,9 @@ class ShopApiV1Tests(TestCase):
     def test_item_detail_includes_only_current_users_shipping_addresses(self):
         """Shipping item detail should expose only the current user's addresses."""
         shipping_item = ShopItem.objects.create(
-            name="Bundle",
-            description="Requires shipping",
+            name_zh="Bundle",
+            name_en="Bundle",
+            description_zh="Requires shipping",
             cost=50,
             is_active=True,
             requires_shipping=True,
@@ -209,8 +213,9 @@ class ShopApiV1Tests(TestCase):
     def test_redemption_rejects_nonexistent_shipping_address(self):
         """Redemption should reject a shipping address id that does not exist."""
         shipping_item = ShopItem.objects.create(
-            name="Poster",
-            description="Requires shipping",
+            name_zh="Poster",
+            name_en="Poster",
+            description_zh="Requires shipping",
             cost=50,
             is_active=True,
             requires_shipping=True,
@@ -243,8 +248,9 @@ class ShopApiV1Tests(TestCase):
             address="9 Other Lane",
         )
         shipping_item = ShopItem.objects.create(
-            name="Mug",
-            description="Requires shipping",
+            name_zh="Mug",
+            name_en="Mug",
+            description_zh="Requires shipping",
             cost=50,
             is_active=True,
             requires_shipping=True,
@@ -271,8 +277,9 @@ class ShopApiV1Tests(TestCase):
     def test_redemption_rejects_out_of_stock_item(self):
         """Redemption should fail with a stable error when stock is exhausted."""
         sold_out_item = ShopItem.objects.create(
-            name="Limited Reward",
-            description="No inventory left",
+            name_zh="Limited Reward",
+            name_en="Limited Reward",
+            description_zh="No inventory left",
             cost=50,
             is_active=True,
             requires_shipping=False,
@@ -318,8 +325,9 @@ class ShopApiV1Tests(TestCase):
     def test_redemption_rejects_inactive_item(self):
         """Redemption should reject inactive shop items."""
         inactive_item = ShopItem.objects.create(
-            name="Retired Reward",
-            description="Unavailable",
+            name_zh="Retired Reward",
+            name_en="Retired Reward",
+            description_zh="Unavailable",
             cost=10,
             is_active=False,
             requires_shipping=False,
@@ -349,8 +357,9 @@ class ShopApiV1Tests(TestCase):
             status=Redemption.StatusChoices.COMPLETED,
         )
         other_item = ShopItem.objects.create(
-            name="Notebook",
-            description="Other user's reward",
+            name_zh="Notebook",
+            name_en="Notebook",
+            description_zh="Other user's reward",
             cost=30,
             is_active=True,
             requires_shipping=False,

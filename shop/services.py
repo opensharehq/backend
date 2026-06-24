@@ -4,6 +4,7 @@ import logging
 
 from django.db import transaction
 from django.db.models import F
+from django.utils import timezone
 
 from points import services as points_services
 from points.models import PointType
@@ -17,8 +18,69 @@ class RedemptionError(Exception):
     """Exception raised when redemption fails."""
 
 
+def claim_coupon(code_type: str, user_profile) -> "CouponCode":  # noqa: F821
+    """
+    Atomically claim a coupon code.
+
+    Uses select_for_update(skip_locked=True) to prevent concurrent duplicate claims.
+    In SQLite environments, select_for_update is a no-op without affecting functionality.
+    """
+    from .models import CouponCode
+
+    coupon = (
+        CouponCode.objects.select_for_update(skip_locked=True)
+        .filter(code_type=code_type, status=CouponCode.Status.AVAILABLE)
+        .order_by("id")
+        .first()
+    )
+    if coupon is None:
+        msg = "该商品已售罄。"
+        raise RedemptionError(msg)
+
+    coupon.status = CouponCode.Status.USED
+    coupon.redeemed_by = user_profile
+    coupon.redeemed_at = timezone.now()
+    coupon.save(update_fields=["status", "redeemed_by", "redeemed_at"])
+    return coupon
+
+
+def send_redemption_message(item, user, coupon, lang="zh"):
+    """Send redemption success notification based on item's message template."""
+    from messages.models import Message
+    from messages.services import send_message
+
+    params = {
+        "timestamp": timezone.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "coupon_code": coupon.code if coupon else "",
+        "item_name": getattr(item, f"name_{lang}", None) or item.name_zh,
+    }
+
+    # 选择对应语言的模板，回退到中文
+    title_template = (
+        getattr(item, f"message_title_template_{lang}", "")
+        or item.message_title_template_zh
+    )
+    content_template = (
+        getattr(item, f"message_content_template_{lang}", "")
+        or item.message_content_template_zh
+    )
+
+    if not title_template and not content_template:
+        return  # 无模板则不发送
+
+    title = title_template.format(**params) if title_template else ""
+    content = content_template.format(**params) if content_template else ""
+
+    send_message(
+        title=title,
+        content=content,
+        message_type=Message.MessageType.ORDER,
+        recipients=[user],
+    )
+
+
 @transaction.atomic
-def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # noqa: PLR0912, PLR0915
+def redeem_item(user, item_id: int, shipping_address_id=None, lang="zh") -> dict:  # noqa: PLR0912, PLR0915
     """
     执行商品兑换的核心业务逻辑.
 
@@ -28,9 +90,10 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # 
         user (User): 执行兑换的用户.
         item_id (int): 要兑换的商品 ID.
         shipping_address_id (int, optional): 收货地址 ID (需要线下发货的商品必须提供).
+        lang (str): 站内信语言, 默认 "zh".
 
     Returns:
-        Redemption: 成功创建的兑换记录.
+        dict: 包含 redemption 和 coupon_code 的字典.
 
     Raises:
         RedemptionError: 如果商品无效、下架、库存不足或缺少收货地址.
@@ -49,17 +112,26 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # 
             "兑换失败（商品已下架）: 用户=%s (ID=%s), 商品=%s (ID=%s)",
             user.username,
             user.id,
-            item.name,
+            item.name_zh,
             item.id,
         )
         raise RedemptionError(msg)
-    if item.stock is not None and item.stock <= 0:
+
+    # 兑换码领取
+    coupon = None
+
+    if item.coupon_type:
+        # 非实物商品（兑换码类型）：通过 claim_coupon 领取
+        # 不再检查 item.stock，库存由兑换码可用数量决定
+        coupon = claim_coupon(item.coupon_type, user.profile)
+    # 实物/普通商品：保持现有库存检查
+    elif item.stock is not None and item.stock <= 0:
         msg = "该商品已售罄。"
         logger.warning(
             "兑换失败（库存不足）: 用户=%s (ID=%s), 商品=%s (ID=%s), 当前库存=%s",
             user.username,
             user.id,
-            item.name,
+            item.name_zh,
             item.id,
             item.stock,
         )
@@ -74,7 +146,7 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # 
                 "兑换失败（缺少收货地址）: 用户=%s (ID=%s), 商品=%s (ID=%s)",
                 user.username,
                 user.id,
-                item.name,
+                item.name_zh,
                 item.id,
             )
             raise RedemptionError(msg)
@@ -109,7 +181,7 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # 
                 "兑换失败（标签积分不足）: 用户=%s (ID=%s), 商品=%s (ID=%s), 需要标签=%s",
                 user.username,
                 user.id,
-                item.name,
+                item.name_zh,
                 item.id,
                 [t.slug for t in allowed_tags],
             )
@@ -123,7 +195,7 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # 
                 "兑换失败（积分不足）: 用户=%s (ID=%s), 商品=%s (ID=%s), 需要=%s, 可用=%s",
                 user.username,
                 user.id,
-                item.name,
+                item.name_zh,
                 item.id,
                 item.cost,
                 balance,
@@ -136,7 +208,7 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # 
             owner=user,
             amount=item.cost,
             point_type=PointType.GIFT,
-            description=f"兑换商品: {item.name}",
+            description=f"兑换商品: {item.name_zh}",
             tag_slug=tag_slug,
             reference_id=f"shop:item:{item.id}",
             created_by=user,
@@ -154,8 +226,8 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # 
         shipping_address=shipping_address,
     )
 
-    # 4. 更新库存 (使用 F() 表达式防止并发问题)
-    if item.stock is not None:
+    # 4. 更新库存 (仅非 coupon_type 商品，使用 F() 表达式防止并发问题)
+    if not item.coupon_type and item.stock is not None:
         updated_rows = ShopItem.objects.filter(id=item.id, stock__gt=0).update(
             stock=F("stock") - 1
         )
@@ -165,19 +237,23 @@ def redeem_item(user, item_id: int, shipping_address_id=None) -> Redemption:  # 
                 "兑换失败（并发库存不足）: 用户=%s (ID=%s), 商品=%s (ID=%s)",
                 user.username,
                 user.id,
-                item.name,
+                item.name_zh,
                 item.id,
             )
             raise RedemptionError(msg)
+
+    # 5. 发送站内信（在事务内部，失败则整体回滚）
+    if item.has_message_template():
+        send_redemption_message(item, user, coupon, lang)
 
     logger.info(
         "商品兑换成功: 用户=%s (ID=%s), 商品=%s (ID=%s), 消费积分=%s, 兑换记录ID=%s",
         user.username,
         user.id,
-        item.name,
+        item.name_zh,
         item.id,
         item.cost,
         redemption.id,
     )
 
-    return redemption
+    return {"redemption": redemption, "coupon_code": coupon.code if coupon else None}

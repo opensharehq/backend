@@ -27,18 +27,20 @@ class ShopRedemptionFlowTests(TestCase):
         """Test complete flow: user redeems item."""
         # Create shop item
         item = ShopItem.objects.create(
-            name="Premium Sticker Pack",
-            description="Exclusive sticker collection",
+            name_zh="Premium Sticker Pack",
+            name_en="Premium Sticker Pack",
+            description_zh="Exclusive sticker collection",
             cost=100,
             stock=10,
             is_active=True,
         )
 
         # Redeem item
-        redemption = redeem_item(
+        result = redeem_item(
             user=self.user,
             item_id=item.id,
         )
+        redemption = result["redemption"]
 
         # Verify redemption was created
         self.assertEqual(redemption.user_profile, self.user)
@@ -54,8 +56,9 @@ class ShopRedemptionFlowTests(TestCase):
         """Test redemption fails when item is out of stock."""
         # Create item with no stock
         item = ShopItem.objects.create(
-            name="Sold Out Item",
-            description="No longer available",
+            name_zh="Sold Out Item",
+            name_en="Sold Out Item",
+            description_zh="No longer available",
             cost=50,
             stock=0,  # Out of stock
             is_active=True,
@@ -74,8 +77,9 @@ class ShopRedemptionFlowTests(TestCase):
         """Test redemption fails when item is not active."""
         # Create inactive item
         item = ShopItem.objects.create(
-            name="Inactive Item",
-            description="Not available",
+            name_zh="Inactive Item",
+            name_en="Inactive Item",
+            description_zh="Not available",
             cost=50,
             stock=10,
             is_active=False,  # Inactive
@@ -94,26 +98,28 @@ class ShopRedemptionFlowTests(TestCase):
         """Test user can make multiple redemptions."""
         # Create two items
         item1 = ShopItem.objects.create(
-            name="Item 1",
-            description="First item",
+            name_zh="Item 1",
+            name_en="Item 1",
+            description_zh="First item",
             cost=100,
             stock=10,
             is_active=True,
         )
 
         item2 = ShopItem.objects.create(
-            name="Item 2",
-            description="Second item",
+            name_zh="Item 2",
+            name_en="Item 2",
+            description_zh="Second item",
             cost=150,
             stock=10,
             is_active=True,
         )
 
         # Redeem first item
-        redemption1 = redeem_item(user=self.user, item_id=item1.id)
+        redemption1 = redeem_item(user=self.user, item_id=item1.id)["redemption"]
 
         # Redeem second item
-        redemption2 = redeem_item(user=self.user, item_id=item2.id)
+        redemption2 = redeem_item(user=self.user, item_id=item2.id)["redemption"]
 
         # Verify both redemptions exist
         self.assertEqual(Redemption.objects.filter(user_profile=self.user).count(), 2)

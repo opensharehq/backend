@@ -345,7 +345,9 @@ class AccountMergeServiceEdgeTests(CacheClearTestCase):
             district="区",
             address="街道1号",
         )
-        item = ShopItem.objects.create(name="Gift", description="d", cost=1)
+        item = ShopItem.objects.create(
+            name_zh="Gift", name_en="Gift", description_zh="d", cost=1
+        )
         Redemption.objects.create(
             user_profile=self.source,
             item=item,

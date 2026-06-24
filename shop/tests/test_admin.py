@@ -47,8 +47,9 @@ class ShopItemAdminTests(TestCase):
     def test_stock_display_with_shipping(self):
         """Test stock display method works with requires_shipping field."""
         item = ShopItem.objects.create(
-            name="Test Item",
-            description="Test",
+            name_zh="Test Item",
+            name_en="Test Item",
+            description_zh="Test",
             cost=100,
             stock=15,
             requires_shipping=True,
@@ -61,20 +62,23 @@ class ShopItemAdminTests(TestCase):
     def test_stock_display_handles_infinite_and_low_stock(self):
         """Test colorized stock display branches."""
         unlimited = ShopItem.objects.create(
-            name="Unlimited",
-            description="Unlimited item",
+            name_zh="Unlimited",
+            name_en="Unlimited",
+            description_zh="Unlimited item",
             cost=100,
             stock=None,
         )
         low_stock = ShopItem.objects.create(
-            name="Low",
-            description="Low stock item",
+            name_zh="Low",
+            name_en="Low",
+            description_zh="Low stock item",
             cost=100,
             stock=3,
         )
         sold_out = ShopItem.objects.create(
-            name="Sold out",
-            description="Sold out item",
+            name_zh="Sold out",
+            name_en="Sold out",
+            description_zh="Sold out item",
             cost=100,
             stock=0,
         )
@@ -86,8 +90,9 @@ class ShopItemAdminTests(TestCase):
     def test_has_image_and_redemption_count_helpers(self):
         """Test additional ShopItem admin helpers."""
         item = ShopItem.objects.create(
-            name="With Image",
-            description="Test",
+            name_zh="With Image",
+            name_en="With Image",
+            description_zh="Test",
             cost=100,
             stock=5,
         )
@@ -129,8 +134,9 @@ class RedemptionAdminTests(TestCase):
         """Test has_shipping_address display returns True when address exists."""
         # Create item and address
         item = ShopItem.objects.create(
-            name="Physical Item",
-            description="Test",
+            name_zh="Physical Item",
+            name_en="Physical Item",
+            description_zh="Test",
             cost=100,
             requires_shipping=True,
         )
@@ -150,7 +156,7 @@ class RedemptionAdminTests(TestCase):
             user=self.user,
             item_id=item.id,
             shipping_address_id=address.id,
-        )
+        )["redemption"]
 
         # Test display method
         result = self.admin.has_shipping_address(redemption)
@@ -160,14 +166,15 @@ class RedemptionAdminTests(TestCase):
         """Test has_shipping_address display returns False when no address."""
         # Create virtual item (no shipping)
         item = ShopItem.objects.create(
-            name="Virtual Item",
-            description="Test",
+            name_zh="Virtual Item",
+            name_en="Virtual Item",
+            description_zh="Test",
             cost=100,
             requires_shipping=False,
         )
 
         # Redeem item
-        redemption = redeem_item(user=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)["redemption"]
 
         # Test display method
         result = self.admin.has_shipping_address(redemption)
@@ -177,8 +184,9 @@ class RedemptionAdminTests(TestCase):
         """Test shipping_address_display shows address details."""
         # Create item and address
         item = ShopItem.objects.create(
-            name="Physical Item",
-            description="Test",
+            name_zh="Physical Item",
+            name_en="Physical Item",
+            description_zh="Test",
             cost=100,
             requires_shipping=True,
         )
@@ -198,7 +206,7 @@ class RedemptionAdminTests(TestCase):
             user=self.user,
             item_id=item.id,
             shipping_address_id=address.id,
-        )
+        )["redemption"]
 
         # Test display method
         result = self.admin.shipping_address_display(redemption)
@@ -214,14 +222,15 @@ class RedemptionAdminTests(TestCase):
         """Test shipping_address_display shows message when no address."""
         # Create virtual item
         item = ShopItem.objects.create(
-            name="Virtual Item",
-            description="Test",
+            name_zh="Virtual Item",
+            name_en="Virtual Item",
+            description_zh="Test",
             cost=100,
             requires_shipping=False,
         )
 
         # Redeem item
-        redemption = redeem_item(user=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)["redemption"]
 
         # Test display method
         result = self.admin.shipping_address_display(redemption)
@@ -241,8 +250,9 @@ class RedemptionAdminTests(TestCase):
         self.admin.message_user = lambda _request, _message: None
 
         item = ShopItem.objects.create(
-            name="Action Item",
-            description="Action",
+            name_zh="Action Item",
+            name_en="Action Item",
+            description_zh="Action",
             cost=100,
             requires_shipping=False,
         )
@@ -251,7 +261,7 @@ class RedemptionAdminTests(TestCase):
             item=item,
             points_cost_at_redemption=item.cost,
         )
-        redemption = redeem_item(user=self.user, item_id=item.id)
+        redemption = redeem_item(user=self.user, item_id=item.id)["redemption"]
 
         assert "orange" in str(self.admin.status_display(pending_redemption))
 

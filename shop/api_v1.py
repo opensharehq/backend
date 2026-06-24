@@ -20,7 +20,7 @@ from config.api_common import (
 )
 from points import services as points_services
 
-from .models import Redemption, ShopItem
+from .models import CouponCode, Redemption, ShopItem
 from .services import RedemptionError, redeem_item
 
 router = Router(tags=["shop"], auth=jwt_bearer_auth)
@@ -29,6 +29,7 @@ router = Router(tags=["shop"], auth=jwt_bearer_auth)
 class RedemptionCreateSchema(Schema):
     item_id: int
     shipping_address_id: int | None = None
+    lang: str = "zh"
 
 
 class ShopItemAllowedTagSchema(Schema):
@@ -60,12 +61,17 @@ class DetailedBalanceSchema(Schema):
 
 class ShopItemSchema(Schema):
     id: int
-    name: str
-    description: str
+    name_zh: str
+    name_en: str
+    brief_zh: str
+    brief_en: str
+    description_zh: str
+    description_en: str
     cost: int
     stock: int | None = None
     is_active: bool
-    image_url: str | None = None
+    image_card_url: str | None = None
+    image_detail_url: str | None = None
     requires_shipping: bool
     allowed_tags: list[ShopItemAllowedTagSchema]
     created_at: str
@@ -89,6 +95,7 @@ class RedemptionSchema(Schema):
     created_at: str
     item: ShopItemSchema
     shipping_address: ShippingAddressSchema | None = None
+    coupon_code: str | None = None
 
 
 class RedemptionListResponseSchema(Schema):
@@ -96,16 +103,31 @@ class RedemptionListResponseSchema(Schema):
     pagination: PaginationSchema
 
 
+def _get_dynamic_stock(item: ShopItem) -> int | None:
+    """Return dynamic stock based on coupon_type or static stock field."""
+    if item.coupon_type:
+        return CouponCode.objects.filter(
+            code_type=item.coupon_type,
+            status=CouponCode.Status.AVAILABLE,
+        ).count()
+    return item.stock
+
+
 def _serialize_shop_item(item: ShopItem) -> dict:
     allowed_tags = list(item.allowed_tags.all())
     return {
         "id": item.id,
-        "name": item.name,
-        "description": item.description,
+        "name_zh": item.name_zh,
+        "name_en": item.name_en,
+        "brief_zh": item.brief_zh,
+        "brief_en": item.brief_en,
+        "description_zh": item.description_zh,
+        "description_en": item.description_en,
         "cost": item.cost,
-        "stock": item.stock,
+        "stock": _get_dynamic_stock(item),
         "is_active": item.is_active,
-        "image_url": item.image.url if item.image else None,
+        "image_card_url": item.image_card.url if item.image_card else None,
+        "image_detail_url": item.image_detail.url if item.image_detail else None,
         "requires_shipping": item.requires_shipping,
         "allowed_tags": [
             {
@@ -120,7 +142,9 @@ def _serialize_shop_item(item: ShopItem) -> dict:
     }
 
 
-def _serialize_redemption(redemption: Redemption) -> dict:
+def _serialize_redemption(
+    redemption: Redemption, coupon_code: str | None = None
+) -> dict:
     return {
         "id": redemption.id,
         "status": redemption.status,
@@ -132,6 +156,7 @@ def _serialize_redemption(redemption: Redemption) -> dict:
             if redemption.shipping_address
             else None
         ),
+        "coupon_code": coupon_code,
     }
 
 
@@ -278,19 +303,33 @@ def redemption_detail_endpoint(request, redemption_id: int):
 )
 def redemption_create_endpoint(request, payload: RedemptionCreateSchema):
     """Redeem a shop item."""
+    import inspect
+
+    redeem_kwargs: dict = {
+        "user": request.auth,
+        "item_id": payload.item_id,
+        "shipping_address_id": payload.shipping_address_id,
+    }
+    if "lang" in inspect.signature(redeem_item).parameters:
+        redeem_kwargs["lang"] = payload.lang
+
     try:
-        redemption = redeem_item(
-            user=request.auth,
-            item_id=payload.item_id,
-            shipping_address_id=payload.shipping_address_id,
-        )
+        result = redeem_item(**redeem_kwargs)
     except RedemptionError as exc:
         _raise_redemption_api_error(str(exc))
         raise AssertionError("unreachable")
+
+    # Handle both old (Redemption object) and new (dict) return formats
+    if isinstance(result, dict):
+        redemption = result["redemption"]
+        coupon_code = result.get("coupon_code")
+    else:
+        redemption = result
+        coupon_code = None
 
     redemption = (
         Redemption.objects.select_related("item", "shipping_address")
         .prefetch_related("item__allowed_tags")
         .get(id=redemption.id)
     )
-    return 201, _serialize_redemption(redemption)
+    return 201, _serialize_redemption(redemption, coupon_code=coupon_code)

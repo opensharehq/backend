@@ -39,8 +39,8 @@ class GrantPointsFormTests(TestCase):
         )
         self.assertTrue(form.is_valid())
 
-    def test_gift_without_tag_invalid(self):
-        """Test gift points without tag is invalid."""
+    def test_gift_without_tag_valid(self):
+        """Test gift points without tag is valid (generic gift points)."""
         form = GrantPointsForm(
             data={
                 "point_type": PointType.GIFT.value,
@@ -48,8 +48,7 @@ class GrantPointsFormTests(TestCase):
                 "reason": "测试发放礼物积分",
             }
         )
-        self.assertFalse(form.is_valid())
-        self.assertIn("礼物积分必须选择标签", str(form.errors))
+        self.assertTrue(form.is_valid())
 
     def test_cash_with_tag_invalid(self):
         """Test cash points with tag is invalid."""
@@ -210,14 +209,15 @@ class GrantPointsToUsersViewTests(TestCase):
         response = self.client.post(
             f"/admin/points/grant-to-users/?ids={self.user1.id}",
             {
-                "point_type": PointType.GIFT.value,
+                "point_type": PointType.CASH.value,
                 "amount": 50,
-                "reason": "礼物积分发放",
-                # Missing tag for gift points
+                "reason": "现金积分发放",
+                "tag": self.tag.id,
+                # Cash points cannot have a tag
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "礼物积分必须选择标签")
+        self.assertContains(response, "现金积分不能选择标签")
 
 
 class GrantPointsToOrgsViewTests(TestCase):
@@ -339,14 +339,15 @@ class GrantPointsToOrgsViewTests(TestCase):
         response = self.client.post(
             f"/admin/points/grant-to-orgs/?ids={self.org1.id}",
             {
-                "point_type": PointType.GIFT.value,
+                "point_type": PointType.CASH.value,
                 "amount": 50,
-                "reason": "礼物积分发放",
-                # Missing tag for gift points
+                "reason": "现金积分发放",
+                "tag": self.tag.id,
+                # Cash points cannot have a tag
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "礼物积分必须选择标签")
+        self.assertContains(response, "现金积分不能选择标签")
 
 
 class AdminActionTests(TestCase):

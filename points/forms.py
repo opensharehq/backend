@@ -161,7 +161,7 @@ class GrantPointsForm(forms.Form):
         queryset=Tag.objects.all(),
         required=False,
         label="标签",
-        help_text="仅礼物积分需要选择标签",
+        help_text="可选，用于标记礼物积分来源；现金积分不可设置标签",
         widget=forms.Select(attrs={"class": "form-control"}),
     )
     expires_at = forms.DateField(
@@ -181,10 +181,6 @@ class GrantPointsForm(forms.Form):
         cleaned_data = super().clean()
         point_type = cleaned_data.get("point_type")
         tag = cleaned_data.get("tag")
-
-        if point_type == PointType.GIFT.value and not tag:
-            msg = "礼物积分必须选择标签"
-            raise forms.ValidationError(msg)
 
         if point_type == PointType.CASH.value and tag:
             msg = "现金积分不能选择标签"

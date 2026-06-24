@@ -1,0 +1,58 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}批量导入兑换码{% endblock title %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">首页</a>
+    › <a href="{% url 'admin:app_list' opts.app_label %}">{{ opts.app_label }}</a>
+    › <a href="{% url 'admin:shop_couponcode_changelist' %}">{{ opts.verbose_name_plural }}</a>
+    › 批量导入
+  </div>
+{% endblock breadcrumbs %}
+
+{% block content %}
+<div id="content-main">
+  <h1>批量导入兑换码</h1>
+
+  {% if error %}
+  <p class="errornote">{{ error }}</p>
+  {% endif %}
+
+  {% if success %}
+  <ul class="messagelist">
+    <li class="success">{{ success }}</li>
+  </ul>
+  {% endif %}
+
+  <form method="post" action="">
+    {% csrf_token %}
+    <fieldset class="module aligned">
+      <h2>导入设置</h2>
+      <div class="form-row">
+        <label for="id_code_type">兑换码类型：</label>
+        <input type="text" name="code_type" id="id_code_type" list="code_type_list"
+               value="{{ code_type|default:'' }}" required
+               class="vTextField" placeholder="输入或选择兑换码类型">
+        <datalist id="code_type_list">
+          {% for t in existing_types %}
+          <option value="{{ t }}"></option>
+          {% endfor %}
+        </datalist>
+        <p class="help">输入新类型名称或从下拉列表选择已有类型</p>
+      </div>
+      <div class="form-row">
+        <label for="id_codes">兑换码列表：</label>
+        <textarea name="codes" id="id_codes" rows="15" cols="80"
+                  required placeholder="每行一个兑换码&#10;例如:&#10;ABC-1234-XXXX&#10;DEF-5678-YYYY"></textarea>
+        <p class="help">每行输入一个兑换码，自动去除空行和重复项</p>
+      </div>
+    </fieldset>
+    <div class="submit-row">
+      <input type="submit" value="批量导入" class="default">
+      <a href="{% url 'admin:shop_couponcode_changelist' %}" class="button cancel-link">返回列表</a>
+    </div>
+  </form>
+</div>
+{% endblock content %}

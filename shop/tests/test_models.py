@@ -15,23 +15,27 @@ class ShopItemModelTests(TestCase):
     def test_shop_item_str(self):
         """Test string representation of ShopItem."""
         item = ShopItem.objects.create(
-            name="Test Item", description="Test description", cost=100
+            name_zh="Test Item",
+            name_en="Test Item",
+            description_zh="Test description",
+            cost=100,
         )
 
-        self.assertEqual(str(item), "Test Item - 100 pts")
+        self.assertEqual(str(item), "Test Item")
 
     def test_shop_item_creation(self):
         """Test creating a shop item."""
         item = ShopItem.objects.create(
-            name="Test Item",
-            description="Test description",
+            name_zh="Test Item",
+            name_en="Test Item",
+            description_zh="Test description",
             cost=100,
             stock=10,
             is_active=True,
         )
 
-        self.assertEqual(item.name, "Test Item")
-        self.assertEqual(item.description, "Test description")
+        self.assertEqual(item.name_zh, "Test Item")
+        self.assertEqual(item.description_zh, "Test description")
         self.assertEqual(item.cost, 100)
         self.assertEqual(item.stock, 10)
         self.assertTrue(item.is_active)
@@ -39,20 +43,28 @@ class ShopItemModelTests(TestCase):
     def test_shop_item_unlimited_stock(self):
         """Test creating item with unlimited stock."""
         item = ShopItem.objects.create(
-            name="Unlimited Item", description="Test", cost=50, stock=None
+            name_zh="Unlimited Item",
+            name_en="Unlimited Item",
+            description_zh="Test",
+            cost=50,
+            stock=None,
         )
 
         self.assertIsNone(item.stock)
 
     def test_shop_item_default_is_active(self):
         """Test that is_active defaults to True."""
-        item = ShopItem.objects.create(name="Test", description="Test", cost=10)
+        item = ShopItem.objects.create(
+            name_zh="Test", name_en="Test", description_zh="Test", cost=10
+        )
 
         self.assertTrue(item.is_active)
 
     def test_shop_item_timestamps(self):
         """Test that created_at and updated_at are set."""
-        item = ShopItem.objects.create(name="Test", description="Test", cost=10)
+        item = ShopItem.objects.create(
+            name_zh="Test", name_en="Test", description_zh="Test", cost=10
+        )
 
         self.assertIsNotNone(item.created_at)
         self.assertIsNotNone(item.updated_at)
@@ -60,10 +72,13 @@ class ShopItemModelTests(TestCase):
     def test_shop_item_without_image(self):
         """Test creating shop item without image (null/blank)."""
         item = ShopItem.objects.create(
-            name="Item without Image", description="Test", cost=50
+            name_zh="Item without Image",
+            name_en="Item without Image",
+            description_zh="Test",
+            cost=50,
         )
 
-        self.assertFalse(item.image)
+        self.assertFalse(item.image_card)
 
     def test_shop_item_verbose_name(self):
         """Test that verbose_name is set correctly."""
@@ -74,43 +89,60 @@ class ShopItemModelTests(TestCase):
         """Test that name field respects max_length constraint."""
         # Create item with exactly 100 characters (should work)
         long_name = "A" * 100
-        item = ShopItem.objects.create(name=long_name, description="Test", cost=50)
-        self.assertEqual(len(item.name), 100)
+        item = ShopItem.objects.create(
+            name_zh=long_name, name_en=long_name, description_zh="Test", cost=50
+        )
+        self.assertEqual(len(item.name_zh), 100)
 
         # Test with 101 characters (should fail on save)
         very_long_name = "A" * 101
-        item_too_long = ShopItem(name=very_long_name, description="Test", cost=50)
+        item_too_long = ShopItem(
+            name_zh=very_long_name,
+            name_en=very_long_name,
+            description_zh="Test",
+            cost=50,
+        )
         with self.assertRaises(ValidationError):
             item_too_long.full_clean()
 
     def test_shop_item_cost_must_be_positive(self):
         """Test that cost cannot be negative."""
         # This is enforced by PositiveIntegerField at database level
-        item = ShopItem(name="Test", description="Test", cost=-10)
+        item = ShopItem(name_zh="Test", name_en="Test", description_zh="Test", cost=-10)
         with self.assertRaises(ValidationError):
             item.full_clean()
 
     def test_shop_item_cost_zero_is_valid(self):
         """Test that cost can be zero (free item)."""
-        item = ShopItem.objects.create(name="Free Item", description="Test", cost=0)
+        item = ShopItem.objects.create(
+            name_zh="Free Item", name_en="Free Item", description_zh="Test", cost=0
+        )
         self.assertEqual(item.cost, 0)
 
     def test_shop_item_stock_must_be_positive_or_null(self):
         """Test that stock cannot be negative."""
-        item = ShopItem(name="Test", description="Test", cost=10, stock=-5)
+        item = ShopItem(
+            name_zh="Test", name_en="Test", description_zh="Test", cost=10, stock=-5
+        )
         with self.assertRaises(ValidationError):
             item.full_clean()
 
     def test_shop_item_stock_zero_is_valid(self):
         """Test that stock can be zero (out of stock)."""
         item = ShopItem.objects.create(
-            name="Out of Stock", description="Test", cost=50, stock=0
+            name_zh="Out of Stock",
+            name_en="Out of Stock",
+            description_zh="Test",
+            cost=50,
+            stock=0,
         )
         self.assertEqual(item.stock, 0)
 
     def test_shop_item_updated_at_changes_on_update(self):
         """Test that updated_at changes when item is updated."""
-        item = ShopItem.objects.create(name="Test", description="Test", cost=100)
+        item = ShopItem.objects.create(
+            name_zh="Test", name_en="Test", description_zh="Test", cost=100
+        )
         original_updated_at = item.updated_at
 
         # Wait a tiny bit and update
@@ -122,7 +154,9 @@ class ShopItemModelTests(TestCase):
 
     def test_shop_item_created_at_does_not_change_on_update(self):
         """Test that created_at remains constant after updates."""
-        item = ShopItem.objects.create(name="Test", description="Test", cost=100)
+        item = ShopItem.objects.create(
+            name_zh="Test", name_en="Test", description_zh="Test", cost=100
+        )
         original_created_at = item.created_at
 
         item.cost = 200
@@ -137,7 +171,11 @@ class ShopItemModelTests(TestCase):
         user1 = User.objects.create_user(username="user1", password="pass")
         user2 = User.objects.create_user(username="user2", password="pass")
         item = ShopItem.objects.create(
-            name="Popular Item", description="Test", cost=100, stock=10
+            name_zh="Popular Item",
+            name_en="Popular Item",
+            description_zh="Test",
+            cost=100,
+            stock=10,
         )
 
         redemption1 = Redemption.objects.create(
@@ -154,7 +192,11 @@ class ShopItemModelTests(TestCase):
     def test_shop_item_is_active_false(self):
         """Test creating item with is_active=False."""
         item = ShopItem.objects.create(
-            name="Inactive Item", description="Test", cost=50, is_active=False
+            name_zh="Inactive Item",
+            name_en="Inactive Item",
+            description_zh="Test",
+            cost=50,
+            is_active=False,
         )
         self.assertFalse(item.is_active)
 
@@ -162,16 +204,19 @@ class ShopItemModelTests(TestCase):
         """Test that description TextField can handle long text."""
         long_description = "Test description " * 1000
         item = ShopItem.objects.create(
-            name="Test", description=long_description, cost=100
+            name_zh="Test", name_en="Test", description_zh=long_description, cost=100
         )
-        self.assertGreater(len(item.description), 1000)
+        self.assertGreater(len(item.description_zh), 1000)
 
     def test_shop_item_str_with_special_characters(self):
         """Test string representation with special characters."""
         item = ShopItem.objects.create(
-            name="特殊商品 & 测试", description="Test", cost=999
+            name_zh="特殊商品 & 测试",
+            name_en="特殊商品 & 测试",
+            description_zh="Test",
+            cost=999,
         )
-        self.assertEqual(str(item), "特殊商品 & 测试 - 999 pts")
+        self.assertEqual(str(item), "特殊商品 & 测试")
 
 
 class RedemptionModelTests(TestCase):
@@ -183,7 +228,7 @@ class RedemptionModelTests(TestCase):
             username="testuser", email="test@example.com", password="password123"
         )
         self.item = ShopItem.objects.create(
-            name="Test Item", description="Test", cost=100
+            name_zh="Test Item", name_en="Test Item", description_zh="Test", cost=100
         )
 
     def test_redemption_str(self):
@@ -320,8 +365,12 @@ class RedemptionModelTests(TestCase):
 
     def test_redemption_user_can_have_multiple_redemptions(self):
         """Test that one user can have multiple redemptions."""
-        item1 = ShopItem.objects.create(name="Item 1", description="Test", cost=50)
-        item2 = ShopItem.objects.create(name="Item 2", description="Test", cost=75)
+        item1 = ShopItem.objects.create(
+            name_zh="Item 1", name_en="Item 1", description_zh="Test", cost=50
+        )
+        item2 = ShopItem.objects.create(
+            name_zh="Item 2", name_en="Item 2", description_zh="Test", cost=75
+        )
 
         redemption1 = Redemption.objects.create(
             user_profile=self.user, item=item1, points_cost_at_redemption=50
@@ -370,7 +419,9 @@ class RedemptionModelTests(TestCase):
         """Test string representation with special characters in username."""
         User = get_user_model()
         user = User.objects.create_user(username="user@test", password="pass")
-        item = ShopItem.objects.create(name="特殊商品", description="Test", cost=100)
+        item = ShopItem.objects.create(
+            name_zh="特殊商品", name_en="特殊商品", description_zh="Test", cost=100
+        )
         redemption = Redemption.objects.create(
             user_profile=user, item=item, points_cost_at_redemption=100
         )

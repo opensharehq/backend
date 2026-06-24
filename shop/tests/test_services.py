@@ -27,10 +27,15 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_success(self):
         """Test successful item redemption."""
         item = ShopItem.objects.create(
-            name="Test Item", description="Test", cost=100, stock=5
+            name_zh="Test Item",
+            name_en="Test Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
         )
 
-        redemption = redeem_item(user=self.user, item_id=item.id)
+        result = redeem_item(user=self.user, item_id=item.id)
+        redemption = result["redemption"]
 
         self.assertEqual(redemption.user_profile, self.user)
         self.assertEqual(redemption.item, item)
@@ -44,10 +49,15 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_unlimited_stock(self):
         """Test redeeming item with unlimited stock."""
         item = ShopItem.objects.create(
-            name="Unlimited Item", description="Test", cost=100, stock=None
+            name_zh="Unlimited Item",
+            name_en="Unlimited Item",
+            description_zh="Test",
+            cost=100,
+            stock=None,
         )
 
-        redemption = redeem_item(user=self.user, item_id=item.id)
+        result = redeem_item(user=self.user, item_id=item.id)
+        redemption = result["redemption"]
 
         self.assertIsNotNone(redemption)
         # Stock should remain None
@@ -62,7 +72,11 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_inactive(self):
         """Test redeeming inactive item raises error."""
         item = ShopItem.objects.create(
-            name="Inactive Item", description="Test", cost=100, is_active=False
+            name_zh="Inactive Item",
+            name_en="Inactive Item",
+            description_zh="Test",
+            cost=100,
+            is_active=False,
         )
 
         with self.assertRaisesMessage(RedemptionError, "该商品已下架"):
@@ -71,7 +85,11 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_out_of_stock(self):
         """Test redeeming out of stock item raises error."""
         item = ShopItem.objects.create(
-            name="Out of Stock", description="Test", cost=100, stock=0
+            name_zh="Out of Stock",
+            name_en="Out of Stock",
+            description_zh="Test",
+            cost=100,
+            stock=0,
         )
 
         with self.assertRaisesMessage(RedemptionError, "该商品已售罄"):
@@ -81,7 +99,11 @@ class RedeemItemServiceTests(TestCase):
         """Test that redemption is atomic - failures don't change state."""
         # Create item with 0 stock to trigger error
         item = ShopItem.objects.create(
-            name="No Stock", description="Test", cost=50, stock=0
+            name_zh="No Stock",
+            name_en="No Stock",
+            description_zh="Test",
+            cost=50,
+            stock=0,
         )
 
         # Try to redeem - should fail
@@ -93,9 +115,12 @@ class RedeemItemServiceTests(TestCase):
 
     def test_redeem_item_records_cost_at_redemption_time(self):
         """Test that redemption records the item cost at time of redemption."""
-        item = ShopItem.objects.create(name="Price Test", description="Test", cost=100)
+        item = ShopItem.objects.create(
+            name_zh="Price Test", name_en="Price Test", description_zh="Test", cost=100
+        )
 
-        redemption = redeem_item(user=self.user, item_id=item.id)
+        result = redeem_item(user=self.user, item_id=item.id)
+        redemption = result["redemption"]
 
         # Record the cost
         original_cost = redemption.points_cost_at_redemption
@@ -112,7 +137,11 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_concurrent_stock_update(self):
         """Test that stock updates use F() expression to prevent race conditions."""
         item = ShopItem.objects.create(
-            name="Stock Test", description="Test", cost=50, stock=10
+            name_zh="Stock Test",
+            name_en="Stock Test",
+            description_zh="Test",
+            cost=50,
+            stock=10,
         )
 
         # Redeem item
@@ -126,7 +155,11 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_rejects_second_stale_stock_snapshot(self):
         """A stale second stock snapshot should not be able to create another redemption."""
         item = ShopItem.objects.create(
-            name="Last Item", description="Test", cost=50, stock=1
+            name_zh="Last Item",
+            name_en="Last Item",
+            description_zh="Test",
+            cost=50,
+            stock=1,
         )
         stale_item_1 = ShopItem.objects.get(id=item.id)
         stale_item_2 = ShopItem.objects.get(id=item.id)
@@ -158,10 +191,15 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_stock_exactly_one(self):
         """Test redeeming item when stock is exactly 1."""
         item = ShopItem.objects.create(
-            name="Last Item", description="Test", cost=50, stock=1
+            name_zh="Last Item",
+            name_en="Last Item",
+            description_zh="Test",
+            cost=50,
+            stock=1,
         )
 
-        redemption = redeem_item(user=self.user, item_id=item.id)
+        result = redeem_item(user=self.user, item_id=item.id)
+        redemption = result["redemption"]
 
         self.assertIsNotNone(redemption)
 
@@ -176,8 +214,9 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_requires_shipping_without_address(self):
         """Test redeeming item that requires shipping without address fails."""
         item = ShopItem.objects.create(
-            name="Physical Item",
-            description="Test",
+            name_zh="Physical Item",
+            name_en="Physical Item",
+            description_zh="Test",
             cost=100,
             requires_shipping=True,
         )
@@ -189,8 +228,9 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_requires_shipping_with_invalid_address(self):
         """Test redeeming with invalid shipping address ID fails."""
         item = ShopItem.objects.create(
-            name="Physical Item",
-            description="Test",
+            name_zh="Physical Item",
+            name_en="Physical Item",
+            description_zh="Test",
             cost=100,
             requires_shipping=True,
         )
@@ -223,8 +263,9 @@ class RedeemItemServiceTests(TestCase):
         )
 
         item = ShopItem.objects.create(
-            name="Physical Item",
-            description="Test",
+            name_zh="Physical Item",
+            name_en="Physical Item",
+            description_zh="Test",
             cost=100,
             requires_shipping=True,
         )
@@ -247,8 +288,9 @@ class RedeemItemServiceTests(TestCase):
         tag_b = Tag.objects.create(name="Tag B", slug="tag-b")
 
         item = ShopItem.objects.create(
-            name="Tagged Item",
-            description="Test",
+            name_zh="Tagged Item",
+            name_en="Tagged Item",
+            description_zh="Test",
             cost=100,
             stock=5,
         )
@@ -263,9 +305,11 @@ class RedeemItemServiceTests(TestCase):
 
         mock_get_balance.side_effect = fake_balance
 
-        redemption = redeem_item(user=self.user, item_id=item.id)
+        result = redeem_item(user=self.user, item_id=item.id)
+        redemption = result["redemption"]
 
         self.assertIsNotNone(redemption)
+        self.assertIsInstance(redemption, Redemption)
         mock_spend_points.assert_called_once()
         _, kwargs = mock_spend_points.call_args
         self.assertEqual(kwargs["tag_slug"], tag_b.slug)
@@ -279,8 +323,9 @@ class RedeemItemServiceTests(TestCase):
         tag_b = Tag.objects.create(name="Tag B", slug="tag-b")
 
         item = ShopItem.objects.create(
-            name="Tagged Item",
-            description="Test",
+            name_zh="Tagged Item",
+            name_en="Tagged Item",
+            description_zh="Test",
             cost=100,
             stock=5,
         )
@@ -305,8 +350,9 @@ class RedeemItemServiceTests(TestCase):
         tag_b = Tag.objects.create(name="Beta Tag", slug="beta-tag")
 
         item = ShopItem.objects.create(
-            name="Priority Item",
-            description="Test",
+            name_zh="Priority Item",
+            name_en="Priority Item",
+            description_zh="Test",
             cost=100,
             stock=5,
         )
@@ -330,8 +376,9 @@ class RedeemItemServiceTests(TestCase):
         tag_b = Tag.objects.create(name="Partial B", slug="partial-b")
 
         item = ShopItem.objects.create(
-            name="Split Balance Item",
-            description="Test",
+            name_zh="Split Balance Item",
+            name_en="Split Balance Item",
+            description_zh="Test",
             cost=100,
             stock=5,
         )
@@ -355,7 +402,11 @@ class RedeemItemServiceTests(TestCase):
         """Wrap spend_points errors in RedemptionError while keeping state unchanged."""
         mock_spend_points.side_effect = points_services.InsufficientPointsError("不足")
         item = ShopItem.objects.create(
-            name="Expensive Tag", description="Test", cost=500, stock=10
+            name_zh="Expensive Tag",
+            name_en="Expensive Tag",
+            description_zh="Test",
+            cost=500,
+            stock=10,
         )
 
         with self.assertRaisesMessage(RedemptionError, "积分不足"):
@@ -368,7 +419,11 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_rolls_back_when_redemption_creation_fails(self):
         """Late failures while creating the redemption should restore points and stock."""
         item = ShopItem.objects.create(
-            name="Creation Failure", description="Test", cost=120, stock=3
+            name_zh="Creation Failure",
+            name_en="Creation Failure",
+            description_zh="Test",
+            cost=120,
+            stock=3,
         )
         initial_balance = points_services.get_balance(self.user, PointType.GIFT)
 
@@ -390,7 +445,11 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_rolls_back_when_stock_update_fails(self):
         """Stock persistence failures should roll back the spent points and redemption row."""
         item = ShopItem.objects.create(
-            name="Save Failure", description="Test", cost=150, stock=4
+            name_zh="Save Failure",
+            name_en="Save Failure",
+            description_zh="Test",
+            cost=150,
+            stock=4,
         )
         initial_balance = points_services.get_balance(self.user, PointType.GIFT)
 
@@ -424,18 +483,20 @@ class RedeemItemServiceTests(TestCase):
         )
 
         item = ShopItem.objects.create(
-            name="Physical Item",
-            description="Test",
+            name_zh="Physical Item",
+            name_en="Physical Item",
+            description_zh="Test",
             cost=100,
             requires_shipping=True,
         )
 
         # Should succeed with valid address
-        redemption = redeem_item(
+        result = redeem_item(
             user=self.user,
             item_id=item.id,
             shipping_address_id=address.id,
         )
+        redemption = result["redemption"]
 
         self.assertIsNotNone(redemption)
         self.assertEqual(redemption.shipping_address, address)
@@ -443,14 +504,16 @@ class RedeemItemServiceTests(TestCase):
     def test_redeem_item_not_requiring_shipping(self):
         """Test redeeming virtual item without shipping address."""
         item = ShopItem.objects.create(
-            name="Virtual Item",
-            description="Test",
+            name_zh="Virtual Item",
+            name_en="Virtual Item",
+            description_zh="Test",
             cost=100,
             requires_shipping=False,
         )
 
         # Should succeed without shipping address
-        redemption = redeem_item(user=self.user, item_id=item.id)
+        result = redeem_item(user=self.user, item_id=item.id)
+        redemption = result["redemption"]
 
         self.assertIsNotNone(redemption)
         self.assertIsNone(redemption.shipping_address)
@@ -462,7 +525,11 @@ class RedeemItemServiceTests(TestCase):
             username="pooruser", email="poor@example.com", password="password123"
         )
         item = ShopItem.objects.create(
-            name="Expensive Item", description="Test", cost=100, stock=5
+            name_zh="Expensive Item",
+            name_en="Expensive Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
         )
 
         with self.assertRaisesMessage(RedemptionError, "积分不足"):

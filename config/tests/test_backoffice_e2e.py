@@ -8,7 +8,7 @@ from accounts.models import Organization
 from common.test_utils import BrowserE2ETestCase
 from messages.models import UserMessage
 from points import services as points_services
-from points.models import PointType
+from points.models import PointType, Tag
 
 User = get_user_model()
 
@@ -141,12 +141,15 @@ class BackOfficeE2ETests(BrowserE2ETestCase):
             email="validate-recipient@example.com",
             password="UserPass123!",
         )
+        test_tag = Tag.objects.create(name="E2ETag", slug="e2e-tag")
 
         self.login_admin_via_ui(admin.username, "AdminPass123!")
         self.goto(f"/admin/points/grant-to-users/?ids={recipient.id}")
-        self.page.check("input[value='gift']")
+        # Cash points cannot have a tag - select cash and pick a tag
+        self.page.check("input[value='cash']")
         self.page.fill("#id_amount", "10")
-        self.page.fill("#id_reason", "Validation case without tag")
+        self.page.fill("#id_reason", "Validation case cash with tag")
+        self.page.select_option("#id_tag", str(test_tag.id))
         self.page.locator("input[type='submit'][value='提交发放']").click()
         self.page.wait_for_load_state("networkidle")
 

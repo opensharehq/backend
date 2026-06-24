@@ -1,16 +1,16 @@
 {% extends "admin/base_site.html" %}
 {% load i18n %}
 
-{% block title %}批量导入兑换码{% endblock %}
+{% block title %}批量导入兑换码{% endblock title %}
 
 {% block breadcrumbs %}
   <div class="breadcrumbs">
     <a href="{% url 'admin:index' %}">首页</a>
-    &rsaquo; <a href="{% url 'admin:app_list' opts.app_label %}">{{ opts.app_label }}</a>
-    &rsaquo; <a href="{% url 'admin:shop_couponcode_changelist' %}">{{ opts.verbose_name_plural }}</a>
-    &rsaquo; 批量导入
+    › <a href="{% url 'admin:app_list' opts.app_label %}">{{ opts.app_label }}</a>
+    › <a href="{% url 'admin:shop_couponcode_changelist' %}">{{ opts.verbose_name_plural }}</a>
+    › 批量导入
   </div>
-{% endblock %}
+{% endblock breadcrumbs %}
 
 {% block content %}
 <div id="content-main">
@@ -34,10 +34,10 @@
         <label for="id_code_type">兑换码类型：</label>
         <input type="text" name="code_type" id="id_code_type" list="code_type_list"
                value="{{ code_type|default:'' }}" required
-               style="width: 300px;" placeholder="输入或选择兑换码类型">
+               class="vTextField" placeholder="输入或选择兑换码类型">
         <datalist id="code_type_list">
           {% for t in existing_types %}
-          <option value="{{ t }}">
+          <option value="{{ t }}"></option>
           {% endfor %}
         </datalist>
         <p class="help">输入新类型名称或从下拉列表选择已有类型</p>
@@ -55,4 +55,4 @@
     </div>
   </form>
 </div>
-{% endblock %}
+{% endblock content %}

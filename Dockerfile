@@ -71,6 +71,7 @@ COPY --from=builder /app/pyproject.toml /app/pyproject.toml
 COPY --from=builder /app/uv.lock /app/uv.lock
 COPY --from=builder /app/.env.example /app/.env.example
 COPY --from=builder /app/shenbianyun /app/shenbianyun
+COPY --from=builder /app/talent_reach /app/talent_reach
 # Carry the pre-downloaded ip2region xdb file into the runtime image and
 # point the application at it. Operators do not need to set IP2REGION_XDB_PATH
 # manually; .env may still override this for local development.

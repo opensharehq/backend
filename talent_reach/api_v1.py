@@ -10,6 +10,7 @@ from chdb.services import get_available_languages
 from config.api_common import ApiError, ErrorResponseSchema
 
 from . import services
+from .models import OutreachDraft
 
 router = Router(tags=["talent-reach"], auth=jwt_bearer_auth)
 
@@ -147,7 +148,7 @@ def draft_detail_endpoint(request, draft_id: int):
     """Get a single draft."""
     try:
         draft = services.get_draft(draft_id, request.auth)
-    except Exception as exc:
+    except OutreachDraft.DoesNotExist as exc:
         raise ApiError("not_found", 404, "Draft not found.") from exc
     return _serialize_draft(draft)
 
@@ -158,6 +159,7 @@ def draft_detail_endpoint(request, draft_id: int):
         200: DraftResponseSchema,
         401: ErrorResponseSchema,
         404: ErrorResponseSchema,
+        422: ErrorResponseSchema,
     },
 )
 def draft_update_endpoint(request, draft_id: int, payload: DraftCreateSchema):
@@ -175,7 +177,7 @@ def draft_update_endpoint(request, draft_id: int, payload: DraftCreateSchema):
             title_zh=payload.title_zh.strip(),
             content_zh=payload.content_zh,
         )
-    except Exception as exc:
+    except OutreachDraft.DoesNotExist as exc:
         raise ApiError("not_found", 404, "Draft not found.") from exc
     return _serialize_draft(draft)
 

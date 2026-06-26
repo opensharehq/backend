@@ -782,7 +782,7 @@ def query_developers_for_outreach(
             regions,
         )
 
-    limit_clause = f"LIMIT {int(top_n)}" if top_n else ""
+    limit_clause = f"LIMIT {int(top_n)}" if top_n and int(top_n) > 0 else ""
 
     sql = f"""
         SELECT

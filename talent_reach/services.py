@@ -8,7 +8,7 @@ import time
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import OperationalError, close_old_connections
+from django.db import OperationalError, close_old_connections, transaction
 from django.db.models import F, QuerySet
 from django.utils import timezone
 from social_django.models import UserSocialAuth
@@ -283,14 +283,19 @@ def send_outreach(
 
     # 6. Deduct points
     tag_is_null = point_type == PointType.GIFT
-    spend_points(
-        owner=author,
-        amount=total_cost,
-        point_type=point_type,
-        description=f"Talent outreach: {draft.title}",
-        tag_is_null=tag_is_null,
-        reference_id=reference_id,
-    )
+    try:
+        spend_points(
+            owner=author,
+            amount=total_cost,
+            point_type=point_type,
+            description=f"Talent outreach: {draft.title}",
+            tag_is_null=tag_is_null,
+            reference_id=reference_id,
+        )
+    except Exception:
+        campaign.status = OutreachCampaign.Status.FAILED
+        campaign.save(update_fields=["status"])
+        raise
 
     # 7. Calculate reward_amount for each user using largest remainder method
     scores = [d["openrank_score"] for d in developers]
@@ -451,12 +456,8 @@ def claim_reading_reward(user, user_message_id: int) -> dict | None:
     except OutreachRecipient.DoesNotExist:
         return None
 
-    # Already rewarded
-    if recipient.is_rewarded:
-        return None
-
-    # Already expired
-    if recipient.reward_expired:
+    # Already rewarded or expired
+    if recipient.is_rewarded or recipient.reward_expired:
         return None
 
     # Check expiry
@@ -471,25 +472,33 @@ def claim_reading_reward(user, user_message_id: int) -> dict | None:
     if recipient.reward_amount <= 0:
         return None
 
-    # Grant points
-    grant_points(
-        owner=user,
-        amount=recipient.reward_amount,
-        point_type=campaign.point_type,
-        reason=f"Outreach reading reward: {campaign.title}",
-        reference_id=f"outreach_reward_{campaign.id}",
-    )
+    # Atomically claim the reward by conditionally updating is_rewarded.
+    # Only one concurrent request can succeed because the UPDATE filters on
+    # is_rewarded=False; if another request already flipped it, updated==0.
+    now = timezone.now()
+    with transaction.atomic():
+        updated = OutreachRecipient.objects.filter(
+            id=recipient.id, is_rewarded=False
+        ).update(is_rewarded=True, rewarded_at=now)
 
-    # Update recipient record
-    recipient.is_rewarded = True
-    recipient.rewarded_at = timezone.now()
-    recipient.save(update_fields=["is_rewarded", "rewarded_at"])
+        if not updated:
+            # Another request already claimed the reward
+            return None
 
-    # Update campaign counters atomically
-    OutreachCampaign.objects.filter(id=campaign.id).update(
-        read_count=F("read_count") + 1,
-        rewarded_count=F("rewarded_count") + 1,
-    )
+        # Grant points inside the transaction so it rolls back on failure
+        grant_points(
+            owner=user,
+            amount=recipient.reward_amount,
+            point_type=campaign.point_type,
+            reason=f"Outreach reading reward: {campaign.title}",
+            reference_id=f"outreach_reward_{campaign.id}",
+        )
+
+        # Update campaign counters atomically
+        OutreachCampaign.objects.filter(id=campaign.id).update(
+            read_count=F("read_count") + 1,
+            rewarded_count=F("rewarded_count") + 1,
+        )
 
     return {
         "reward_amount": recipient.reward_amount,
@@ -514,8 +523,7 @@ def get_campaign_detail(campaign_id: int, author) -> dict:
     recipients_qs = campaign.recipient_records.all()
     delivered_count = recipients_qs.count()
     rewarded_count = recipients_qs.filter(is_rewarded=True).count()
-    expired_count = recipients_qs.filter(reward_expired=True).count()
-    read_count = rewarded_count + expired_count
+    read_count = campaign.read_count
 
     return {
         "id": campaign.id,

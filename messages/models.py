@@ -21,6 +21,7 @@ class Message(models.Model):
         ORDER = "order", "订单信息"
         SECURITY = "security", "安全提醒"
         WITHDRAWAL = "withdrawal", "提现信息"
+        OUTREACH = "outreach", "Outreach"
 
     title = models.CharField(max_length=200, verbose_name="标题")
     content = models.TextField(verbose_name="内容(Markdown)")

@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import date, timedelta
 from typing import Any
 
 from django.core.cache import cache, caches
@@ -642,4 +643,192 @@ def query_contributions_with_operators(
         return contributions
     except Exception as e:
         logger.error("标签运算查询贡献度失败: %s", e)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Developer outreach queries
+# ---------------------------------------------------------------------------
+
+LANGUAGE_LIST_CACHE_TTL = 28800  # 8 hours
+LANGUAGE_LIST_CACHE_KEY = "outreach:languages"
+
+# TODO(team): Confirm the actual table name; it might be  # noqa: TD003, FIX002
+# `opensource.gh_repo_info` or `default.repo_info` depending on the schema.
+AVAILABLE_LANGUAGES_SQL = """
+    SELECT DISTINCT language
+    FROM opensource.gh_repo_info
+    WHERE language IS NOT NULL AND language != ''
+    ORDER BY language
+"""
+
+
+def get_available_languages() -> list[str]:
+    """
+    Query all available programming languages from ClickHouse repo_info table.
+
+    Results are cached for 8 hours.
+
+    Returns:
+        A sorted list of distinct programming language names.
+
+    """
+    search_cache = _get_search_cache()
+    cached = search_cache.get(LANGUAGE_LIST_CACHE_KEY)
+    if cached is not None:
+        return cached
+
+    try:
+        result = ClickHouseDB.query(AVAILABLE_LANGUAGES_SQL)
+        rows = _get_result_rows(result)
+        languages = sorted([row[0] for row in rows if row[0]])
+        logger.info("Fetched %d available languages from ClickHouse", len(languages))
+        if languages:
+            search_cache.set(
+                LANGUAGE_LIST_CACHE_KEY, languages, LANGUAGE_LIST_CACHE_TTL
+            )
+        return languages
+    except Exception as e:
+        logger.error("Failed to fetch available languages: %s", e)
+        return []
+
+
+def _compute_outreach_date_range() -> tuple[int, int]:
+    """
+    Compute start_month and end_month for the last 24 months.
+
+    Returns:
+        (start_month, end_month) as integers in YYYYMM format.
+
+    """
+    today = date.today()
+    end_month = today.year * 100 + today.month
+    # Go back 24 months
+    start_date = today - timedelta(days=730)  # ~24 months
+    start_month = start_date.year * 100 + start_date.month
+    return start_month, end_month
+
+
+def query_developers_for_outreach(
+    tag_ids: list[str],
+    languages: list[str] | None = None,
+    countries: list[str] | None = None,
+    regions: list[str] | None = None,
+    top_n: int | None = None,
+) -> list[dict]:
+    """
+    Query developers matching the given criteria for talent outreach.
+
+    Steps:
+        1. Expand tag_ids to get associated repos (via flatten_labels table)
+        2. (Optional) Filter repos by programming languages (via repo_info table)
+        3. Query contributors of these repos (using last 2 years of OpenRank data)
+        4. (Optional) Filter by countries/regions (if data available)
+        5. Sort by global OpenRank contribution score (descending, last 2 years cumulative)
+        6. (Optional) Apply top_n limit
+
+    Args:
+        tag_ids: List of label IDs to expand into repos.
+        languages: Optional list of programming languages to filter repos.
+        countries: Optional list of countries to filter developers.
+        regions: Optional list of regions to filter developers.
+        top_n: Optional limit on number of results returned.
+
+    Returns:
+        List of dicts with keys: platform, actor_id, actor_login, openrank_score.
+
+    """
+    if not tag_ids:
+        return []
+
+    normalized_ids = _normalize_label_ids(tag_ids)
+    if not normalized_ids:
+        return []
+
+    start_month, end_month = _compute_outreach_date_range()
+
+    # Build repo subquery from flatten_labels
+    tag_placeholders = ", ".join(
+        f"'{tid.replace(chr(39), '')}'" for tid in normalized_ids
+    )
+    repo_subquery = (
+        f"SELECT platform, entity_id FROM flatten_labels "  # noqa: S608
+        f"WHERE entity_type = 'Repo' AND id IN ({tag_placeholders})"
+    )
+
+    # Optional: filter by programming languages via repo_info JOIN
+    language_filter = ""
+    if languages:
+        escaped_langs = ", ".join(
+            f"'{lang.replace(chr(39), '')}'" for lang in languages
+        )
+        # TODO(team): Confirm gh_repo_info table name and that it has  # noqa: TD003, FIX002
+        # columns (platform, repo_id, language) matching normalized_community_openrank.
+        language_filter = (
+            f"AND (platform, repo_id) IN ("  # noqa: S608
+            f"SELECT platform, repo_id FROM opensource.gh_repo_info "
+            f"WHERE language IN ({escaped_langs})"
+            f")"
+        )
+
+    # TODO(team): countries/regions filtering is not yet supported because  # noqa: TD003, FIX002
+    # the developer location table/field is not confirmed in the current schema.
+    # When available, add a JOIN or subquery filter here.
+    if countries or regions:
+        logger.info(
+            "countries/regions filter requested but not yet implemented; ignoring. "
+            "countries=%s, regions=%s",
+            countries,
+            regions,
+        )
+
+    limit_clause = f"LIMIT {int(top_n)}" if top_n else ""
+
+    sql = f"""
+        SELECT
+            platform,
+            actor_id,
+            argMax(actor_login, created_at) AS login,
+            SUM(openrank) AS openrank_score
+        FROM normalized_community_openrank
+        WHERE (platform, repo_id) IN ({repo_subquery})
+          {language_filter}
+          AND toYYYYMM(created_at) >= {{start_month:UInt32}}
+          AND toYYYYMM(created_at) <= {{end_month:UInt32}}
+          AND (platform, actor_id) NOT IN (
+              SELECT platform, entity_id FROM flatten_labels
+              WHERE entity_type='User' AND id=':bot'
+          )
+        GROUP BY platform, actor_id
+        ORDER BY openrank_score DESC
+        {limit_clause}
+    """  # noqa: S608
+
+    try:
+        result = ClickHouseDB.query(
+            sql,
+            parameters={
+                "start_month": start_month,
+                "end_month": end_month,
+            },
+        )
+        rows = _get_result_rows(result)
+        developers = [
+            {
+                "platform": row[0] or "GitHub",
+                "actor_id": str(row[1]),
+                "actor_login": row[2],
+                "openrank_score": float(row[3]),
+            }
+            for row in rows
+        ]
+        logger.info(
+            "Outreach query: %d tag(s), languages=%s, returned %d developers",
+            len(normalized_ids),
+            languages,
+            len(developers),
+        )
+        return developers
+    except Exception as e:
+        logger.error("Failed to query developers for outreach: %s", e)
         return []

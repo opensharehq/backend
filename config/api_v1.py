@@ -13,6 +13,7 @@ from homepage.api_v1 import router as homepage_router
 from messages.api_v1 import router as messages_router
 from points.api_v1 import router as points_router
 from shop.api_v1 import router as shop_router
+from talent_reach.api_v1 import router as talent_reach_router
 
 from .api_common import ApiError, translate_error_detail
 
@@ -88,3 +89,4 @@ api_v1.add_router("/public/", homepage_router)
 api_v1.add_router("/messages/", messages_router)
 api_v1.add_router("/shop/", shop_router)
 api_v1.add_router("/points/", points_router)
+api_v1.add_router("/talent-reach/", talent_reach_router)

@@ -51,10 +51,17 @@ class MessageItemSchema(Schema):
     created_at: str
     updated_at: str
     content_preview: str
+    reward_amount: int | None = None
+    title_zh: str | None = None
+    content_preview_zh: str | None = None
 
 
 class MessageDetailSchema(MessageItemSchema):
     content: str
+    reward_amount: int | None = None
+    reward_point_type: str | None = None
+    title_zh: str | None = None
+    content_zh: str | None = None
 
 
 class MessageStatsSchema(Schema):
@@ -128,6 +135,25 @@ def _serialize_message_item(user_message: UserMessage) -> MessageItemSchema:
 def _serialize_message_detail(user_message: UserMessage) -> MessageDetailSchema:
     payload = _serialize_message_item(user_message).model_dump()
     payload["content"] = user_message.message.content
+
+    # Include reward info and bilingual content for outreach messages
+    if user_message.message.message_type == "outreach":
+        from talent_reach.models import OutreachRecipient
+
+        recipient = (
+            OutreachRecipient.objects.select_related("campaign")
+            .filter(user_message_id=user_message.id)
+            .first()
+        )
+        if recipient:
+            payload["reward_amount"] = recipient.reward_amount
+            payload["reward_point_type"] = recipient.campaign.point_type
+            # Include Chinese content if available
+            if recipient.campaign.title_zh:
+                payload["title_zh"] = recipient.campaign.title_zh
+            if recipient.campaign.content_zh:
+                payload["content_zh"] = recipient.campaign.content_zh
+
     return MessageDetailSchema(**payload)
 
 
@@ -165,10 +191,38 @@ def message_list_endpoint(
     page_obj = paginate_queryset(
         messages_qs, page=page, page_size=page_size, max_page_size=100
     )
-    response = build_paginated_response(
-        page_obj,
-        [_serialize_message_item(item) for item in page_obj.object_list],
-    )
+    items = [_serialize_message_item(item) for item in page_obj.object_list]
+
+    # Batch-enrich outreach messages with reward_amount
+    outreach_um_ids = [
+        item.user_message_id for item in items if item.message_type == "outreach"
+    ]
+    if outreach_um_ids:
+        from talent_reach.models import OutreachRecipient
+
+        recipients = OutreachRecipient.objects.select_related("campaign").filter(
+            user_message_id__in=outreach_um_ids
+        )
+        reward_map = {}
+        zh_map = {}
+        for r in recipients:
+            reward_map[r.user_message_id] = r.reward_amount
+            if r.campaign.title_zh or r.campaign.content_zh:
+                zh_map[r.user_message_id] = {
+                    "title_zh": r.campaign.title_zh,
+                    "content_zh": r.campaign.content_zh,
+                }
+        for item in items:
+            if item.message_type == "outreach" and item.user_message_id in reward_map:
+                item.reward_amount = reward_map[item.user_message_id]
+            if item.message_type == "outreach" and item.user_message_id in zh_map:
+                zh_data = zh_map[item.user_message_id]
+                if zh_data["title_zh"]:
+                    item.title_zh = zh_data["title_zh"]
+                if zh_data["content_zh"]:
+                    item.content_preview_zh = zh_data["content_zh"][:200]
+
+    response = build_paginated_response(page_obj, items)
     response["stats"] = get_message_stats(request.auth)
     response["filters"] = {"message_type": message_type, "status": status}
     return response
@@ -200,7 +254,7 @@ def message_unread_count_endpoint(request, message_type: str | None = None):
 @router.post(
     "/mark-read",
     response={
-        200: UpdateCountResponseSchema,
+        200: dict,
         401: ErrorResponseSchema,
         422: ErrorResponseSchema,
     },
@@ -214,7 +268,23 @@ def message_mark_read_endpoint(request, payload: MessageActionSchema):
             code="required",
         )
     count = mark_as_read(request.auth, payload.message_ids)
-    return {"updated": count}
+
+    # Check for outreach reading rewards
+    from talent_reach.services import claim_reading_reward
+
+    rewards = []
+    user_messages = UserMessage.objects.filter(
+        user=request.auth, message_id__in=payload.message_ids
+    )
+    for um in user_messages:
+        reward_result = claim_reading_reward(user=request.auth, user_message_id=um.id)
+        if reward_result:
+            rewards.append(reward_result)
+
+    response: dict = {"updated": count}
+    if rewards:
+        response["rewards"] = rewards
+    return response
 
 
 @router.post(
@@ -288,11 +358,23 @@ def message_detail_endpoint(request, message_id: int):
 @router.post(
     "/{message_id}/mark-read",
     response={
-        200: UpdateCountResponseSchema,
+        200: dict,
         401: ErrorResponseSchema,
     },
 )
 def message_detail_mark_read_endpoint(request, message_id: int):
     """Mark a single message as read."""
     updated = mark_as_read(request.auth, [message_id])
-    return {"updated": updated}
+
+    # Check for outreach reading reward
+    from talent_reach.services import claim_reading_reward
+
+    reward = None
+    um = UserMessage.objects.filter(user=request.auth, message_id=message_id).first()
+    if um:
+        reward = claim_reading_reward(user=request.auth, user_message_id=um.id)
+
+    response: dict = {"updated": updated}
+    if reward:
+        response["reward"] = reward
+    return response

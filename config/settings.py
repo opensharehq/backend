@@ -97,6 +97,9 @@ env = environ.Env(
     SBY_PROVIDER_ID=(str, ""),
     SBY_FU_URL=(str, ""),
     IP2REGION_XDB_PATH=(str, ""),
+    OUTREACH_COST_PER_USER=(int, 5),
+    OUTREACH_REWARD_RATIO=(float, 0.5),
+    OUTREACH_REWARD_EXPIRY_DAYS=(int, 30),
 )
 
 TESTING = "test" in sys.argv or "PYTEST_VERSION" in os.environ
@@ -150,6 +153,11 @@ SBY_FU_URL = env("SBY_FU_URL")
 # IP 归属地 xdb 文件路径（可选）。未配置或文件不存在时，IP 区域判定接口返回 None。
 IP2REGION_XDB_PATH = env("IP2REGION_XDB_PATH")
 
+# Talent Outreach Configuration
+OUTREACH_COST_PER_USER = env("OUTREACH_COST_PER_USER")
+OUTREACH_REWARD_RATIO = env("OUTREACH_REWARD_RATIO")
+OUTREACH_REWARD_EXPIRY_DAYS = env("OUTREACH_REWARD_EXPIRY_DAYS")
+
 INSTALLED_APPS = [
     # Use the GitHub OAuth-backed admin site instead of the stock one.
     "config.apps.GitHubAdminConfig",
@@ -178,6 +186,7 @@ INSTALLED_APPS = [
     "contributions",
     "messages.apps.SiteMessagesConfig",
     "shenbianyun",
+    "talent_reach",
 ]
 
 _BASE_MIDDLEWARE = [

@@ -84,12 +84,24 @@ def get_balance(
         owner: User 或 Organization 实例
         point_type: 积分类型 (cash/gift), 为 None 时返回总余额
         tag_slug: 标签别名, 仅对 gift 类型有效
-        tag_is_null: 仅统计无标签 gift 积分 (仅对 gift 类型有效)
+        tag_is_null: 仅统计无标签 gift 积分, 仅对 gift 类型有效
 
     Returns:
         int: 积分余额
 
+    Raises:
+        InvalidPointOperationError: 如果 tag_slug/tag_is_null 用于非 gift 类型,
+            或两者同时使用
+
     """
+    if tag_slug and tag_is_null:
+        msg = "tag_slug 与 tag_is_null 不能同时使用"
+        raise InvalidPointOperationError(msg)
+
+    if (tag_slug or tag_is_null) and point_type != PointType.GIFT:
+        msg = "只有礼物积分可以按标签筛选"
+        raise InvalidPointOperationError(msg)
+
     wallet = get_or_create_wallet(owner)
 
     if point_type is None:

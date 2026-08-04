@@ -867,6 +867,78 @@ class RedeemItemServiceTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.stock, 4)
 
+    def test_redeem_with_empty_tag_slug_does_not_spend_tagged_balance(self):
+        """Empty-string tag_slug must behave like no tag and never drain tagged pool."""
+        tagged_user = get_user_model().objects.create_user(
+            username="taggedempty",
+            email="taggedempty@example.com",
+            password="password123",
+        )
+        tag = Tag.objects.create(name="Tag C", slug="tag-c")
+        points_services.grant_points(
+            tagged_user,
+            500,
+            PointType.GIFT,
+            "Tagged gift only",
+            tag_slug=tag.slug,
+        )
+        item = ShopItem.objects.create(
+            name_zh="Tagged-Only Item",
+            name_en="Tagged-Only Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+        item.allowed_tags.set([tag])
+
+        with self.assertRaisesMessage(RedemptionError, "积分不足"):
+            redeem_item(
+                user=tagged_user, item_id=item.id, point_type="gift", tag_slug=""
+            )
+
+        self.assertEqual(Redemption.objects.count(), 0)
+        self.assertEqual(
+            points_services.get_balance(tagged_user, PointType.GIFT, tag_slug=tag.slug),
+            500,
+        )
+
+    def test_redeem_with_empty_tag_slug_equals_no_tag(self):
+        """Empty-string tag_slug spends only the untagged pool, like tag_slug=None."""
+        tag = Tag.objects.create(name="Tag D", slug="tag-d")
+        points_services.grant_points(
+            self.user,
+            500,
+            PointType.GIFT,
+            "Tagged gift",
+            tag_slug=tag.slug,
+        )
+        item = ShopItem.objects.create(
+            name_zh="Empty Slug Item",
+            name_en="Empty Slug Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+        item.allowed_tags.set([tag])
+
+        result = redeem_item(
+            user=self.user, item_id=item.id, point_type="gift", tag_slug=""
+        )
+        redemption = result["redemption"]
+
+        self.assertIsNone(redemption.point_tag_slug)
+        # Untagged pool paid the cost; tagged pool must remain untouched
+        self.assertEqual(
+            points_services.get_balance(self.user, PointType.GIFT, tag_is_null=True),
+            10000 - 100,
+        )
+        self.assertEqual(
+            points_services.get_balance(self.user, PointType.GIFT, tag_slug=tag.slug),
+            500,
+        )
+        item.refresh_from_db()
+        self.assertEqual(item.stock, 4)
+
     # ==================== 参数校验 ====================
 
     def test_redeem_invalid_point_type(self):

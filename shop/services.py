@@ -118,7 +118,12 @@ def redeem_item(  # noqa: C901, PLR0912, PLR0913, PLR0915
         RedemptionError: 如果商品无效、下架、库存不足、积分不足或参数无效.
 
     """
-    # 0. 校验 point_type 参数
+    # 0. Normalize empty-string tag_slug (e.g. JSON "") to None so that
+    #    validation/branching and spending always use a single "no tag" form.
+    if tag_slug == "":
+        tag_slug = None
+
+    # 1. 校验 point_type 参数
     if point_type not in [PointType.CASH, PointType.GIFT]:
         msg = f"无效的积分类型: {point_type}"
         raise RedemptionError(msg)

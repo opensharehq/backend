@@ -352,7 +352,7 @@ def send_outreach(
         top_n=top_n,
         point_type=point_type,
         source_owner_type=owner_type,
-        source_owner_slug=owner_slug or "",
+        source_owner_slug=owner_slug if owner_type == "organization" else "",
         tag_slug=tag_slug or "",
         cost_per_user=cost_per_user,
         total_cost=total_cost,

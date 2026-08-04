@@ -247,6 +247,18 @@ def redeem_item(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 raise RedemptionError(msg)
         else:
             # 使用通用礼物积分（无标签）：不能消耗带标签的积分池
+            # 如果商品有允许的标签限制，无标签积分不可兑换
+            if allowed_tags:
+                msg = "此商品需要使用指定标签的积分兑换"
+                logger.warning(
+                    "兑换失败（商品有标签限制，无标签不可兑换）: 用户=%s (ID=%s), 商品=%s (ID=%s), 允许标签=%s",
+                    user.username,
+                    user.id,
+                    item.name_zh,
+                    item.id,
+                    [t.slug for t in allowed_tags],
+                )
+                raise RedemptionError(msg)
             balance = points_services.get_balance(
                 user, PointType.GIFT, tag_is_null=True
             )

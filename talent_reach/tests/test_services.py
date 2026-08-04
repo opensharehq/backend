@@ -631,9 +631,9 @@ class TestClaimReadingReward(TestCase):
             tag_names=["test/example"],
             point_type=PointType.CASH,
             cost_per_user=2,
-            total_cost=5,
+            total_cost=2,
             reward_ratio=0.5,
-            reward_pool=2,
+            reward_pool=1,
             reward_expiry_days=30,
             total_recipients=1,
             status=OutreachCampaign.Status.COMPLETED,
@@ -656,7 +656,7 @@ class TestClaimReadingReward(TestCase):
             campaign=self.campaign,
             user=self.recipient_user,
             user_message=self.user_message,
-            reward_amount=2,
+            reward_amount=1,
             openrank_score=10.0,
         )
 
@@ -665,7 +665,7 @@ class TestClaimReadingReward(TestCase):
         result = claim_reading_reward(self.recipient_user, self.user_message.id)
 
         self.assertIsNotNone(result)
-        self.assertEqual(result["reward_amount"], 2)
+        self.assertEqual(result["reward_amount"], 1)
         self.assertEqual(result["point_type"], PointType.CASH)
 
         # Verify recipient is marked as rewarded
@@ -718,7 +718,7 @@ class TestClaimReadingReward(TestCase):
         claim_reading_reward(self.recipient_user, self.user_message.id)
         balance_after = get_balance(self.recipient_user, PointType.CASH)
 
-        self.assertEqual(balance_after - balance_before, 2)
+        self.assertEqual(balance_after - balance_before, 1)
 
     def test_claim_reward_zero_amount(self):
         """Test zero reward amount returns None."""

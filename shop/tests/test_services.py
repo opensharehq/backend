@@ -823,7 +823,7 @@ class RedeemItemServiceTests(TestCase):
         item.allowed_tags.set([tag])
 
         # No tag_slug selected: tagged pools must not be spendable implicitly
-        with self.assertRaisesMessage(RedemptionError, "积分不足"):
+        with self.assertRaisesMessage(RedemptionError, "此商品需要使用指定标签的积分兑换"):
             redeem_item(user=tagged_user, item_id=item.id, point_type="gift")
 
         self.assertEqual(Redemption.objects.count(), 0)
@@ -833,7 +833,7 @@ class RedeemItemServiceTests(TestCase):
         )
 
     def test_redeem_without_tag_keeps_tagged_balance_intact(self):
-        """Untagged redemption spends only untagged pool, leaving tagged pool intact."""
+        """Untagged redemption must fail when item has allowed_tags, leaving tagged pool intact."""
         tag = Tag.objects.create(name="Tag B", slug="tag-b")
         points_services.grant_points(
             self.user,
@@ -851,21 +851,15 @@ class RedeemItemServiceTests(TestCase):
         )
         item.allowed_tags.set([tag])
 
-        result = redeem_item(user=self.user, item_id=item.id, point_type="gift")
-        redemption = result["redemption"]
+        with self.assertRaisesMessage(RedemptionError, "此商品需要使用指定标签的积分兑换"):
+            redeem_item(user=self.user, item_id=item.id, point_type="gift")
 
-        self.assertIsNone(redemption.point_tag_slug)
-        # Untagged pool paid the cost; tagged pool must remain untouched
-        self.assertEqual(
-            points_services.get_balance(self.user, PointType.GIFT, tag_is_null=True),
-            10000 - 100,
-        )
+        self.assertEqual(Redemption.objects.count(), 0)
+        # Tagged pool must remain untouched
         self.assertEqual(
             points_services.get_balance(self.user, PointType.GIFT, tag_slug=tag.slug),
             500,
         )
-        item.refresh_from_db()
-        self.assertEqual(item.stock, 4)
 
     def test_redeem_with_empty_tag_slug_does_not_spend_tagged_balance(self):
         """Empty-string tag_slug must behave like no tag and never drain tagged pool."""
@@ -891,7 +885,7 @@ class RedeemItemServiceTests(TestCase):
         )
         item.allowed_tags.set([tag])
 
-        with self.assertRaisesMessage(RedemptionError, "积分不足"):
+        with self.assertRaisesMessage(RedemptionError, "此商品需要使用指定标签的积分兑换"):
             redeem_item(
                 user=tagged_user, item_id=item.id, point_type="gift", tag_slug=""
             )
@@ -903,7 +897,7 @@ class RedeemItemServiceTests(TestCase):
         )
 
     def test_redeem_with_empty_tag_slug_equals_no_tag(self):
-        """Empty-string tag_slug spends only the untagged pool, like tag_slug=None."""
+        """Empty-string tag_slug must fail when item has allowed_tags, like tag_slug=None."""
         tag = Tag.objects.create(name="Tag D", slug="tag-d")
         points_services.grant_points(
             self.user,
@@ -921,23 +915,17 @@ class RedeemItemServiceTests(TestCase):
         )
         item.allowed_tags.set([tag])
 
-        result = redeem_item(
-            user=self.user, item_id=item.id, point_type="gift", tag_slug=""
-        )
-        redemption = result["redemption"]
+        with self.assertRaisesMessage(RedemptionError, "此商品需要使用指定标签的积分兑换"):
+            redeem_item(
+                user=self.user, item_id=item.id, point_type="gift", tag_slug=""
+            )
 
-        self.assertIsNone(redemption.point_tag_slug)
-        # Untagged pool paid the cost; tagged pool must remain untouched
-        self.assertEqual(
-            points_services.get_balance(self.user, PointType.GIFT, tag_is_null=True),
-            10000 - 100,
-        )
+        self.assertEqual(Redemption.objects.count(), 0)
+        # Tagged pool must remain untouched
         self.assertEqual(
             points_services.get_balance(self.user, PointType.GIFT, tag_slug=tag.slug),
             500,
         )
-        item.refresh_from_db()
-        self.assertEqual(item.stock, 4)
 
     # ==================== 参数校验 ====================
 

@@ -75,6 +75,7 @@ def get_balance(
     owner: User | Organization,
     point_type: str | None = None,
     tag_slug: str | None = None,
+    tag_is_null: bool = False,
 ) -> int:
     """
     获取积分余额.
@@ -83,6 +84,7 @@ def get_balance(
         owner: User 或 Organization 实例
         point_type: 积分类型 (cash/gift), 为 None 时返回总余额
         tag_slug: 标签别名, 仅对 gift 类型有效
+        tag_is_null: 仅统计无标签 gift 积分 (仅对 gift 类型有效)
 
     Returns:
         int: 积分余额
@@ -95,7 +97,7 @@ def get_balance(
     elif point_type == PointType.CASH:
         return wallet.get_cash_balance()
     elif point_type == PointType.GIFT:
-        return wallet.get_gift_balance(tag_slug=tag_slug)
+        return wallet.get_gift_balance(tag_slug=tag_slug, tag_is_null=tag_is_null)
     else:
         msg = f"无效的积分类型: {point_type}"
         raise InvalidPointOperationError(msg)

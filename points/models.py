@@ -154,14 +154,16 @@ class PointWallet(models.Model):
             or 0
         )
 
-    def get_gift_balance(self, tag_slug=None):
-        """获取礼物积分余额, 可按标签筛选."""
+    def get_gift_balance(self, tag_slug=None, tag_is_null=False):
+        """获取礼物积分余额, 可按标签筛选或仅统计无标签积分."""
         queryset = self.sources.filter(
             point_type=PointType.GIFT,
             remaining_amount__gt=0,
         )
         if tag_slug:
             queryset = queryset.filter(tag__slug=tag_slug)
+        if tag_is_null:
+            queryset = queryset.filter(tag__isnull=True)
         return queryset.aggregate(total=models.Sum("remaining_amount"))["total"] or 0
 
     def get_total_balance(self):

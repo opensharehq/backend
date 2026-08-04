@@ -241,8 +241,10 @@ def redeem_item(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 )
                 raise RedemptionError(msg)
         else:
-            # 使用通用礼物积分（无标签）
-            balance = points_services.get_balance(user, PointType.GIFT)
+            # 使用通用礼物积分（无标签）：不能消耗带标签的积分池
+            balance = points_services.get_balance(
+                user, PointType.GIFT, tag_is_null=True
+            )
             if balance < item.cost:
                 msg = f"积分不足：需要 {item.cost}，当前可用 {balance}"
                 logger.warning(
@@ -264,6 +266,7 @@ def redeem_item(  # noqa: C901, PLR0912, PLR0913, PLR0915
             point_type=point_type,
             description=f"兑换商品: {item.name_zh}",
             tag_slug=resolved_tag_slug,
+            tag_is_null=(point_type == PointType.GIFT and resolved_tag_slug is None),
             reference_id=f"shop:item:{item.id}",
             created_by=user,
         )

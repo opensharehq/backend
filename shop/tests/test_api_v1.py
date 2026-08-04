@@ -6,7 +6,7 @@ from django.test import TestCase
 from accounts.models import ShippingAddress
 from accounts.services.jwt_tokens import create_access_token
 from config.api_common import ApiError
-from points.models import PointType, PointWallet
+from points.models import PointType, PointWallet, Tag
 from points.services import grant_points
 from shop.api_v1 import _raise_redemption_api_error
 from shop.models import Redemption, ShopItem
@@ -42,6 +42,13 @@ class ShopApiV1Tests(TestCase):
             amount=500,
             point_type=PointType.GIFT,
             reason="Test gift points",
+            created_by=self.user,
+        )
+        grant_points(
+            owner=self.user,
+            amount=1000,
+            point_type=PointType.CASH,
+            reason="Test cash points",
             created_by=self.user,
         )
         self.item = ShopItem.objects.create(
@@ -185,6 +192,18 @@ class ShopApiV1Tests(TestCase):
                 "redemption_failed",
                 "The item could not be redeemed.",
             ),
+            (
+                "只有礼物积分可以设置标签",
+                422,
+                "invalid_point_type",
+                "Only gift points can be used with a tag.",
+            ),
+            (
+                "无效的积分类型: foobar",
+                422,
+                "invalid_point_type",
+                "Invalid point type: foobar.",
+            ),
         ]
 
         for message, status_code, code, response_message in cases:
@@ -320,6 +339,155 @@ class ShopApiV1Tests(TestCase):
             Redemption.objects.filter(
                 item=self.item, user_profile=self.zero_user
             ).exists()
+        )
+
+    def test_redemption_with_cash_success(self):
+        """User can redeem an item using cash points via API."""
+        response = self.client.post(
+            "/api/v1/shop/redemptions",
+            {"item_id": self.item.id, "point_type": "cash"},
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["item"]["id"], self.item.id)
+        self.assertTrue(
+            Redemption.objects.filter(item=self.item, user_profile=self.user).exists()
+        )
+        redemption = Redemption.objects.get(item=self.item, user_profile=self.user)
+        self.assertEqual(redemption.point_type, PointType.CASH)
+
+    def test_redemption_with_cash_insufficient(self):
+        """Cash redemption should fail when cash balance is insufficient."""
+        response = self.client.post(
+            "/api/v1/shop/redemptions",
+            {"item_id": self.item.id, "point_type": "cash"},
+            content_type="application/json",
+            **self.zero_headers,
+        )
+
+        self._assert_api_error(
+            response,
+            status_code=409,
+            code="insufficient_points",
+            message="Not enough points to redeem this item. Required: 100, available: 0.",
+        )
+
+    def test_redemption_with_tagged_gift_success(self):
+        """User can redeem with tagged gift points via API."""
+        tag = Tag.objects.create(name="Tag A", slug="tag-a")
+        grant_points(
+            owner=self.user,
+            amount=500,
+            point_type=PointType.GIFT,
+            reason="Tagged gift",
+            tag_slug="tag-a",
+            created_by=self.user,
+        )
+        tagged_item = ShopItem.objects.create(
+            name_zh="Tagged Item",
+            name_en="Tagged Item",
+            description_zh="Requires tag",
+            cost=100,
+            is_active=True,
+            requires_shipping=False,
+            stock=5,
+        )
+        tagged_item.allowed_tags.set([tag])
+
+        response = self.client.post(
+            "/api/v1/shop/redemptions",
+            {
+                "item_id": tagged_item.id,
+                "point_type": "gift",
+                "tag_slug": "tag-a",
+            },
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        redemption = Redemption.objects.get(item=tagged_item, user_profile=self.user)
+        self.assertEqual(redemption.point_type, PointType.GIFT)
+        self.assertEqual(redemption.point_tag_slug, "tag-a")
+
+    def test_redemption_with_tagged_gift_wrong_tag(self):
+        """Tagged gift with non-matching tag should fail via API."""
+        tag_a = Tag.objects.create(name="Tag A", slug="tag-a")
+        Tag.objects.create(name="Tag B", slug="tag-b")
+        grant_points(
+            owner=self.user,
+            amount=500,
+            point_type=PointType.GIFT,
+            reason="Tag B gift",
+            tag_slug="tag-b",
+            created_by=self.user,
+        )
+        tagged_item = ShopItem.objects.create(
+            name_zh="Tagged Item",
+            name_en="Tagged Item",
+            description_zh="Requires tag A",
+            cost=100,
+            is_active=True,
+            requires_shipping=False,
+            stock=5,
+        )
+        tagged_item.allowed_tags.set([tag_a])
+
+        response = self.client.post(
+            "/api/v1/shop/redemptions",
+            {
+                "item_id": tagged_item.id,
+                "point_type": "gift",
+                "tag_slug": "tag-b",
+            },
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self._assert_api_error(
+            response,
+            status_code=409,
+            code="insufficient_points",
+            message="You do not have enough eligible points to redeem this item.",
+        )
+
+    def test_redemption_with_invalid_point_type(self):
+        """Invalid point_type should be rejected via API."""
+        response = self.client.post(
+            "/api/v1/shop/redemptions",
+            {"item_id": self.item.id, "point_type": "invalid"},
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self._assert_api_error(
+            response,
+            status_code=422,
+            code="invalid_point_type",
+            message="Invalid point type: invalid.",
+        )
+
+    def test_redemption_cash_with_tag_fails(self):
+        """Cash with tag_slug should be rejected via API."""
+        response = self.client.post(
+            "/api/v1/shop/redemptions",
+            {
+                "item_id": self.item.id,
+                "point_type": "cash",
+                "tag_slug": "some-tag",
+            },
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self._assert_api_error(
+            response,
+            status_code=422,
+            code="invalid_point_type",
+            message="Only gift points can be used with a tag.",
         )
 
     def test_redemption_rejects_inactive_item(self):

@@ -283,8 +283,7 @@ class RedeemItemServiceTests(TestCase):
     def test_allowed_tags_selects_sufficient_tag(
         self, mock_spend_points, mock_get_balance
     ):
-        """Ensure allowed tag balance selection prefers a tag with enough points."""
-        tag_a = Tag.objects.create(name="Tag A", slug="tag-a")
+        """User can specify a tag with enough balance to redeem a tagged item."""
         tag_b = Tag.objects.create(name="Tag B", slug="tag-b")
 
         item = ShopItem.objects.create(
@@ -294,18 +293,16 @@ class RedeemItemServiceTests(TestCase):
             cost=100,
             stock=5,
         )
-        item.allowed_tags.set([tag_a, tag_b])
+        item.allowed_tags.set([tag_b])
 
-        def fake_balance(owner, point_type, tag_slug=None, **kwargs):
-            if tag_slug == tag_a.slug:
-                return 10
-            if tag_slug == tag_b.slug:
-                return 200
-            return 0
+        mock_get_balance.return_value = 200
 
-        mock_get_balance.side_effect = fake_balance
-
-        result = redeem_item(user=self.user, item_id=item.id)
+        result = redeem_item(
+            user=self.user,
+            item_id=item.id,
+            point_type="gift",
+            tag_slug="tag-b",
+        )
         redemption = result["redemption"]
 
         self.assertIsNotNone(redemption)
@@ -318,9 +315,8 @@ class RedeemItemServiceTests(TestCase):
 
     @patch("shop.services.points_services.get_balance", return_value=0)
     def test_allowed_tags_insufficient_balance(self, _mock_get_balance):
-        """Fail if every allowed tag lacks enough balance."""
+        """Fail if the specified allowed tag lacks enough balance."""
         tag_a = Tag.objects.create(name="Tag A", slug="tag-a")
-        tag_b = Tag.objects.create(name="Tag B", slug="tag-b")
 
         item = ShopItem.objects.create(
             name_zh="Tagged Item",
@@ -329,12 +325,15 @@ class RedeemItemServiceTests(TestCase):
             cost=100,
             stock=5,
         )
-        item.allowed_tags.set([tag_a, tag_b])
+        item.allowed_tags.set([tag_a])
 
-        with self.assertRaisesMessage(
-            RedemptionError, "您没有足够的符合条件的积分来兑换此商品"
-        ):
-            redeem_item(user=self.user, item_id=item.id)
+        with self.assertRaisesMessage(RedemptionError, "积分不足"):
+            redeem_item(
+                user=self.user,
+                item_id=item.id,
+                point_type="gift",
+                tag_slug="tag-a",
+            )
 
         self.assertEqual(Redemption.objects.count(), 0)
         item.refresh_from_db()
@@ -345,7 +344,7 @@ class RedeemItemServiceTests(TestCase):
     def test_allowed_tags_prefers_first_sufficient_tag(
         self, mock_spend_points, mock_get_balance
     ):
-        """When multiple tags qualify, the first allowed tag should be selected."""
+        """User can specify which tag to use for redemption."""
         tag_a = Tag.objects.create(name="Alpha Tag", slug="alpha-tag")
         tag_b = Tag.objects.create(name="Beta Tag", slug="beta-tag")
 
@@ -357,23 +356,23 @@ class RedeemItemServiceTests(TestCase):
             stock=5,
         )
         item.allowed_tags.set([tag_a, tag_b])
-        mock_get_balance.side_effect = (
-            lambda owner, point_type, tag_slug=None, **kwargs: {
-                tag_a.slug: 200,
-                tag_b.slug: 300,
-            }.get(tag_slug, 0)
+        mock_get_balance.return_value = 200
+
+        # User explicitly picks tag_a
+        redeem_item(
+            user=self.user,
+            item_id=item.id,
+            point_type="gift",
+            tag_slug="alpha-tag",
         )
 
-        redeem_item(user=self.user, item_id=item.id)
-
         _, kwargs = mock_spend_points.call_args
-        self.assertEqual(kwargs["tag_slug"], tag_a.slug)
+        self.assertEqual(kwargs["tag_slug"], "alpha-tag")
 
     @patch("shop.services.points_services.get_balance")
     def test_allowed_tags_do_not_combine_partial_balances(self, mock_get_balance):
-        """Two insufficient tag buckets should not be combined to satisfy a purchase."""
+        """An insufficient tag bucket should not be combined with another."""
         tag_a = Tag.objects.create(name="Partial A", slug="partial-a")
-        tag_b = Tag.objects.create(name="Partial B", slug="partial-b")
 
         item = ShopItem.objects.create(
             name_zh="Split Balance Item",
@@ -382,18 +381,16 @@ class RedeemItemServiceTests(TestCase):
             cost=100,
             stock=5,
         )
-        item.allowed_tags.set([tag_a, tag_b])
-        mock_get_balance.side_effect = (
-            lambda owner, point_type, tag_slug=None, **kwargs: {
-                tag_a.slug: 60,
-                tag_b.slug: 50,
-            }.get(tag_slug, 0)
-        )
+        item.allowed_tags.set([tag_a])
+        mock_get_balance.return_value = 60
 
-        with self.assertRaisesMessage(
-            RedemptionError, "您没有足够的符合条件的积分来兑换此商品"
-        ):
-            redeem_item(user=self.user, item_id=item.id)
+        with self.assertRaisesMessage(RedemptionError, "积分不足"):
+            redeem_item(
+                user=self.user,
+                item_id=item.id,
+                point_type="gift",
+                tag_slug="partial-a",
+            )
 
         self.assertEqual(Redemption.objects.count(), 0)
 
@@ -534,3 +531,306 @@ class RedeemItemServiceTests(TestCase):
 
         with self.assertRaisesMessage(RedemptionError, "积分不足"):
             redeem_item(user=poor_user, item_id=item.id)
+
+    # ==================== Cash 支付测试 ====================
+
+    def test_redeem_with_cash_success(self):
+        """User can redeem an item with cash points."""
+        points_services.grant_points(
+            self.user,
+            500,
+            PointType.CASH,
+            "Cash test points",
+        )
+        item = ShopItem.objects.create(
+            name_zh="Cash Item",
+            name_en="Cash Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+
+        result = redeem_item(user=self.user, item_id=item.id, point_type="cash")
+        redemption = result["redemption"]
+
+        self.assertEqual(redemption.point_type, PointType.CASH)
+        self.assertIsNone(redemption.point_tag_slug)
+        item.refresh_from_db()
+        self.assertEqual(item.stock, 4)
+
+    def test_redeem_with_cash_insufficient(self):
+        """Cash redemption fails when cash balance is insufficient."""
+        # Only grant gift points, no cash
+        item = ShopItem.objects.create(
+            name_zh="Cash Item",
+            name_en="Cash Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+
+        with self.assertRaisesMessage(RedemptionError, "积分不足"):
+            redeem_item(user=self.user, item_id=item.id, point_type="cash")
+
+        self.assertEqual(Redemption.objects.count(), 0)
+        item.refresh_from_db()
+        self.assertEqual(item.stock, 5)
+
+    def test_redeem_with_cash_on_tagged_item(self):
+        """Cash can redeem tagged items without tag restriction."""
+        points_services.grant_points(
+            self.user,
+            500,
+            PointType.CASH,
+            "Cash test points",
+        )
+        tag = Tag.objects.create(name="Tag X", slug="tag-x")
+        item = ShopItem.objects.create(
+            name_zh="Tagged Item",
+            name_en="Tagged Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+        item.allowed_tags.set([tag])
+
+        result = redeem_item(user=self.user, item_id=item.id, point_type="cash")
+        redemption = result["redemption"]
+
+        self.assertEqual(redemption.point_type, PointType.CASH)
+        self.assertIsNone(redemption.point_tag_slug)
+
+    def test_redeem_with_cash_rollback_on_failure(self):
+        """Cash redemption rolls back when downstream fails."""
+        points_services.grant_points(
+            self.user,
+            500,
+            PointType.CASH,
+            "Cash test points",
+        )
+        item = ShopItem.objects.create(
+            name_zh="Cash Rollback",
+            name_en="Cash Rollback",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+        initial_cash = points_services.get_balance(self.user, PointType.CASH)
+
+        with patch(
+            "shop.services.Redemption.objects.create",
+            side_effect=RuntimeError("create failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                redeem_item(user=self.user, item_id=item.id, point_type="cash")
+
+        self.assertEqual(Redemption.objects.count(), 0)
+        self.assertEqual(
+            points_services.get_balance(self.user, PointType.CASH),
+            initial_cash,
+        )
+        item.refresh_from_db()
+        self.assertEqual(item.stock, 5)
+
+    # ==================== Gift + 标签支付测试 ====================
+
+    def test_redeem_with_tagged_gift_success(self):
+        """User can redeem with a specific tagged gift points."""
+        tag = Tag.objects.create(name="Tag A", slug="tag-a")
+        points_services.grant_points(
+            self.user,
+            500,
+            PointType.GIFT,
+            "Tagged gift",
+            tag_slug="tag-a",
+        )
+        item = ShopItem.objects.create(
+            name_zh="Tagged Item",
+            name_en="Tagged Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+        item.allowed_tags.set([tag])
+
+        result = redeem_item(
+            user=self.user,
+            item_id=item.id,
+            point_type="gift",
+            tag_slug="tag-a",
+        )
+        redemption = result["redemption"]
+
+        self.assertEqual(redemption.point_type, PointType.GIFT)
+        self.assertEqual(redemption.point_tag_slug, "tag-a")
+        item.refresh_from_db()
+        self.assertEqual(item.stock, 4)
+
+    def test_redeem_with_tagged_gift_wrong_tag(self):
+        """Tagged gift with tag not in allowed_tags fails."""
+        tag_a = Tag.objects.create(name="Tag A", slug="tag-a")
+        Tag.objects.create(name="Tag B", slug="tag-b")
+        points_services.grant_points(
+            self.user,
+            500,
+            PointType.GIFT,
+            "Tag B gift",
+            tag_slug="tag-b",
+        )
+        item = ShopItem.objects.create(
+            name_zh="Tagged Item",
+            name_en="Tagged Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+        item.allowed_tags.set([tag_a])
+
+        with self.assertRaisesMessage(
+            RedemptionError, "您没有足够的符合条件的积分来兑换此商品"
+        ):
+            redeem_item(
+                user=self.user,
+                item_id=item.id,
+                point_type="gift",
+                tag_slug="tag-b",
+            )
+
+        self.assertEqual(Redemption.objects.count(), 0)
+        item.refresh_from_db()
+        self.assertEqual(item.stock, 5)
+
+    def test_redeem_with_tagged_gift_insufficient(self):
+        """Tagged gift with insufficient balance fails."""
+        tag = Tag.objects.create(name="Tag A", slug="tag-a")
+        points_services.grant_points(
+            self.user,
+            50,
+            PointType.GIFT,
+            "Small gift",
+            tag_slug="tag-a",
+        )
+        item = ShopItem.objects.create(
+            name_zh="Expensive Tagged Item",
+            name_en="Expensive Tagged Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+        item.allowed_tags.set([tag])
+
+        with self.assertRaisesMessage(RedemptionError, "积分不足"):
+            redeem_item(
+                user=self.user,
+                item_id=item.id,
+                point_type="gift",
+                tag_slug="tag-a",
+            )
+
+        self.assertEqual(Redemption.objects.count(), 0)
+
+    def test_redeem_with_tagged_gift_on_tagless_item(self):
+        """Tagged gift on item without allowed_tags fails."""
+        Tag.objects.create(name="Tag A", slug="tag-a")
+        points_services.grant_points(
+            self.user,
+            500,
+            PointType.GIFT,
+            "Tagged gift",
+            tag_slug="tag-a",
+        )
+        item = ShopItem.objects.create(
+            name_zh="No Tag Item",
+            name_en="No Tag Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+        # Item has no allowed_tags
+
+        with self.assertRaisesMessage(
+            RedemptionError, "您没有足够的符合条件的积分来兑换此商品"
+        ):
+            redeem_item(
+                user=self.user,
+                item_id=item.id,
+                point_type="gift",
+                tag_slug="tag-a",
+            )
+
+        self.assertEqual(Redemption.objects.count(), 0)
+
+    # ==================== Gift + 无标签支付测试 ====================
+
+    def test_redeem_with_untagged_gift_success(self):
+        """User can redeem with universal gift points (no tag)."""
+        item = ShopItem.objects.create(
+            name_zh="Untagged Gift Item",
+            name_en="Untagged Gift Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+
+        result = redeem_item(user=self.user, item_id=item.id, point_type="gift")
+        redemption = result["redemption"]
+
+        self.assertEqual(redemption.point_type, PointType.GIFT)
+        self.assertIsNone(redemption.point_tag_slug)
+        item.refresh_from_db()
+        self.assertEqual(item.stock, 4)
+
+    def test_redeem_with_untagged_gift_insufficient(self):
+        """Universal gift redemption fails when balance insufficient."""
+        poor_user = get_user_model().objects.create_user(
+            username="pooruser2", email="poor2@example.com", password="password123"
+        )
+        item = ShopItem.objects.create(
+            name_zh="Expensive Item",
+            name_en="Expensive Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+
+        with self.assertRaisesMessage(RedemptionError, "积分不足"):
+            redeem_item(user=poor_user, item_id=item.id, point_type="gift")
+
+        self.assertEqual(Redemption.objects.count(), 0)
+
+    # ==================== 参数校验 ====================
+
+    def test_redeem_invalid_point_type(self):
+        """Invalid point_type raises error."""
+        item = ShopItem.objects.create(
+            name_zh="Test Item",
+            name_en="Test Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+
+        with self.assertRaisesMessage(RedemptionError, "无效的积分类型"):
+            redeem_item(user=self.user, item_id=item.id, point_type="invalid")
+
+        self.assertEqual(Redemption.objects.count(), 0)
+
+    def test_redeem_cash_with_tag_fails(self):
+        """Cash point_type with tag_slug raises error."""
+        item = ShopItem.objects.create(
+            name_zh="Test Item",
+            name_en="Test Item",
+            description_zh="Test",
+            cost=100,
+            stock=5,
+        )
+
+        with self.assertRaisesMessage(RedemptionError, "只有礼物积分可以设置标签"):
+            redeem_item(
+                user=self.user,
+                item_id=item.id,
+                point_type="cash",
+                tag_slug="some-tag",
+            )
+
+        self.assertEqual(Redemption.objects.count(), 0)

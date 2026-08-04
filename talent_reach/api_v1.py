@@ -56,6 +56,10 @@ class SendRequestSchema(Schema):
     cities: list[str] | None = None
     top_n: int | None = None
     point_type: str  # 'cash' or 'gift'
+    # Source pool selection (mirrors /points/pools source_selector)
+    tag_slug: str | None = None
+    owner_type: str = "user"  # 'user' or 'organization'
+    owner_slug: str | None = None
 
 
 class CampaignListSchema(Schema):
@@ -99,6 +103,9 @@ def _serialize_campaign_list_item(campaign) -> dict:
         "total_cost": campaign.total_cost,
         "reward_pool": campaign.reward_pool,
         "point_type": campaign.point_type,
+        "source_owner_type": campaign.source_owner_type,
+        "source_owner_slug": campaign.source_owner_slug,
+        "tag_slug": campaign.tag_slug,
         "created_at": campaign.created_at.isoformat(),
     }
 
@@ -251,6 +258,20 @@ def send_endpoint(request, payload: SendRequestSchema):
         raise ApiError("validation_error", 422, "At least one tag_id is required.")
     if payload.point_type not in ("cash", "gift"):
         raise ApiError("validation_error", 422, "point_type must be 'cash' or 'gift'.")
+    if payload.owner_type not in ("user", "organization"):
+        raise ApiError(
+            "validation_error", 422, "owner_type must be 'user' or 'organization'."
+        )
+    if payload.point_type == "cash" and payload.tag_slug:
+        raise ApiError(
+            "validation_error", 422, "tag_slug cannot be used with cash points."
+        )
+    if payload.owner_type == "organization" and not payload.owner_slug:
+        raise ApiError(
+            "validation_error",
+            422,
+            "owner_slug is required when owner_type is 'organization'.",
+        )
     try:
         campaign = services.send_outreach(
             draft_id=payload.draft_id,
@@ -263,6 +284,9 @@ def send_endpoint(request, payload: SendRequestSchema):
             cities=payload.cities,
             top_n=payload.top_n,
             point_type=payload.point_type,
+            tag_slug=payload.tag_slug,
+            owner_type=payload.owner_type,
+            owner_slug=payload.owner_slug,
         )
     except services.OutreachDraft.DoesNotExist as exc:
         raise ApiError("not_found", 404, "Draft not found.") from exc

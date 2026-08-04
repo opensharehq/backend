@@ -178,6 +178,37 @@ class TestPreviewRecipients(TestCase):
         self.assertEqual(result["reachable_users"], 0)
         self.assertEqual(result["estimated_cost"], 0)
 
+    @patch("talent_reach.services.query_developers_for_outreach")
+    def test_preview_large_developer_list_is_batched(self, mock_query):
+        """
+        Large developer lists must be queried in batches.
+
+        >999 uid values would exceed SQLite's 999-variable limit and raise
+        "too many SQL variables" with a single __in query.
+        """
+        dev_count = 1005  # forces multiple batches (QUERY_BATCH_SIZE=500)
+        users = [
+            User(username=f"bulk-user-{i}", email=f"bulk{i}@example.com")
+            for i in range(dev_count)
+        ]
+        User.objects.bulk_create(users)
+        UserSocialAuth.objects.bulk_create(
+            [
+                UserSocialAuth(user=users[i], provider="github", uid=str(5000 + i))
+                for i in range(dev_count)
+            ]
+        )
+
+        mock_query.return_value = [
+            {"platform": "GitHub", "actor_id": str(5000 + i), "openrank_score": 1.0}
+            for i in range(dev_count)
+        ]
+
+        result = preview_recipients(tag_ids=["repo:test/example"])
+
+        self.assertEqual(result["reachable_users"], dev_count)
+        self.assertEqual(len(result["developers"]), dev_count)
+
 
 # ---------------------------------------------------------------------------
 # Send Tests
@@ -352,6 +383,140 @@ class TestSendOutreach(TestCase):
             )
 
     @patch("talent_reach.services.query_developers_for_outreach")
+    def test_send_cash_with_tag_slug_rejected(self, mock_query):
+        """Test error when a tag_slug is combined with cash points."""
+        mock_query.return_value = [
+            {"platform": "GitHub", "actor_id": "2001", "openrank_score": 10.0},
+        ]
+
+        with self.assertRaises(ValueError):
+            send_outreach(
+                draft_id=self.draft.id,
+                author=self.author,
+                tag_ids=["repo:test/example"],
+                tag_names=["test/example"],
+                languages=None,
+                countries=None,
+                regions=None,
+                top_n=None,
+                point_type=PointType.CASH,
+                tag_slug="some-tag",
+            )
+
+    @patch("talent_reach.services.query_developers_for_outreach")
+    def test_send_gift_from_tagged_pool(self, mock_query):
+        """Tagged gift pools can fund outreach; cost is deducted from that pool."""
+        from points.models import Tag
+
+        tag = Tag.objects.create(
+            slug="test-gift-tag", name="Test Gift Tag", tag_type="general"
+        )
+        grant_points(
+            owner=self.author,
+            amount=1000,
+            point_type=PointType.GIFT,
+            reason="Tagged gift fixture",
+            tag_slug=tag.slug,
+        )
+        mock_query.return_value = [
+            {"platform": "GitHub", "actor_id": "2001", "openrank_score": 10.0},
+        ]
+
+        from points.services import get_balance
+
+        balance_before = get_balance(self.author, PointType.GIFT, tag_slug=tag.slug)
+
+        campaign = send_outreach(
+            draft_id=self.draft.id,
+            author=self.author,
+            tag_ids=["repo:test/example"],
+            tag_names=["test/example"],
+            languages=None,
+            countries=None,
+            regions=None,
+            top_n=None,
+            point_type=PointType.GIFT,
+            tag_slug=tag.slug,
+        )
+
+        balance_after = get_balance(self.author, PointType.GIFT, tag_slug=tag.slug)
+        expected_cost = 1 * settings.OUTREACH_COST_PER_USER
+        self.assertEqual(balance_before - balance_after, expected_cost)
+        self.assertEqual(campaign.point_type, PointType.GIFT)
+        self.assertEqual(campaign.tag_slug, tag.slug)
+
+    @patch("talent_reach.services.query_developers_for_outreach")
+    def test_send_from_organization_pool(self, mock_query):
+        """Organization owner/admin can fund outreach from the org pool."""
+        from accounts.models import Organization, OrganizationMembership
+
+        org = Organization.objects.create(name="Test Org", slug="test-org")
+        OrganizationMembership.objects.create(
+            user=self.author, organization=org, role=OrganizationMembership.Role.OWNER
+        )
+        grant_points(
+            owner=org,
+            amount=1000,
+            point_type=PointType.CASH,
+            reason="Org fixture",
+        )
+        mock_query.return_value = [
+            {"platform": "GitHub", "actor_id": "2001", "openrank_score": 10.0},
+        ]
+
+        from points.services import get_balance
+
+        balance_before = get_balance(org, PointType.CASH)
+
+        campaign = send_outreach(
+            draft_id=self.draft.id,
+            author=self.author,
+            tag_ids=["repo:test/example"],
+            tag_names=["test/example"],
+            languages=None,
+            countries=None,
+            regions=None,
+            top_n=None,
+            point_type=PointType.CASH,
+            owner_type="organization",
+            owner_slug=org.slug,
+        )
+
+        balance_after = get_balance(org, PointType.CASH)
+        expected_cost = 1 * settings.OUTREACH_COST_PER_USER
+        self.assertEqual(balance_before - balance_after, expected_cost)
+        self.assertEqual(campaign.source_owner_type, "organization")
+        self.assertEqual(campaign.source_owner_slug, org.slug)
+
+    @patch("talent_reach.services.query_developers_for_outreach")
+    def test_send_from_organization_forbidden_for_member(self, mock_query):
+        """Plain members cannot fund outreach from the org pool."""
+        from accounts.models import Organization, OrganizationMembership
+
+        org = Organization.objects.create(name="Test Org", slug="test-org")
+        OrganizationMembership.objects.create(
+            user=self.author, organization=org, role=OrganizationMembership.Role.MEMBER
+        )
+        mock_query.return_value = [
+            {"platform": "GitHub", "actor_id": "2001", "openrank_score": 10.0},
+        ]
+
+        with self.assertRaises(ValueError):
+            send_outreach(
+                draft_id=self.draft.id,
+                author=self.author,
+                tag_ids=["repo:test/example"],
+                tag_names=["test/example"],
+                languages=None,
+                countries=None,
+                regions=None,
+                top_n=None,
+                point_type=PointType.CASH,
+                owner_type="organization",
+                owner_slug=org.slug,
+            )
+
+    @patch("talent_reach.services.query_developers_for_outreach")
     def test_send_reward_calculation(self, mock_query):
         """Test reward amounts are proportional to OpenRank scores."""
         # Create more recipients
@@ -465,7 +630,7 @@ class TestClaimReadingReward(TestCase):
             tag_ids=["repo:test/example"],
             tag_names=["test/example"],
             point_type=PointType.CASH,
-            cost_per_user=5,
+            cost_per_user=2,
             total_cost=5,
             reward_ratio=0.5,
             reward_pool=2,

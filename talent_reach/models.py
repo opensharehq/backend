@@ -60,6 +60,13 @@ class OutreachCampaign(models.Model):
 
     # Points info
     point_type = models.CharField(max_length=10)  # cash / gift
+    # Source pool snapshot: which pool the campaign cost was deducted from
+    source_owner_type = models.CharField(
+        max_length=20, default="user"
+    )  # "user" or "organization"
+    source_owner_slug = models.CharField(max_length=200, blank=True, default="")
+    # Gift tag slug the campaign cost was deducted from (empty = untagged gift)
+    tag_slug = models.CharField(max_length=200, blank=True, default="")
     cost_per_user = models.PositiveIntegerField()
     total_cost = models.PositiveIntegerField()
     reward_ratio = models.FloatField()  # Reward ratio from env var (0-1)

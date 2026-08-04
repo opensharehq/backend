@@ -27,12 +27,12 @@ TALENT_BASELINE_URL = "https://oss.open-digger.cn/talent_baseline.json"
 
 # Tier-to-points mapping
 TIER_POINTS = {
-    "SSS": 1000,
-    "SS": 500,
-    "S": 300,
-    "A": 200,
-    "B": 100,
-    "C": 50,
+    "SSS": 200,
+    "SS": 100,
+    "S": 60,
+    "A": 40,
+    "B": 20,
+    "C": 10,
     "D": 0,
 }
 

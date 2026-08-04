@@ -292,6 +292,121 @@ class TestSendAPI(TestCase):
         )
         self.assertEqual(response.status_code, 409)
 
+    @patch("talent_reach.services.query_developers_for_outreach")
+    def test_send_gift_with_tag_slug(self, mock_query):
+        """POST /talent-reach/send - tagged gift pool is accepted."""
+        from points.models import Tag
+
+        tag = Tag.objects.create(
+            slug="api-gift-tag", name="API Gift Tag", tag_type="general"
+        )
+        grant_points(
+            owner=self.user,
+            amount=500,
+            point_type=PointType.GIFT,
+            reason="Tagged gift fixture",
+            tag_slug=tag.slug,
+        )
+        mock_query.return_value = [
+            {"platform": "GitHub", "actor_id": "4001", "openrank_score": 8.0},
+        ]
+
+        response = self.client.post(
+            "/api/v1/talent-reach/send",
+            {
+                "draft_id": self.draft.id,
+                "tag_ids": ["repo:test/example"],
+                "tag_names": ["test/example"],
+                "point_type": "gift",
+                "tag_slug": tag.slug,
+            },
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data["point_type"], "gift")
+        self.assertEqual(data["tag_slug"], tag.slug)
+
+    @patch("talent_reach.services.query_developers_for_outreach")
+    def test_send_cash_with_tag_slug_rejected(self, mock_query):
+        """POST /talent-reach/send - rejects tag_slug on cash points."""
+        mock_query.return_value = [
+            {"platform": "GitHub", "actor_id": "4001", "openrank_score": 8.0},
+        ]
+
+        response = self.client.post(
+            "/api/v1/talent-reach/send",
+            {
+                "draft_id": self.draft.id,
+                "tag_ids": ["repo:test/example"],
+                "tag_names": ["test/example"],
+                "point_type": "cash",
+                "tag_slug": "some-tag",
+            },
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 422)
+
+    @patch("talent_reach.services.query_developers_for_outreach")
+    def test_send_organization_missing_slug_rejected(self, mock_query):
+        """POST /talent-reach/send - rejects org owner_type without slug."""
+        mock_query.return_value = [
+            {"platform": "GitHub", "actor_id": "4001", "openrank_score": 8.0},
+        ]
+
+        response = self.client.post(
+            "/api/v1/talent-reach/send",
+            {
+                "draft_id": self.draft.id,
+                "tag_ids": ["repo:test/example"],
+                "tag_names": ["test/example"],
+                "point_type": "cash",
+                "owner_type": "organization",
+            },
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 422)
+
+    @patch("talent_reach.services.query_developers_for_outreach")
+    def test_send_organization_pool(self, mock_query):
+        """POST /talent-reach/send - organization pool as owner is accepted."""
+        from accounts.models import Organization, OrganizationMembership
+
+        org = Organization.objects.create(name="API Org", slug="api-org")
+        OrganizationMembership.objects.create(
+            user=self.user, organization=org, role=OrganizationMembership.Role.OWNER
+        )
+        grant_points(
+            owner=org,
+            amount=500,
+            point_type=PointType.CASH,
+            reason="Org fixture",
+        )
+        mock_query.return_value = [
+            {"platform": "GitHub", "actor_id": "4001", "openrank_score": 8.0},
+        ]
+
+        response = self.client.post(
+            "/api/v1/talent-reach/send",
+            {
+                "draft_id": self.draft.id,
+                "tag_ids": ["repo:test/example"],
+                "tag_names": ["test/example"],
+                "point_type": "cash",
+                "owner_type": "organization",
+                "owner_slug": org.slug,
+            },
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data["source_owner_type"], "organization")
+        self.assertEqual(data["source_owner_slug"], org.slug)
+
     def test_send_unauthenticated(self):
         """POST /talent-reach/send - returns 401 without auth."""
         response = self.client.post(
@@ -350,7 +465,7 @@ class TestCampaignAPI(TestCase):
             tag_ids=["repo:test/example"],
             tag_names=["test/example"],
             point_type=PointType.CASH,
-            cost_per_user=5,
+            cost_per_user=2,
             total_cost=10,
             reward_ratio=0.5,
             reward_pool=5,
@@ -366,7 +481,7 @@ class TestCampaignAPI(TestCase):
             tag_ids=["repo:other/repo"],
             tag_names=["other/repo"],
             point_type=PointType.GIFT,
-            cost_per_user=5,
+            cost_per_user=2,
             total_cost=5,
             reward_ratio=0.5,
             reward_pool=2,

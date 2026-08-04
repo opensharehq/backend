@@ -156,8 +156,8 @@ class CalculateRewardPointsTests(TestCase):
         }
 
         points = calculate_reward_points(user)
-        # Best year is 2023 with 25.0 → tier S (>=20) → 300 points
-        self.assertEqual(points, 300)
+        # Best year is 2023 with 25.0 → tier S (>=20) → 60 points
+        self.assertEqual(points, 60)
 
     @patch("accounts.services.profile_completion_reward._fetch_baseline_tiers")
     @patch("accounts.services.profile_completion_reward.query_user_yearly_openrank")
@@ -246,11 +246,11 @@ class GetProfileCompletionRewardInfoTests(TestCase):
             username="eligible",
             location_country_id=":divisions/CN",
         )
-        mock_calc.return_value = 500
+        mock_calc.return_value = 100
 
         info = get_profile_completion_reward_info(user)
         self.assertFalse(info["eligible"])
-        self.assertEqual(info["reward_points"], 500)
+        self.assertEqual(info["reward_points"], 100)
         self.assertIn("birth_date", info["missing_fields"])
 
     def test_get_profile_completion_reward_info_already_claimed(self):
@@ -282,7 +282,7 @@ class ProfileRewardApiTests(TestCase):
     @patch("accounts.services.profile_completion_reward.calculate_reward_points")
     def test_api_profile_includes_reward_info(self, mock_calc):
         """GET /api/v1/me/profile response includes profile_completion_reward."""
-        mock_calc.return_value = 200
+        mock_calc.return_value = 40
 
         response = self.client.get("/api/v1/me/profile", **self.headers)
         self.assertEqual(response.status_code, 200)

@@ -5,6 +5,8 @@ import uuid
 from django.conf import settings
 from django.db import models
 
+from points.models import PointType
+
 
 def shop_item_card_path(instance, filename):
     """Generate upload path for shop item card image."""
@@ -151,6 +153,21 @@ class Redemption(models.Model):
         verbose_name="收货地址",
         help_text="兑换时用户选择的收货地址（仅需要线下发货的商品）",
     )
+    # 兑换时使用的积分池信息
+    point_type = models.CharField(
+        max_length=10,
+        choices=PointType.choices,
+        default=PointType.GIFT,
+        verbose_name="支付积分类型",
+    )
+    point_tag_slug = models.CharField(  # noqa: DJ001
+        max_length=50,
+        null=True,
+        blank=True,
+        verbose_name="支付积分标签slug",
+        help_text="兑换时使用的特定标签积分（仅 gift 类型）",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

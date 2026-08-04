@@ -30,6 +30,8 @@ class RedemptionCreateSchema(Schema):
     item_id: int
     shipping_address_id: int | None = None
     lang: str = "zh"
+    point_type: str = "gift"
+    tag_slug: str | None = None
 
 
 class ShopItemAllowedTagSchema(Schema):
@@ -239,6 +241,19 @@ def _raise_redemption_api_error(message: str) -> None:
         raise ApiError(
             "insufficient_points", 409, "Not enough points to redeem this item."
         )
+    if normalized == "只有礼物积分可以设置标签":
+        raise ApiError(
+            "invalid_point_type",
+            422,
+            "Only gift points can be used with a tag.",
+        )
+    tag_match = re.match(r"^无效的积分类型: (?P<point_type>.+)$", normalized)
+    if tag_match:
+        raise ApiError(
+            "invalid_point_type",
+            422,
+            f"Invalid point type: {tag_match.group('point_type')}.",
+        )
     raise ApiError("redemption_failed", 409, "The item could not be redeemed.")
 
 
@@ -351,6 +366,8 @@ def redemption_create_endpoint(request, payload: RedemptionCreateSchema):
         "user": request.auth,
         "item_id": payload.item_id,
         "shipping_address_id": payload.shipping_address_id,
+        "point_type": payload.point_type,
+        "tag_slug": payload.tag_slug,
     }
     if "lang" in inspect.signature(redeem_item).parameters:
         redeem_kwargs["lang"] = payload.lang

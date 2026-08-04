@@ -97,7 +97,7 @@ env = environ.Env(
     SBY_PROVIDER_ID=(str, ""),
     SBY_FU_URL=(str, ""),
     IP2REGION_XDB_PATH=(str, ""),
-    OUTREACH_COST_PER_USER=(int, 5),
+    OUTREACH_COST_PER_USER=(int, 2),
     OUTREACH_REWARD_RATIO=(float, 0.5),
     OUTREACH_REWARD_EXPIRY_DAYS=(int, 30),
 )

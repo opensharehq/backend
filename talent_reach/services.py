@@ -23,6 +23,16 @@ from .models import OutreachCampaign, OutreachDraft, OutreachRecipient
 
 logger = logging.getLogger(__name__)
 
+# 分批查询大小: 防止 uid__in / id__in 等查询超出 SQL 变量数上限
+# (SQLite 单查询上限 999), 与积分分配模块的批大小保持一致
+QUERY_BATCH_SIZE = 500
+
+
+def _batched(items: list, size: int = QUERY_BATCH_SIZE):
+    """Yield successive chunks of ``items`` of at most ``size`` elements."""
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
 
 # ---------------------------------------------------------------------------
 # Draft management
@@ -100,14 +110,20 @@ def _match_registered_users(developers: list[dict]) -> list[dict]:
         lookup[(platform, actor_id)] = dev
 
     # Query UserSocialAuth for matching (provider, uid) pairs
-    # social_django stores provider as e.g. "github", uid as string
+    # social_django stores provider as e.g. "github", uid as string.
+    # Batch by uid to avoid "too many SQL variables" when the developer
+    # list is large (SQLite allows 999 variables per query).
     platforms = list({k[0] for k in lookup})
     actor_ids = list({k[1] for k in lookup})
 
-    social_auths = UserSocialAuth.objects.filter(
-        provider__in=platforms,
-        uid__in=actor_ids,
-    ).select_related("user")
+    social_auths = []
+    for chunk in _batched(actor_ids):
+        social_auths.extend(
+            UserSocialAuth.objects.filter(
+                provider__in=platforms,
+                uid__in=chunk,
+            ).select_related("user")
+        )
 
     matched = []
     seen_users = set()
@@ -228,6 +244,37 @@ def _largest_remainder_allocation(scores: list[float], total: int) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_source_owner(author, owner_type: str, owner_slug: str | None):
+    """
+    Resolve the owner the outreach cost is deducted from.
+
+    ``user`` resolves to the author; ``organization`` requires the author to
+    be an owner/admin of the organization (mirrors the /points/pools list).
+    """
+    if owner_type == "user":
+        return author
+    if owner_type != "organization":
+        msg = "owner_type must be 'user' or 'organization'."
+        raise ValueError(msg)
+    if not owner_slug:
+        msg = "owner_slug is required when owner_type is 'organization'."
+        raise ValueError(msg)
+
+    from accounts.models import Organization, OrganizationMembership
+
+    organization = Organization.objects.filter(slug=owner_slug).first()
+    if organization is None:
+        msg = f"Organization '{owner_slug}' not found."
+        raise ValueError(msg)
+    membership = OrganizationMembership.objects.filter(
+        user=author, organization=organization
+    ).first()
+    if membership is None or not membership.is_admin_or_owner():
+        msg = "You are not an admin or owner of this organization."
+        raise ValueError(msg)
+    return organization
+
+
 def send_outreach(
     draft_id: int,
     author,
@@ -239,12 +286,20 @@ def send_outreach(
     top_n: int | None,
     point_type: str,
     cities: list[str] | None = None,
+    tag_slug: str | None = None,
+    owner_type: str = "user",
+    owner_slug: str | None = None,
 ) -> OutreachCampaign:
     """
     Execute the outreach campaign.
 
     Synchronous part: validate, deduct points, create campaign.
     Async part: send messages in background thread.
+
+    Any available point pool may be used (cash, untagged gift or tagged
+    gift, owned by the user or an organization they manage). Rewards are
+    always granted to recipients into the matching account type: cash
+    rewards to cash accounts, gift rewards to gift accounts.
     """
     # 1. Validate draft
     draft = OutreachDraft.objects.get(id=draft_id, author=author)
@@ -264,10 +319,15 @@ def send_outreach(
         msg = "No reachable registered users found for the given criteria."
         raise ValueError(msg)
 
-    # 3. Validate point_type
+    # 3. Validate point_type and resolve the source pool owner
     if point_type not in (PointType.CASH, PointType.GIFT):
         msg = "point_type must be 'cash' or 'gift'."
         raise ValueError(msg)
+    if point_type == PointType.CASH and tag_slug:
+        msg = "tag_slug cannot be used with cash points."
+        raise ValueError(msg)
+    source_owner = _resolve_source_owner(author, owner_type, owner_slug)
+    tag_is_null = point_type == PointType.GIFT and not tag_slug
 
     # 4. Calculate costs
     cost_per_user = settings.OUTREACH_COST_PER_USER
@@ -291,6 +351,9 @@ def send_outreach(
         cities=cities or [],
         top_n=top_n,
         point_type=point_type,
+        source_owner_type=owner_type,
+        source_owner_slug=owner_slug or "",
+        tag_slug=tag_slug or "",
         cost_per_user=cost_per_user,
         total_cost=total_cost,
         reward_ratio=reward_ratio,
@@ -305,14 +368,14 @@ def send_outreach(
     campaign.save(update_fields=["reference_id"])
 
     # 6. Deduct points
-    tag_is_null = point_type == PointType.GIFT
     try:
         spend_points(
-            owner=author,
+            owner=source_owner,
             amount=total_cost,
             point_type=point_type,
             description=f"Talent outreach: {draft.title}",
             tag_is_null=tag_is_null,
+            tag_slug=tag_slug,
             reference_id=reference_id,
         )
     except Exception:
@@ -329,7 +392,10 @@ def send_outreach(
     from accounts.models import User
 
     user_ids = [d["user_id"] for d in developers]
-    recipient_users = list(User.objects.filter(id__in=user_ids))
+    # Batch the lookup to avoid "too many SQL variables" on large campaigns
+    recipient_users = []
+    for chunk in _batched(user_ids):
+        recipient_users.extend(User.objects.filter(id__in=chunk))
     user_map = {u.id: u for u in recipient_users}
 
     # 9. Delete draft
@@ -402,10 +468,13 @@ def _send_outreach_async(
                 campaign.save(update_fields=["message"])
 
                 # Get created UserMessage records
-                user_messages = UserMessage.objects.filter(
-                    message=message, user_id__in=user_ids
-                )
-                um_map = {um.user_id: um for um in user_messages}
+                # Batch the lookup to avoid "too many SQL variables"
+                um_map = {}
+                for chunk in _batched(user_ids):
+                    for um in UserMessage.objects.filter(
+                        message=message, user_id__in=chunk
+                    ):
+                        um_map[um.user_id] = um
 
                 # Bulk create OutreachRecipient records
                 recipients_to_create = []
@@ -562,6 +631,9 @@ def get_campaign_detail(campaign_id: int, author) -> dict:
         "cities": campaign.cities,
         "top_n": campaign.top_n,
         "point_type": campaign.point_type,
+        "source_owner_type": campaign.source_owner_type,
+        "source_owner_slug": campaign.source_owner_slug,
+        "tag_slug": campaign.tag_slug,
         "cost_per_user": campaign.cost_per_user,
         "total_cost": campaign.total_cost,
         "reward_ratio": campaign.reward_ratio,

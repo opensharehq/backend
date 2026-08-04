@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class AllocationService:
     """积分分配服务."""
 
-    CONTRIBUTION_TO_POINTS_RATIO = 300  # 1 贡献度 = 300 积分
+    CONTRIBUTION_TO_POINTS_RATIO = 100  # 1 贡献度 = 100 积分
     SOCIAL_AUTH_PREFETCH_ATTR = "prefetched_code_hosting_social_auth"
     # Deprecated: kept for backward compatibility with management commands
     GITHUB_SOCIAL_AUTH_PREFETCH_ATTR = "prefetched_code_hosting_social_auth"

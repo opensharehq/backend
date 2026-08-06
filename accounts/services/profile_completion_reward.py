@@ -33,7 +33,7 @@ TIER_POINTS = {
     "A": 40,
     "B": 20,
     "C": 10,
-    "D": 0,
+    "D": 5,
 }
 
 # Ordered tier labels (highest to lowest)
@@ -181,51 +181,58 @@ def _determine_tier(openrank_value: float, thresholds: list) -> str:
     return "D"
 
 
-def calculate_reward_points(user) -> int:
+def calculate_reward_points(user) -> dict:
     """
-    Calculate the profile completion reward points for a user.
+    Calculate the profile completion reward for a user.
 
     Steps:
         1. Get user's bound platform accounts.
         2. Query ClickHouse for yearly OpenRank contributions.
         3. Fetch baseline tier thresholds from CDN.
-        4. Determine the highest tier from historical max yearly contribution.
+        4. Determine the highest tier from historical yearly contributions and
+           remember the year that tier was reached.
         5. Map tier to reward points.
 
     Args:
         user: User instance.
 
     Returns:
-        Integer reward points (0 if no contribution data or tier is D).
+        Dict with keys:
+            - 'points': int reward points (0 if no contribution data).
+            - 'highest_level': str tier label, or None if no contribution data.
+            - 'highest_level_year': int year of the highest tier, or None.
 
     """
+    empty_result = {"points": 0, "highest_level": None, "highest_level_year": None}
+
     # Check cache for user openrank data
     openrank_cache_key = f"{OPENRANK_CACHE_PREFIX}:{user.id}"
-    cached_points = cache.get(openrank_cache_key)
-    if cached_points is not None:
-        return cached_points
+    cached_result = cache.get(openrank_cache_key)
+    if cached_result is not None:
+        return cached_result
 
     # Step 1: Get platform accounts
     platform_ids = _get_user_platform_ids(user)
     if not platform_ids:
-        cache.set(openrank_cache_key, 0, CACHE_TTL)
-        return 0
+        cache.set(openrank_cache_key, empty_result, CACHE_TTL)
+        return empty_result
 
     # Step 2: Query yearly openrank from ClickHouse
     yearly_data = query_user_yearly_openrank(platform_ids)
     if not yearly_data:
-        cache.set(openrank_cache_key, 0, CACHE_TTL)
-        return 0
+        cache.set(openrank_cache_key, empty_result, CACHE_TTL)
+        return empty_result
 
     # Step 3: Fetch baseline tiers
     tiers = _fetch_baseline_tiers()
     if not tiers:
-        cache.set(openrank_cache_key, 0, CACHE_TTL)
-        return 0
+        cache.set(openrank_cache_key, empty_result, CACHE_TTL)
+        return empty_result
 
-    # Step 4: Find highest tier across all years
-    best_tier = "D"
-    best_tier_index = TIER_LABELS.index("D")
+    # Step 4: Find highest tier across all years, keeping its year
+    best_tier = None
+    best_tier_index = len(TIER_LABELS)
+    best_tier_year = None
 
     for entry in yearly_data:
         year = str(entry["year"])
@@ -246,14 +253,27 @@ def calculate_reward_points(user) -> int:
 
         tier = _determine_tier(yearly_openrank, year_thresholds)
         tier_index = TIER_LABELS.index(tier)
-        if tier_index < best_tier_index:
+        # Strictly better tier wins; on a tie the most recent year wins
+        is_better = tier_index < best_tier_index or (
+            tier_index == best_tier_index and int(year) > (best_tier_year or 0)
+        )
+        if is_better:
             best_tier = tier
             best_tier_index = tier_index
+            best_tier_year = int(year)
+
+    if best_tier is None:
+        cache.set(openrank_cache_key, empty_result, CACHE_TTL)
+        return empty_result
 
     # Step 5: Map tier to points
-    points = TIER_POINTS.get(best_tier, 0)
-    cache.set(openrank_cache_key, points, CACHE_TTL)
-    return points
+    result = {
+        "points": TIER_POINTS.get(best_tier, 0),
+        "highest_level": best_tier,
+        "highest_level_year": best_tier_year,
+    }
+    cache.set(openrank_cache_key, result, CACHE_TTL)
+    return result
 
 
 def grant_profile_completion_reward(user) -> dict | None:
@@ -281,7 +301,7 @@ def grant_profile_completion_reward(user) -> dict | None:
         return None
 
     # Step 3: Calculate reward points
-    points = calculate_reward_points(user)
+    points = calculate_reward_points(user)["points"]
     if points <= 0:
         return None
 
@@ -312,18 +332,28 @@ def get_profile_completion_reward_info(user) -> dict:
         user: User instance.
 
     Returns:
-        Dict with 'eligible', 'reward_points', and 'missing_fields' keys.
+        Dict with 'eligible', 'reward_points', 'missing_fields',
+        'highest_level' and 'highest_level_year' keys.
 
     """
     # Already claimed
     if has_claimed_reward(user):
-        return {"eligible": False, "reward_points": 0, "missing_fields": []}
+        return {
+            "eligible": False,
+            "reward_points": 0,
+            "missing_fields": [],
+            "highest_level": None,
+            "highest_level_year": None,
+        }
 
     complete, missing = is_profile_complete(user)
-    reward_points = calculate_reward_points(user)
+    reward = calculate_reward_points(user)
+    reward_points = reward["points"]
 
     return {
         "eligible": complete and reward_points > 0,
         "reward_points": reward_points,
         "missing_fields": missing,
+        "highest_level": reward["highest_level"],
+        "highest_level_year": reward["highest_level_year"],
     }

@@ -155,9 +155,11 @@ class CalculateRewardPointsTests(TestCase):
             "2024": [100, 50, 20, 10, 5, 2],
         }
 
-        points = calculate_reward_points(user)
+        result = calculate_reward_points(user)
         # Best year is 2023 with 25.0 → tier S (>=20) → 60 points
-        self.assertEqual(points, 60)
+        self.assertEqual(result["points"], 60)
+        self.assertEqual(result["highest_level"], "S")
+        self.assertEqual(result["highest_level_year"], 2023)
 
     @patch("accounts.services.profile_completion_reward._fetch_baseline_tiers")
     @patch("accounts.services.profile_completion_reward.query_user_yearly_openrank")
@@ -177,9 +179,11 @@ class CalculateRewardPointsTests(TestCase):
             "2023": [100, 50, 20, 10, 5, 2, 0],
         }
 
-        points = calculate_reward_points(user)
-        # 1.0 is below C threshold (2) → tier D → 0 points
-        self.assertEqual(points, 0)
+        result = calculate_reward_points(user)
+        # 1.0 is below C threshold (2) → tier D → 5 points
+        self.assertEqual(result["points"], 5)
+        self.assertEqual(result["highest_level"], "D")
+        self.assertEqual(result["highest_level_year"], 2023)
 
 
 class GrantProfileCompletionRewardTests(TestCase):
@@ -195,7 +199,11 @@ class GrantProfileCompletionRewardTests(TestCase):
         )
         _add_work_experience(user)
         _add_education(user)
-        mock_calc.return_value = 300
+        mock_calc.return_value = {
+            "points": 300,
+            "highest_level": "SSS",
+            "highest_level_year": 2024,
+        }
 
         result = grant_profile_completion_reward(user)
         self.assertEqual(result, {"rewarded": True, "points": 300})
@@ -246,12 +254,18 @@ class GetProfileCompletionRewardInfoTests(TestCase):
             username="eligible",
             location_country_id=":divisions/CN",
         )
-        mock_calc.return_value = 100
+        mock_calc.return_value = {
+            "points": 100,
+            "highest_level": "SS",
+            "highest_level_year": 2023,
+        }
 
         info = get_profile_completion_reward_info(user)
         self.assertFalse(info["eligible"])
         self.assertEqual(info["reward_points"], 100)
         self.assertIn("birth_date", info["missing_fields"])
+        self.assertEqual(info["highest_level"], "SS")
+        self.assertEqual(info["highest_level_year"], 2023)
 
     def test_get_profile_completion_reward_info_already_claimed(self):
         """Already claimed user → not eligible, no missing fields."""
@@ -266,7 +280,7 @@ class GetProfileCompletionRewardInfoTests(TestCase):
 
 
 class ProfileRewardApiTests(TestCase):
-    """Tests for profile API including reward info."""
+    """Tests for the profile completion reward API endpoint."""
 
     def setUp(self):
         """Create authenticated user with profile for API tests."""
@@ -280,15 +294,27 @@ class ProfileRewardApiTests(TestCase):
         }
 
     @patch("accounts.services.profile_completion_reward.calculate_reward_points")
-    def test_api_profile_includes_reward_info(self, mock_calc):
-        """GET /api/v1/me/profile response includes profile_completion_reward."""
-        mock_calc.return_value = 40
+    def test_api_profile_completion_reward_endpoint(self, mock_calc):
+        """GET /api/v1/me/profile-completion-reward returns reward info."""
+        mock_calc.return_value = {
+            "points": 40,
+            "highest_level": "A",
+            "highest_level_year": 2024,
+        }
 
-        response = self.client.get("/api/v1/me/profile", **self.headers)
+        response = self.client.get(
+            "/api/v1/me/profile-completion-reward", **self.headers
+        )
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertIn("profile_completion_reward", data)
-        reward_info = data["profile_completion_reward"]
-        self.assertIn("eligible", reward_info)
-        self.assertIn("reward_points", reward_info)
-        self.assertIn("missing_fields", reward_info)
+        self.assertIn("eligible", data)
+        self.assertEqual(data["reward_points"], 40)
+        self.assertIn("missing_fields", data)
+        self.assertEqual(data["highest_level"], "A")
+        self.assertEqual(data["highest_level_year"], 2024)
+
+    def test_api_profile_no_longer_includes_reward_info(self):
+        """GET /api/v1/me/profile no longer returns profile_completion_reward."""
+        response = self.client.get("/api/v1/me/profile", **self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("profile_completion_reward", response.json())

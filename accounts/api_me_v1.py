@@ -231,7 +231,7 @@ def current_profile_endpoint(request):
     """Return the authenticated user's profile summary."""
     profile = _get_profile_or_none(request.auth)
     balance = points_services.get_detailed_balance_or_zero(request.auth)
-    response_data = {
+    return {
         "user": {
             "id": request.auth.id,
             "username": request.auth.username,
@@ -240,13 +240,15 @@ def current_profile_endpoint(request):
         "profile": _profile_payload(profile),
         "balance": balance,
     }
-    # Only compute reward info when the user has a profile
-    if profile:
-        response_data["profile_completion_reward"] = get_profile_completion_reward_info(
-            request.auth
-        )
-    else:
-        response_data["profile_completion_reward"] = {
+
+
+@router.get("/profile-completion-reward", response=dict)
+def profile_completion_reward_endpoint(request):
+    """Return the authenticated user's profile completion reward status."""
+    profile = _get_profile_or_none(request.auth)
+    # Users without a profile have nothing filled in yet
+    if profile is None:
+        return {
             "eligible": False,
             "reward_points": 0,
             "missing_fields": [
@@ -255,8 +257,10 @@ def current_profile_endpoint(request):
                 "work_experience",
                 "education",
             ],
+            "highest_level": None,
+            "highest_level_year": None,
         }
-    return response_data
+    return get_profile_completion_reward_info(request.auth)
 
 
 @router.patch("/profile", response={200: dict, 422: ErrorResponseSchema})

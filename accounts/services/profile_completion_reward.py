@@ -203,33 +203,55 @@ def calculate_reward_points(user) -> dict:
             - 'highest_level_year': int year of the highest tier, or None.
 
     """
-    empty_result = {"points": 0, "highest_level": None, "highest_level_year": None}
-
     # Check cache for user openrank data
     openrank_cache_key = f"{OPENRANK_CACHE_PREFIX}:{user.id}"
     cached_result = cache.get(openrank_cache_key)
     if cached_result is not None:
         # Backward compatibility: old cache stored a plain int. Wrap it.
         if isinstance(cached_result, int):
-            return {"points": cached_result, "highest_level": None, "highest_level_year": None}
+            return {
+                "points": cached_result,
+                "highest_level": None,
+                "highest_level_year": None,
+            }
         return cached_result
+
+    result = _compute_reward_points(user)
+    cache.set(openrank_cache_key, result, CACHE_TTL)
+    return result
+
+
+def _compute_reward_points(user) -> dict:
+    """
+    Compute the reward points for a user without touching the cache.
+
+    Caller is responsible for caching the result.
+
+    Args:
+        user: User instance.
+
+    Returns:
+        Dict with keys:
+            - 'points': int reward points (0 if no contribution data).
+            - 'highest_level': str tier label, or None if no contribution data.
+            - 'highest_level_year': int year of the highest tier, or None.
+
+    """
+    empty_result = {"points": 0, "highest_level": None, "highest_level_year": None}
 
     # Step 1: Get platform accounts
     platform_ids = _get_user_platform_ids(user)
     if not platform_ids:
-        cache.set(openrank_cache_key, empty_result, CACHE_TTL)
         return empty_result
 
     # Step 2: Query yearly openrank from ClickHouse
     yearly_data = query_user_yearly_openrank(platform_ids)
     if not yearly_data:
-        cache.set(openrank_cache_key, empty_result, CACHE_TTL)
         return empty_result
 
     # Step 3: Fetch baseline tiers
     tiers = _fetch_baseline_tiers()
     if not tiers:
-        cache.set(openrank_cache_key, empty_result, CACHE_TTL)
         return empty_result
 
     # Step 4: Find highest tier across all years, keeping its year
@@ -266,17 +288,14 @@ def calculate_reward_points(user) -> dict:
             best_tier_year = int(year)
 
     if best_tier is None:
-        cache.set(openrank_cache_key, empty_result, CACHE_TTL)
         return empty_result
 
     # Step 5: Map tier to points
-    result = {
+    return {
         "points": TIER_POINTS.get(best_tier, 0),
         "highest_level": best_tier,
         "highest_level_year": best_tier_year,
     }
-    cache.set(openrank_cache_key, result, CACHE_TTL)
-    return result
 
 
 def grant_profile_completion_reward(user) -> dict | None:

@@ -209,6 +209,9 @@ def calculate_reward_points(user) -> dict:
     openrank_cache_key = f"{OPENRANK_CACHE_PREFIX}:{user.id}"
     cached_result = cache.get(openrank_cache_key)
     if cached_result is not None:
+        # Backward compatibility: old cache stored a plain int. Wrap it.
+        if isinstance(cached_result, int):
+            return {"points": cached_result, "highest_level": None, "highest_level_year": None}
         return cached_result
 
     # Step 1: Get platform accounts

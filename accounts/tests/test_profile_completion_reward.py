@@ -313,6 +313,35 @@ class ProfileRewardApiTests(TestCase):
         self.assertEqual(data["highest_level"], "A")
         self.assertEqual(data["highest_level_year"], 2024)
 
+    def test_api_profile_completion_reward_without_profile(self):
+        """User without a UserProfile gets the default all-missing payload."""
+        no_profile_user = User.objects.create_user(
+            username="no_profile_user",
+            email="no_profile_user@example.com",
+            password="StrongPass123!",
+        )
+        headers = {
+            "HTTP_AUTHORIZATION": f"Bearer {create_access_token(no_profile_user)}"
+        }
+
+        response = self.client.get("/api/v1/me/profile-completion-reward", **headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "eligible": False,
+                "reward_points": 0,
+                "missing_fields": [
+                    "location",
+                    "birth_date",
+                    "work_experience",
+                    "education",
+                ],
+                "highest_level": None,
+                "highest_level_year": None,
+            },
+        )
+
     def test_api_profile_no_longer_includes_reward_info(self):
         """GET /api/v1/me/profile no longer returns profile_completion_reward."""
         response = self.client.get("/api/v1/me/profile", **self.headers)

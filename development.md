@@ -46,6 +46,23 @@ This guide is for developers who want to run or extend OpenShare locally.
 - After model changes: `uv run manage.py makemigrations` and commit generated migrations.
 - Pre-deploy check: `uv run manage.py migrate --check` to ensure no pending migrations.
 
+### One-time RMB-to-USD points conversion
+
+Before deploying migration `points.0008_convert_existing_points_to_usd_scale`, put
+points writes into maintenance mode and run the read-only production preflight:
+
+```bash
+uv run manage.py preview_points_usd_conversion
+```
+
+The command reports before/after totals and exits non-zero when incomplete point
+allocations or pending/approved withdrawals must be resolved. Deployment runs the
+conversion automatically through `manage.py migrate`. The operation divides live
+wallet balances and each recipient's pending point balance by 6.7, then apportions
+the rounded totals back to their source rows. It also converts unclaimed outreach
+rewards per reward record. The operation is intentionally irreversible; restore the
+pre-deploy database backup if rollback is required.
+
 ## Docker (optional)
 - Build image: `just docker-build IMAGE=fullsite`.
 - Run tests in container: `just docker-test IMAGE=fullsite` (uses `.env.example`).

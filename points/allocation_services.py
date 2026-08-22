@@ -594,6 +594,12 @@ class AllocationService:
         if claimed_rows == 0:
             return 0
 
+        # A lossy denomination conversion can legitimately reduce a historical
+        # pending grant to zero. Mark it as settled without calling grant_points,
+        # which intentionally rejects non-positive grants.
+        if grant.amount == 0:
+            return 0
+
         grant_points(
             owner=user,
             amount=grant.amount,
@@ -787,16 +793,17 @@ class AllocationService:
 
     @staticmethod
     def _rollback_single_grant(user, grant: PendingPointGrant) -> None:
-        spend_points(
-            owner=user,
-            amount=grant.amount,
-            point_type=grant.point_type,
-            description=f"回退待领取积分 #{grant.id}",
-            tag_slug=grant.tag.slug if grant.tag else None,
-            tag_is_null=(grant.point_type == PointType.GIFT and grant.tag is None),
-            reference_id=f"pending_grant_rollback:{grant.id}",
-            created_by=None,
-        )
+        if grant.amount > 0:
+            spend_points(
+                owner=user,
+                amount=grant.amount,
+                point_type=grant.point_type,
+                description=f"回退待领取积分 #{grant.id}",
+                tag_slug=grant.tag.slug if grant.tag else None,
+                tag_is_null=(grant.point_type == PointType.GIFT and grant.tag is None),
+                reference_id=f"pending_grant_rollback:{grant.id}",
+                created_by=None,
+            )
 
         grant.is_claimed = False
         grant.claimed_by = None

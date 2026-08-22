@@ -9,6 +9,7 @@ from django.utils import timezone
 CONVERSION_NUMERATOR = 10
 CONVERSION_DENOMINATOR = 67
 CONVERSION_REFERENCE_PREFIX = "point_conversion:rmb_to_usd_2026"
+CONVERSION_TRANSACTION_TYPE = "spend"
 CONVERSION_DESCRIPTION = (
     "积分计价调整：1 RMB = 10 积分改为 1 USD = 10 积分（余额 ÷ 6.7 向下取整）"
 )
@@ -111,8 +112,9 @@ def _pending_groups(PendingPointGrant):
 
     def unclaimed_key(grant):
         if not grant.actor_id:
-            return ("unclaimable", grant.id)
+            return ("unclaimable", str(grant.id), "", "", None)
         return (
+            "claimable",
             grant.platform,
             grant.actor_id,
             grant.point_type,
@@ -134,8 +136,13 @@ def _pending_groups(PendingPointGrant):
 
     def claimed_key(grant):
         if grant.claimed_by_id is None:
-            return ("deleted-claimant", grant.id)
-        return (grant.claimed_by_id, grant.point_type, grant.tag_id)
+            return ("deleted-claimant", str(grant.id), "", None)
+        return (
+            "claimed",
+            str(grant.claimed_by_id),
+            grant.point_type,
+            grant.tag_id,
+        )
 
     for _, grant_group in groupby(
         claimed.iterator(chunk_size=BATCH_SIZE),
@@ -263,7 +270,9 @@ def _convert_sources(PointSource, PointTransaction) -> None:
             transaction_creates.append(
                 PointTransaction(
                     wallet_id=wallet_id,
-                    transaction_type="spend",
+                    # Keep the stored value migration-stable instead of coupling an
+                    # old data migration to the current runtime TextChoices class.
+                    transaction_type=CONVERSION_TRANSACTION_TYPE,
                     point_type=point_type,
                     amount=new_total - old_total,
                     balance_after=new_total,

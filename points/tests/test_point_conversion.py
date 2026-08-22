@@ -264,6 +264,40 @@ class PointConversionIntegrationTests(TestCase):
         self.assertEqual(converted_amounts, [1, 1, 0, 0])
         self.assertEqual(sum(converted_amounts), convert_amount(20))
 
+    def test_unidentifiable_pending_grants_are_converted_individually(self):
+        grants = [self._create_pending(amount=5) for _ in range(4)]
+        grant_ids = [grant.id for grant in grants]
+        PendingPointGrant.objects.filter(id__in=grant_ids).update(actor_id="")
+
+        self._apply()
+
+        converted_amounts = list(
+            PendingPointGrant.objects.filter(id__in=grant_ids)
+            .order_by("id")
+            .values_list("amount", flat=True)
+        )
+        self.assertEqual(converted_amounts, [0, 0, 0, 0])
+
+    def test_claimed_grants_without_claimant_are_converted_individually(self):
+        grants = [
+            self._create_pending(
+                amount=5,
+                is_claimed=True,
+                claimed_at=timezone.now(),
+            )
+            for _ in range(4)
+        ]
+        grant_ids = [grant.id for grant in grants]
+
+        self._apply()
+
+        converted_amounts = list(
+            PendingPointGrant.objects.filter(id__in=grant_ids)
+            .order_by("id")
+            .values_list("amount", flat=True)
+        )
+        self.assertEqual(converted_amounts, [0, 0, 0, 0])
+
     def test_apply_stops_before_writing_when_an_allocation_is_active(self):
         self.allocation.status = "executing"
         self.allocation.save(update_fields=["status"])

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 
+from django.db.models import BooleanField, Case, Exists, OuterRef, Q, Value, When
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
 
@@ -71,6 +72,7 @@ class ShopItemSchema(Schema):
     description_en: str
     cost: int
     stock: int | None = None
+    priority: int
     is_active: bool
     image_card_url: str | None = None
     image_detail_url: str | None = None
@@ -163,6 +165,7 @@ def _serialize_shop_item(
         "description_en": item.description_en,
         "cost": item.cost,
         "stock": stock,
+        "priority": item.priority,
         "is_active": item.is_active,
         "image_card_url": item.image_card.url if item.image_card else None,
         "image_detail_url": item.image_detail.url if item.image_detail else None,
@@ -263,10 +266,22 @@ def _raise_redemption_api_error(message: str) -> None:
 )
 def shop_item_list_endpoint(request, page: int = 1, page_size: int = 20):
     """List active shop items."""
+    available_coupon = CouponCode.objects.filter(
+        code_type=OuterRef("coupon_type"),
+        status=CouponCode.Status.AVAILABLE,
+    )
     items_qs = (
         ShopItem.objects.filter(is_active=True)
         .prefetch_related("allowed_tags")
-        .order_by("id")
+        .annotate(
+            sort_has_stock=Case(
+                When(~Q(coupon_type=""), then=Exists(available_coupon)),
+                When(stock=0, then=Value(False)),
+                default=Value(True),
+                output_field=BooleanField(),
+            )
+        )
+        .order_by("-sort_has_stock", "-priority", "id")
     )
     page_obj = paginate_queryset(
         items_qs, page=page, page_size=page_size, max_page_size=100

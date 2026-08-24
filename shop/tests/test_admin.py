@@ -44,6 +44,15 @@ class ShopItemAdminTests(TestCase):
 
         assert "requires_shipping" in all_fields
 
+    def test_priority_is_editable_and_visible(self):
+        """Admins should be able to control and inspect shop item priority."""
+        all_fields = []
+        for _name, options in self.admin.fieldsets:
+            all_fields.extend(options["fields"])
+
+        assert "priority" in self.admin.list_display
+        assert "priority" in all_fields
+
     def test_stock_display_with_shipping(self):
         """Test stock display method works with requires_shipping field."""
         item = ShopItem.objects.create(

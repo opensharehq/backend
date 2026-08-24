@@ -9,7 +9,7 @@ from config.api_common import ApiError
 from points.models import PointType, PointWallet, Tag
 from points.services import grant_points
 from shop.api_v1 import _raise_redemption_api_error
-from shop.models import Redemption, ShopItem
+from shop.models import CouponCode, Redemption, ShopItem
 
 
 class ShopApiV1Tests(TestCase):
@@ -89,6 +89,7 @@ class ShopApiV1Tests(TestCase):
         self.assertEqual(list_response.status_code, 200)
         payload = list_response.json()
         self.assertEqual(payload["items"][0]["id"], self.item.id)
+        self.assertEqual(payload["items"][0]["priority"], 1)
         self.assertEqual(payload["balance"]["gift"], 500)
         self.assertIn("pagination", payload)
 
@@ -111,6 +112,60 @@ class ShopApiV1Tests(TestCase):
             history_payload["items"][0]["item"]["name_zh"], self.item.name_zh
         )
         self.assertEqual(history_payload["pagination"]["total_items"], 1)
+
+    def test_item_listing_orders_stocked_items_before_sold_out_by_priority(self):
+        """Stock status should outrank priority, including coupon-backed stock."""
+        stocked_high = ShopItem.objects.create(
+            name_zh="Stocked high",
+            name_en="Stocked high",
+            description_zh="Stocked high",
+            cost=10,
+            stock=1,
+            priority=10,
+        )
+        coupon_stocked = ShopItem.objects.create(
+            name_zh="Coupon stocked",
+            name_en="Coupon stocked",
+            description_zh="Coupon stocked",
+            cost=10,
+            coupon_type="available-coupon",
+            priority=8,
+        )
+        CouponCode.objects.create(
+            code_type="available-coupon",
+            code="AVAILABLE-1",
+        )
+        sold_out_high = ShopItem.objects.create(
+            name_zh="Sold out high",
+            name_en="Sold out high",
+            description_zh="Sold out high",
+            cost=10,
+            stock=0,
+            priority=100,
+        )
+        coupon_sold_out = ShopItem.objects.create(
+            name_zh="Coupon sold out",
+            name_en="Coupon sold out",
+            description_zh="Coupon sold out",
+            cost=10,
+            coupon_type="missing-coupon",
+            priority=200,
+        )
+
+        response = self.client.get("/api/v1/shop/items", **self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        item_ids = [item["id"] for item in response.json()["items"]]
+        self.assertEqual(
+            item_ids,
+            [
+                stocked_high.id,
+                coupon_stocked.id,
+                self.item.id,
+                coupon_sold_out.id,
+                sold_out_high.id,
+            ],
+        )
 
     def test_item_detail_for_non_shipping_item_omits_addresses(self):
         """Non-shipping item detail should not include shipping address choices."""

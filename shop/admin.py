@@ -148,6 +148,7 @@ class ShopItemAdmin(admin.ModelAdmin):
         "name_zh",
         "cost",
         "stock_display",
+        "priority",
         "is_active",
         "requires_shipping",
         "has_image",
@@ -203,6 +204,7 @@ class ShopItemAdmin(admin.ModelAdmin):
                 "fields": (
                     "cost",
                     "stock",
+                    "priority",
                     "is_active",
                     "requires_shipping",
                     "coupon_type",

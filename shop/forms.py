@@ -29,6 +29,7 @@ class ShopItemAdminForm(forms.ModelForm):
             "image_detail",
             "cost",
             "stock",
+            "priority",
             "is_active",
             "requires_shipping",
             "allowed_tags",

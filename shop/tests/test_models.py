@@ -38,6 +38,7 @@ class ShopItemModelTests(TestCase):
         self.assertEqual(item.description_zh, "Test description")
         self.assertEqual(item.cost, 100)
         self.assertEqual(item.stock, 10)
+        self.assertEqual(item.priority, 1)
         self.assertTrue(item.is_active)
 
     def test_shop_item_unlimited_stock(self):

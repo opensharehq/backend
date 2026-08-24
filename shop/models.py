@@ -47,6 +47,11 @@ class ShopItem(models.Model):
     stock = models.PositiveIntegerField(
         null=True, blank=True, verbose_name="库存", help_text="留空表示无限库存"
     )
+    priority = models.IntegerField(
+        default=1,
+        verbose_name="优先级",
+        help_text="数值越大，商城展示越靠前；售罄商品始终排在有库存商品之后",
+    )
     is_active = models.BooleanField(default=True, verbose_name="是否上架")
 
     requires_shipping = models.BooleanField(

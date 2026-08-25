@@ -1,5 +1,7 @@
 """Tests for points services."""
 
+from collections import defaultdict
+
 from django.test import TestCase
 from django.utils import timezone
 
@@ -303,6 +305,41 @@ class SpendPointsTests(TestCase):
         # Check event balance reduced
         self.assertEqual(
             services.get_balance(self.user, PointType.GIFT, tag_slug="event"), 20
+        )
+
+    def test_spend_points_with_explicit_fallback_buckets(self):
+        """Tagged, untagged gift, and cash buckets are consumed in that order."""
+        transactions = services.spend_points_with_fallback(
+            owner=self.user,
+            amount=300,
+            primary_point_type=PointType.GIFT,
+            description="Mixed redemption",
+            tag_slug="event",
+            use_untagged_gift=True,
+            use_cash=True,
+        )
+
+        breakdown = defaultdict(int)
+        for point_transaction in transactions:
+            tag_slug = point_transaction.tag.slug if point_transaction.tag else None
+            breakdown[(point_transaction.point_type, tag_slug)] += abs(
+                point_transaction.amount
+            )
+
+        self.assertEqual(
+            breakdown,
+            {
+                (PointType.GIFT, "event"): 50,
+                (PointType.GIFT, None): 200,
+                (PointType.CASH, None): 50,
+            },
+        )
+        self.assertEqual(services.get_balance(self.user, PointType.CASH), 50)
+        self.assertEqual(
+            services.get_balance(self.user, PointType.GIFT, tag_slug="event"), 0
+        )
+        self.assertEqual(
+            services.get_balance(self.user, PointType.GIFT, tag_is_null=True), 0
         )
 
     def test_spend_points_fifo(self):

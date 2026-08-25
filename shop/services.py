@@ -1,6 +1,7 @@
 """Service layer for shop application business logic."""
 
 import logging
+from collections import defaultdict
 
 from django.db import transaction
 from django.db.models import F
@@ -9,7 +10,7 @@ from django.utils import timezone
 from points import services as points_services
 from points.models import PointType
 
-from .models import Redemption, ShopItem
+from .models import Redemption, RedemptionPaymentLine, ShopItem
 
 logger = logging.getLogger(__name__)
 
@@ -90,13 +91,15 @@ def send_redemption_message(item, user, coupon, lang="zh"):
 
 
 @transaction.atomic
-def redeem_item(  # noqa: C901, PLR0912, PLR0913, PLR0915
+def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
     user,
     item_id: int,
     shipping_address_id=None,
     lang="zh",
     point_type="gift",
     tag_slug=None,
+    use_untagged_gift=False,
+    use_cash=False,
 ) -> dict:
     """
     执行商品兑换的核心业务逻辑.
@@ -110,6 +113,8 @@ def redeem_item(  # noqa: C901, PLR0912, PLR0913, PLR0915
         lang (str): 站内信语言, 默认 "zh".
         point_type (str): 支付积分类型, "gift" 或 "cash", 默认 "gift".
         tag_slug (str, optional): 指定使用的标签积分 slug (仅 point_type="gift" 时有效).
+        use_untagged_gift (bool): 标签积分不足时是否使用无标签礼物积分补足.
+        use_cash (bool): 礼物积分不足时是否使用现金积分补足.
 
     Returns:
         dict: 包含 redemption 和 coupon_code 的字典.
@@ -130,6 +135,9 @@ def redeem_item(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
     if tag_slug and point_type != PointType.GIFT:
         msg = "只有礼物积分可以设置标签"
+        raise RedemptionError(msg)
+    if point_type == PointType.CASH and use_untagged_gift:
+        msg = "现金积分支付不能使用通用礼物积分补足"
         raise RedemptionError(msg)
 
     try:
@@ -196,26 +204,11 @@ def redeem_item(  # noqa: C901, PLR0912, PLR0913, PLR0915
             msg = "无效的收货地址。"
             raise RedemptionError(msg) from err
 
-    # 2. 积分验证和扣除
+    # 2. 校验商品允许的主积分池
     allowed_tags = list(item.allowed_tags.all())
     resolved_tag_slug = tag_slug
 
-    if point_type == PointType.CASH:
-        # 现金积分支付：不受标签限制，校验现金积分余额
-        balance = points_services.get_balance(user, PointType.CASH)
-        if balance < item.cost:
-            msg = f"积分不足：需要 {item.cost}，当前可用 {balance}"
-            logger.warning(
-                "兑换失败（现金积分不足）: 用户=%s (ID=%s), 商品=%s (ID=%s), 需要=%s, 可用=%s",
-                user.username,
-                user.id,
-                item.name_zh,
-                item.id,
-                item.cost,
-                balance,
-            )
-            raise RedemptionError(msg)
-    elif point_type == PointType.GIFT:
+    if point_type == PointType.GIFT:
         if tag_slug:
             # 使用指定标签的礼物积分
             # 带标签的 gift 积分只能用于有匹配 allowed_tags 的商品
@@ -231,78 +224,62 @@ def redeem_item(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     [t.slug for t in allowed_tags],
                 )
                 raise RedemptionError(msg)
-            balance = points_services.get_balance(user, PointType.GIFT, tag_slug)
-            if balance < item.cost:
-                msg = f"积分不足：需要 {item.cost}，当前可用 {balance}"
-                logger.warning(
-                    "兑换失败（标签积分不足）: 用户=%s (ID=%s), 商品=%s (ID=%s), 标签=%s, 需要=%s, 可用=%s",
-                    user.username,
-                    user.id,
-                    item.name_zh,
-                    item.id,
-                    tag_slug,
-                    item.cost,
-                    balance,
-                )
-                raise RedemptionError(msg)
-        else:
-            # 使用通用礼物积分（无标签）：不能消耗带标签的积分池
-            # 如果商品有允许的标签限制，无标签积分不可兑换
-            if allowed_tags:
-                msg = "此商品需要使用指定标签的积分兑换"
-                logger.warning(
-                    "兑换失败（商品有标签限制，无标签不可兑换）: 用户=%s (ID=%s), 商品=%s (ID=%s), 允许标签=%s",
-                    user.username,
-                    user.id,
-                    item.name_zh,
-                    item.id,
-                    [t.slug for t in allowed_tags],
-                )
-                raise RedemptionError(msg)
-            balance = points_services.get_balance(
-                user, PointType.GIFT, tag_is_null=True
-            )
-            if balance < item.cost:
-                msg = f"积分不足：需要 {item.cost}，当前可用 {balance}"
-                logger.warning(
-                    "兑换失败（积分不足）: 用户=%s (ID=%s), 商品=%s (ID=%s), 需要=%s, 可用=%s",
-                    user.username,
-                    user.id,
-                    item.name_zh,
-                    item.id,
-                    item.cost,
-                    balance,
-                )
-                raise RedemptionError(msg)
+        # 无标签礼物积分是通用积分，对有标签限制的商品也可直接兑换。
 
-    # 扣除积分
-    try:
-        points_services.spend_points(
-            owner=user,
-            amount=item.cost,
-            point_type=point_type,
-            description=f"兑换商品: {item.name_zh}",
-            tag_slug=resolved_tag_slug,
-            tag_is_null=(point_type == PointType.GIFT and resolved_tag_slug is None),
-            reference_id=f"shop:item:{item.id}",
-            created_by=user,
-        )
-    except points_services.InsufficientPointsError as err:
-        msg = f"积分不足：{err}"
-        raise RedemptionError(msg) from err
-
-    # 3. 创建兑换记录
+    # 3. 先创建待处理兑换，以便所有积分流水使用唯一兑换 reference_id。
     redemption = Redemption.objects.create(
         user_profile=user,
         item=item,
         points_cost_at_redemption=item.cost,
-        status=Redemption.StatusChoices.COMPLETED,
+        status=Redemption.StatusChoices.PENDING,
         shipping_address=shipping_address,
         point_type=point_type,
         point_tag_slug=resolved_tag_slug,
     )
 
-    # 4. 更新库存 (仅非 coupon_type 商品，使用 F() 表达式防止并发问题)
+    # 4. 在用户明确授权的积分池中按优先级原子扣款。
+    try:
+        point_transactions = points_services.spend_points_with_fallback(
+            owner=user,
+            amount=item.cost,
+            primary_point_type=point_type,
+            description=f"兑换商品: {item.name_zh}",
+            tag_slug=resolved_tag_slug,
+            use_untagged_gift=use_untagged_gift,
+            use_cash=use_cash,
+            reference_id=f"shop:redemption:{redemption.id}",
+            created_by=user,
+        )
+    except points_services.InsufficientPointsError as err:
+        error_message = str(err)
+        msg = (
+            error_message
+            if error_message.startswith("积分不足")
+            else f"积分不足：{error_message}"
+        )
+        raise RedemptionError(msg) from err
+
+    payment_amounts: dict[tuple[str, str | None], int] = defaultdict(int)
+    for point_transaction in point_transactions:
+        transaction_tag_slug = (
+            point_transaction.tag.slug if point_transaction.tag else None
+        )
+        payment_amounts[(point_transaction.point_type, transaction_tag_slug)] += abs(
+            point_transaction.amount
+        )
+    RedemptionPaymentLine.objects.bulk_create(
+        [
+            RedemptionPaymentLine(
+                redemption=redemption,
+                point_type=line_point_type,
+                tag_slug=line_tag_slug,
+                amount=line_amount,
+            )
+            for (line_point_type, line_tag_slug), line_amount in payment_amounts.items()
+        ]
+    )
+
+    # 5. 更新库存 (仅非 coupon_type 商品，使用 F() 表达式防止并发问题)
     if not item.coupon_type and item.stock is not None:
         updated_rows = ShopItem.objects.filter(id=item.id, stock__gt=0).update(
             stock=F("stock") - 1
@@ -318,7 +295,10 @@ def redeem_item(  # noqa: C901, PLR0912, PLR0913, PLR0915
             )
             raise RedemptionError(msg)
 
-    # 5. 发送站内信（在事务内部，失败则整体回滚）
+    redemption.status = Redemption.StatusChoices.COMPLETED
+    redemption.save(update_fields=["status"])
+
+    # 6. 发送站内信（在事务内部，失败则整体回滚）
     if item.has_message_template():
         send_redemption_message(item, user, coupon, lang)
 

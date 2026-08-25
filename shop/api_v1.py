@@ -33,6 +33,8 @@ class RedemptionCreateSchema(Schema):
     lang: str = "zh"
     point_type: str = "gift"
     tag_slug: str | None = None
+    use_untagged_gift: bool = False
+    use_cash: bool = False
 
 
 class ShopItemAllowedTagSchema(Schema):
@@ -92,6 +94,12 @@ class ShopItemListResponseSchema(Schema):
     balance: DetailedBalanceSchema
 
 
+class RedemptionPaymentLineSchema(Schema):
+    point_type: str
+    tag_slug: str | None = None
+    amount: int
+
+
 class RedemptionSchema(Schema):
     id: int
     status: str
@@ -100,6 +108,7 @@ class RedemptionSchema(Schema):
     item: ShopItemSchema
     shipping_address: ShippingAddressSchema | None = None
     coupon_code: str | None = None
+    payment_lines: list[RedemptionPaymentLineSchema]
 
 
 class RedemptionListResponseSchema(Schema):
@@ -200,6 +209,14 @@ def _serialize_redemption(
             else None
         ),
         "coupon_code": coupon_code,
+        "payment_lines": [
+            {
+                "point_type": line.point_type,
+                "tag_slug": line.tag_slug,
+                "amount": line.amount,
+            }
+            for line in redemption.payment_lines.all()
+        ],
     }
 
 
@@ -228,7 +245,8 @@ def _raise_redemption_api_error(message: str) -> None:
             "You do not have enough eligible points to redeem this item.",
         )
     exact_match = re.match(
-        r"^积分不足：需要 (?P<required>\d+)，当前可用 (?P<available>\d+)$", normalized
+        r"^积分不足：需要 (?P<required>\d+)，(?:当前)?可用 (?P<available>\d+)$",
+        normalized,
     )
     if exact_match:
         groups = exact_match.groupdict()
@@ -331,6 +349,7 @@ def redemption_list_endpoint(request, page: int = 1, page_size: int = 20):
             "shipping_address",
         )
         .prefetch_related("item__allowed_tags")
+        .prefetch_related("payment_lines")
     )
     page_obj = paginate_queryset(
         redemptions, page=page, page_size=page_size, max_page_size=100
@@ -355,7 +374,7 @@ def redemption_detail_endpoint(request, redemption_id: int):
     """Return a single redemption record owned by the current user."""
     redemption = get_object_or_404(
         Redemption.objects.select_related("item", "shipping_address").prefetch_related(
-            "item__allowed_tags"
+            "item__allowed_tags", "payment_lines"
         ),
         id=redemption_id,
         user_profile=request.auth,
@@ -383,6 +402,8 @@ def redemption_create_endpoint(request, payload: RedemptionCreateSchema):
         "shipping_address_id": payload.shipping_address_id,
         "point_type": payload.point_type,
         "tag_slug": payload.tag_slug,
+        "use_untagged_gift": payload.use_untagged_gift,
+        "use_cash": payload.use_cash,
     }
     if "lang" in inspect.signature(redeem_item).parameters:
         redeem_kwargs["lang"] = payload.lang
@@ -403,7 +424,7 @@ def redemption_create_endpoint(request, payload: RedemptionCreateSchema):
 
     redemption = (
         Redemption.objects.select_related("item", "shipping_address")
-        .prefetch_related("item__allowed_tags")
+        .prefetch_related("item__allowed_tags", "payment_lines")
         .get(id=redemption.id)
     )
     return 201, _serialize_redemption(redemption, coupon_code=coupon_code)

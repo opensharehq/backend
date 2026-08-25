@@ -5,7 +5,7 @@ from collections import defaultdict
 
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from accounts.models import Organization, User, WithdrawalAccount
@@ -443,6 +443,10 @@ def spend_points(  # noqa: PLR0913
         )
         transactions.append(txn)
 
+    if remaining_to_spend > 0:
+        msg = f"积分不足：需要 {amount}，可用 {amount - remaining_to_spend}"
+        raise InsufficientPointsError(msg)
+
     logger.info(
         "消费积分成功: wallet_id=%s, type=%s, amount=%s, tag=%s, description=%s",
         wallet.id,
@@ -452,6 +456,132 @@ def spend_points(  # noqa: PLR0913
         description,
     )
 
+    return transactions
+
+
+@transaction.atomic
+def spend_points_with_fallback(  # noqa: PLR0912, PLR0913, PLR0915
+    owner: User | Organization,
+    amount: int,
+    primary_point_type: str,
+    description: str,
+    *,
+    tag_slug: str | None = None,
+    use_untagged_gift: bool = False,
+    use_cash: bool = False,
+    reference_id: str = "",
+    created_by: User | None = None,
+) -> list[PointTransaction]:
+    """
+    Spend from an explicitly authorized sequence of point buckets.
+
+    Gift redemptions spend the selected tagged bucket first (or the untagged
+    bucket when no tag is selected), then optionally fall back to untagged gift
+    points and cash points. Each bucket remains FIFO by point source.
+    """
+    if amount <= 0:
+        msg = "消费数量必须大于 0"
+        raise InvalidPointOperationError(msg)
+    if primary_point_type not in [PointType.CASH, PointType.GIFT]:
+        msg = f"无效的积分类型: {primary_point_type}"
+        raise InvalidPointOperationError(msg)
+    if tag_slug and primary_point_type != PointType.GIFT:
+        msg = "只有礼物积分可以按标签筛选"
+        raise InvalidPointOperationError(msg)
+    if primary_point_type == PointType.CASH and use_untagged_gift:
+        msg = "现金积分支付不能使用通用礼物积分补足"
+        raise InvalidPointOperationError(msg)
+
+    wallet = get_or_create_wallet(owner)
+
+    # (point type, tag slug). ``None`` for gift means the untagged bucket.
+    bucket_keys: list[tuple[str, str | None]] = []
+    if primary_point_type == PointType.CASH:
+        bucket_keys.append((PointType.CASH, None))
+    else:
+        bucket_keys.append((PointType.GIFT, tag_slug))
+        if tag_slug and use_untagged_gift:
+            bucket_keys.append((PointType.GIFT, None))
+        if use_cash:
+            bucket_keys.append((PointType.CASH, None))
+
+    eligible = Q(pk__isnull=True)
+    for point_type, bucket_tag_slug in bucket_keys:
+        if point_type == PointType.CASH:
+            eligible |= Q(point_type=PointType.CASH)
+        elif bucket_tag_slug:
+            eligible |= Q(point_type=PointType.GIFT, tag__slug=bucket_tag_slug)
+        else:
+            eligible |= Q(point_type=PointType.GIFT, tag__isnull=True)
+
+    locked_sources = list(
+        wallet.sources.select_for_update()
+        .filter(eligible, remaining_amount__gt=0)
+        .select_related("tag")
+        .order_by("created_at", "id")
+    )
+    sources_by_bucket: dict[tuple[str, str | None], list[PointSource]] = defaultdict(
+        list
+    )
+    for source in locked_sources:
+        source_tag_slug = source.tag.slug if source.tag else None
+        sources_by_bucket[(source.point_type, source_tag_slug)].append(source)
+
+    available = sum(
+        source.remaining_amount
+        for bucket_key in bucket_keys
+        for source in sources_by_bucket[bucket_key]
+    )
+    if available < amount:
+        msg = f"积分不足：需要 {amount}，可用 {available}"
+        raise InsufficientPointsError(msg)
+
+    remaining_to_spend = amount
+    transactions: list[PointTransaction] = []
+    for bucket_key in bucket_keys:
+        for source in sources_by_bucket[bucket_key]:
+            if remaining_to_spend <= 0:
+                break
+
+            spend_from_source = min(source.remaining_amount, remaining_to_spend)
+            source.remaining_amount -= spend_from_source
+            source.save(update_fields=["remaining_amount"])
+            remaining_to_spend -= spend_from_source
+
+            balance_after = (
+                wallet.get_cash_balance()
+                if source.point_type == PointType.CASH
+                else wallet.get_gift_balance()
+            )
+            transactions.append(
+                PointTransaction.objects.create(
+                    wallet=wallet,
+                    transaction_type=TransactionType.SPEND,
+                    point_type=source.point_type,
+                    amount=-spend_from_source,
+                    balance_after=balance_after,
+                    description=description,
+                    reference_id=reference_id,
+                    source=source,
+                    tag=source.tag,
+                    created_by=created_by,
+                )
+            )
+
+    if remaining_to_spend > 0:
+        msg = f"积分不足：需要 {amount}，可用 {amount - remaining_to_spend}"
+        raise InsufficientPointsError(msg)
+
+    logger.info(
+        "组合消费积分成功: wallet_id=%s, primary_type=%s, amount=%s, "
+        "tag=%s, use_untagged_gift=%s, use_cash=%s",
+        wallet.id,
+        primary_point_type,
+        amount,
+        tag_slug or "无",
+        use_untagged_gift,
+        use_cash,
+    )
     return transactions
 
 

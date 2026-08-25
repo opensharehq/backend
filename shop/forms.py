@@ -32,7 +32,6 @@ class ShopItemAdminForm(forms.ModelForm):
             "priority",
             "is_active",
             "requires_shipping",
-            "allowed_tags",
             "message_title_template_zh",
             "message_title_template_en",
             "message_content_template_zh",

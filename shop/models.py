@@ -67,7 +67,7 @@ class ShopItem(models.Model):
         through="ShopItemAllowedTags",
         related_name="shop_items",
         verbose_name="允许的积分标签",
-        help_text="如果为空，任何礼物积分都可兑换；否则只有指定标签的积分可用",
+        help_text="带标签礼物积分必须匹配此处标签；通用礼物积分和现金积分始终可用",
     )
 
     # 站内信模板（可选）
@@ -185,6 +185,43 @@ class Redemption(models.Model):
     def __str__(self):
         """Return string representation."""
         return f"{self.user_profile.username} redeemed {self.item.name_zh}"
+
+
+class RedemptionPaymentLine(models.Model):
+    """Snapshot of one point bucket used by a redemption."""
+
+    redemption = models.ForeignKey(
+        Redemption,
+        on_delete=models.CASCADE,
+        related_name="payment_lines",
+        verbose_name="兑换记录",
+    )
+    point_type = models.CharField(
+        max_length=10,
+        choices=PointType.choices,
+        verbose_name="积分类型",
+    )
+    tag_slug = models.CharField(  # noqa: DJ001
+        max_length=50,
+        null=True,
+        blank=True,
+        verbose_name="积分标签 slug",
+        help_text="支付时的标签快照；无标签礼物积分和现金积分为空",
+    )
+    amount = models.PositiveIntegerField(verbose_name="支付积分")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        """Model metadata."""
+
+        ordering = ["id"]
+        verbose_name = "兑换支付明细"
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        """Return string representation."""
+        tag_suffix = f" [{self.tag_slug}]" if self.tag_slug else ""
+        return f"{self.get_point_type_display()}{tag_suffix}: {self.amount}"
 
 
 class CouponCode(models.Model):

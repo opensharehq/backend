@@ -101,6 +101,10 @@ class ShopApiV1Tests(TestCase):
         )
         self.assertEqual(redeem_response.status_code, 201)
         self.assertEqual(redeem_response.json()["item"]["id"], self.item.id)
+        self.assertEqual(
+            redeem_response.json()["payment_lines"],
+            [{"point_type": "gift", "tag_slug": None, "amount": 100}],
+        )
         self.assertTrue(
             Redemption.objects.filter(item=self.item, user_profile=self.user).exists()
         )
@@ -467,6 +471,82 @@ class ShopApiV1Tests(TestCase):
         redemption = Redemption.objects.get(item=tagged_item, user_profile=self.user)
         self.assertEqual(redemption.point_type, PointType.GIFT)
         self.assertEqual(redemption.point_tag_slug, "tag-a")
+
+    def test_redemption_with_universal_gift_on_tagged_item(self):
+        """Universal gift points can fully redeem an item that accepts tags."""
+        tag = Tag.objects.create(name="Universal API Tag", slug="universal-api-tag")
+        tagged_item = ShopItem.objects.create(
+            name_zh="Universal Gift Item",
+            name_en="Universal Gift Item",
+            description_zh="Accepts a tag or universal points",
+            cost=100,
+            is_active=True,
+            requires_shipping=False,
+            stock=5,
+        )
+        tagged_item.allowed_tags.set([tag])
+
+        response = self.client.post(
+            "/api/v1/shop/redemptions",
+            {
+                "item_id": tagged_item.id,
+                "point_type": "gift",
+                "tag_slug": None,
+            },
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.json()["payment_lines"],
+            [{"point_type": "gift", "tag_slug": None, "amount": 100}],
+        )
+
+    def test_redemption_with_explicit_mixed_payment(self):
+        """The API records tagged, universal gift, and cash payment lines."""
+        tag = Tag.objects.create(name="Mixed API Tag", slug="mixed-api-tag")
+        grant_points(
+            owner=self.user,
+            amount=60,
+            point_type=PointType.GIFT,
+            reason="Tagged gift",
+            tag_slug=tag.slug,
+            created_by=self.user,
+        )
+        tagged_item = ShopItem.objects.create(
+            name_zh="Mixed API Item",
+            name_en="Mixed API Item",
+            description_zh="Mixed payment",
+            cost=600,
+            is_active=True,
+            requires_shipping=False,
+            stock=5,
+        )
+        tagged_item.allowed_tags.set([tag])
+
+        response = self.client.post(
+            "/api/v1/shop/redemptions",
+            {
+                "item_id": tagged_item.id,
+                "point_type": "gift",
+                "tag_slug": tag.slug,
+                "use_untagged_gift": True,
+                "use_cash": True,
+            },
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.json()["payment_lines"],
+            [
+                {"point_type": "gift", "tag_slug": tag.slug, "amount": 60},
+                {"point_type": "gift", "tag_slug": None, "amount": 500},
+                {"point_type": "cash", "tag_slug": None, "amount": 40},
+            ],
+        )
 
     def test_redemption_with_tagged_gift_wrong_tag(self):
         """Tagged gift with non-matching tag should fail via API."""

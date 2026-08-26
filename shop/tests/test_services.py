@@ -343,7 +343,7 @@ class RedeemItemServiceTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.stock, 5)
 
-    def test_allowed_tags_prefers_first_sufficient_tag(self):
+    def test_allowed_tags_uses_explicit_selected_tag(self):
         """User can specify which tag to use for redemption."""
         tag_a = Tag.objects.create(name="Alpha Tag", slug="alpha-tag")
         tag_b = Tag.objects.create(name="Beta Tag", slug="beta-tag")

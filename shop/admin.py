@@ -346,6 +346,10 @@ class RedemptionAdmin(admin.ModelAdmin):
 
     actions = ["mark_as_completed", "mark_as_cancelled"]
 
+    def get_queryset(self, request):
+        """Prefetch payment lines used by the changelist payment summary."""
+        return super().get_queryset(request).prefetch_related("payment_lines")
+
     @admin.display(description="状态")
     def status_display(self, obj):
         """Display status with color."""

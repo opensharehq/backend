@@ -479,6 +479,9 @@ def spend_points_with_fallback(  # noqa: PLR0912, PLR0913, PLR0915
     bucket when no tag is selected), then optionally fall back to untagged gift
     points and cash points. Each bucket remains FIFO by point source.
     """
+    if tag_slug == "":
+        tag_slug = None
+
     if amount <= 0:
         msg = "消费数量必须大于 0"
         raise InvalidPointOperationError(msg)

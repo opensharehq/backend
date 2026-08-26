@@ -342,6 +342,25 @@ class SpendPointsTests(TestCase):
             services.get_balance(self.user, PointType.GIFT, tag_is_null=True), 0
         )
 
+    def test_spend_points_with_fallback_normalizes_empty_tag_slug(self):
+        """An empty tag slug selects the universal gift bucket."""
+        transactions = services.spend_points_with_fallback(
+            owner=self.user,
+            amount=50,
+            primary_point_type=PointType.GIFT,
+            description="Universal redemption",
+            tag_slug="",
+        )
+
+        self.assertEqual(sum(abs(txn.amount) for txn in transactions), 50)
+        self.assertTrue(all(txn.tag is None for txn in transactions))
+        self.assertEqual(
+            services.get_balance(self.user, PointType.GIFT, tag_is_null=True), 150
+        )
+        self.assertEqual(
+            services.get_balance(self.user, PointType.GIFT, tag_slug="event"), 50
+        )
+
     def test_spend_points_fifo(self):
         """Test that points are spent in FIFO order."""
         # Grant more points with delay (to ensure different created_at)

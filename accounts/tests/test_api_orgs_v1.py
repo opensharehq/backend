@@ -176,7 +176,9 @@ class ApiV1OrganizationTests(TestCase):
 
     def test_member_candidate_search_excludes_unavailable_users(self):
         """Existing, inactive, and merged users should not be add candidates."""
-        organization = Organization.objects.create(name="Search Org", slug="search-hide")
+        organization = Organization.objects.create(
+            name="Search Org", slug="search-hide"
+        )
         OrganizationMembership.objects.create(
             user=self.owner,
             organization=organization,
@@ -218,7 +220,9 @@ class ApiV1OrganizationTests(TestCase):
 
     def test_member_candidate_search_requires_admin_role(self):
         """Regular members and outsiders cannot enumerate organization candidates."""
-        organization = Organization.objects.create(name="Locked Search", slug="locked-search")
+        organization = Organization.objects.create(
+            name="Locked Search", slug="locked-search"
+        )
         OrganizationMembership.objects.create(
             user=self.owner,
             organization=organization,

@@ -424,16 +424,14 @@ def organization_member_candidates_endpoint(request, slug: str, q: str = ""):
         UserModel.objects.filter(is_active=True, merged_into__isnull=True)
         .exclude(organization_memberships__organization=organization)
         .annotate(
-            search_id=Cast("id", output_field=CharField()),
             display_name=Concat("first_name", Value(" "), "last_name"),
         )
-        .filter(
-            Q(search_id__icontains=query)
-            | Q(username__icontains=query)
-            | Q(display_name__icontains=query)
-        )
-        .order_by("username")[:20]
     )
+    search_filter = Q(username__icontains=query) | Q(display_name__icontains=query)
+    if query.isdigit():
+        candidates = candidates.annotate(search_id=Cast("id", output_field=CharField()))
+        search_filter |= Q(search_id__icontains=query)
+    candidates = candidates.filter(search_filter).order_by("username")[:20]
     return {
         "items": [
             {

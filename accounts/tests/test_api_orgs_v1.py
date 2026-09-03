@@ -175,7 +175,7 @@ class ApiV1OrganizationTests(TestCase):
             self.assertNotIn("email", item)
 
     def test_member_candidate_search_excludes_unavailable_users(self):
-        """Existing, inactive, and merged users should not be add candidates."""
+        """Existing, inactive, and merged users should not be available as candidates."""
         organization = Organization.objects.create(
             name="Search Org", slug="search-hide"
         )
@@ -217,6 +217,27 @@ class ApiV1OrganizationTests(TestCase):
         self.assertNotIn(merged.id, result_ids)
         self.assertEqual(blank_response.status_code, 200)
         self.assertEqual(blank_response.json()["items"], [])
+
+    def test_member_candidate_search_limits_results(self):
+        """Candidate searches should return no more than 20 users."""
+        organization = Organization.objects.create(name="Limit Org", slug="limit-org")
+        OrganizationMembership.objects.create(
+            user=self.owner,
+            organization=organization,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        self.User.objects.bulk_create(
+            [self.User(username=f"candidate_limit_{index:02d}") for index in range(21)]
+        )
+
+        response = self.client.get(
+            f"/api/v1/organizations/{organization.slug}/member-candidates",
+            {"q": "candidate_limit"},
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["items"]), 20)
 
     def test_member_candidate_search_requires_admin_role(self):
         """Regular members and outsiders cannot enumerate organization candidates."""

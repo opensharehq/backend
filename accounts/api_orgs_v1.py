@@ -7,6 +7,8 @@ import re
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
+from django.db.models import CharField, Q, Value
+from django.db.models.functions import Cast, Concat
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
 
@@ -402,6 +404,45 @@ def organization_members_endpoint(request, slug: str):
         "owner_count": memberships.filter(
             role=OrganizationMembership.Role.OWNER
         ).count(),
+    }
+
+
+@router.get(
+    "/{slug}/member-candidates",
+    response={200: dict, 403: ErrorResponseSchema, 404: ErrorResponseSchema},
+)
+def organization_member_candidates_endpoint(request, slug: str, q: str = ""):
+    """Search active non-members by user ID, username, or display name."""
+    organization = _get_organization_or_404(slug)
+    _get_admin_membership_or_error(request.auth, organization)
+    query = q.strip()[:100]
+    if not query:
+        return {"items": []}
+
+    UserModel = get_user_model()
+    candidates = (
+        UserModel.objects.filter(is_active=True, merged_into__isnull=True)
+        .exclude(organization_memberships__organization=organization)
+        .annotate(
+            search_id=Cast("id", output_field=CharField()),
+            display_name=Concat("first_name", Value(" "), "last_name"),
+        )
+        .filter(
+            Q(search_id__icontains=query)
+            | Q(username__icontains=query)
+            | Q(display_name__icontains=query)
+        )
+        .order_by("username")[:20]
+    )
+    return {
+        "items": [
+            {
+                "id": user.id,
+                "username": user.username,
+                "display_name": user.get_full_name() or user.username,
+            }
+            for user in candidates
+        ]
     }
 
 

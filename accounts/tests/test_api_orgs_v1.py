@@ -132,6 +132,118 @@ class ApiV1OrganizationTests(TestCase):
             OrganizationMembership.objects.filter(id=membership_id).exists()
         )
 
+    def test_member_candidate_search_matches_id_username_and_name(self):
+        """Admins can find active non-members without exposing private fields."""
+        organization = Organization.objects.create(name="Search Org", slug="search-org")
+        OrganizationMembership.objects.create(
+            user=self.owner,
+            organization=organization,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        candidate = self.User.objects.create_user(
+            id=12345,
+            username="searchable_handle",
+            email="private@example.com",
+            first_name="Ming",
+            last_name="Zhao",
+            password="StrongPass123!",
+        )
+
+        username_response = self.client.get(
+            f"/api/v1/organizations/{organization.slug}/member-candidates",
+            {"q": "able_han"},
+            **self.headers,
+        )
+        name_response = self.client.get(
+            f"/api/v1/organizations/{organization.slug}/member-candidates",
+            {"q": "Ming Zh"},
+            **self.headers,
+        )
+        id_response = self.client.get(
+            f"/api/v1/organizations/{organization.slug}/member-candidates",
+            {"q": "234"},
+            **self.headers,
+        )
+
+        for response in (username_response, name_response, id_response):
+            self.assertEqual(response.status_code, 200)
+            item = next(
+                item for item in response.json()["items"] if item["id"] == candidate.id
+            )
+            self.assertEqual(item["username"], candidate.username)
+            self.assertEqual(item["display_name"], "Ming Zhao")
+            self.assertNotIn("email", item)
+
+    def test_member_candidate_search_excludes_unavailable_users(self):
+        """Existing, inactive, and merged users should not be add candidates."""
+        organization = Organization.objects.create(name="Search Org", slug="search-hide")
+        OrganizationMembership.objects.create(
+            user=self.owner,
+            organization=organization,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        OrganizationMembership.objects.create(
+            user=self.member,
+            organization=organization,
+            role=OrganizationMembership.Role.MEMBER,
+        )
+        self.member.username = "hidden_search_member"
+        self.member.save(update_fields=["username"])
+        inactive = self.User.objects.create_user(
+            username="hidden_search_inactive",
+            is_active=False,
+        )
+        merged = self.User.objects.create_user(username="hidden_search_merged")
+        merged.merged_into = self.outsider
+        merged.save(update_fields=["merged_into"])
+
+        response = self.client.get(
+            f"/api/v1/organizations/{organization.slug}/member-candidates",
+            {"q": "hidden_search"},
+            **self.headers,
+        )
+        blank_response = self.client.get(
+            f"/api/v1/organizations/{organization.slug}/member-candidates",
+            {"q": "   "},
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        result_ids = {item["id"] for item in response.json()["items"]}
+        self.assertNotIn(self.member.id, result_ids)
+        self.assertNotIn(inactive.id, result_ids)
+        self.assertNotIn(merged.id, result_ids)
+        self.assertEqual(blank_response.status_code, 200)
+        self.assertEqual(blank_response.json()["items"], [])
+
+    def test_member_candidate_search_requires_admin_role(self):
+        """Regular members and outsiders cannot enumerate organization candidates."""
+        organization = Organization.objects.create(name="Locked Search", slug="locked-search")
+        OrganizationMembership.objects.create(
+            user=self.owner,
+            organization=organization,
+            role=OrganizationMembership.Role.OWNER,
+        )
+        OrganizationMembership.objects.create(
+            user=self.member,
+            organization=organization,
+            role=OrganizationMembership.Role.MEMBER,
+        )
+
+        member_response = self.client.get(
+            f"/api/v1/organizations/{organization.slug}/member-candidates",
+            {"q": "org"},
+            **self._headers_for(self.member),
+        )
+        outsider_response = self.client.get(
+            f"/api/v1/organizations/{organization.slug}/member-candidates",
+            {"q": "org"},
+            **self._headers_for(self.outsider),
+        )
+
+        self.assertEqual(member_response.status_code, 403)
+        self.assertEqual(outsider_response.status_code, 403)
+
     def test_admin_can_manage_non_owner_members_and_avatar(self):
         """Admins can manage organization settings, avatars, and non-owner members."""
         organization = Organization.objects.create(name="Managed Org", slug="managed")

@@ -179,6 +179,8 @@ class ShopItemAdmin(admin.ModelAdmin):
         "stock_display",
         "priority",
         "is_active",
+        "is_listed_on_cn",
+        "is_listed_on_global",
         "requires_shipping",
         "has_image",
         "redemption_count",
@@ -187,6 +189,8 @@ class ShopItemAdmin(admin.ModelAdmin):
     )
     list_filter = (
         "is_active",
+        "is_listed_on_cn",
+        "is_listed_on_global",
         "requires_shipping",
         "created_at",
         "updated_at",
@@ -235,6 +239,8 @@ class ShopItemAdmin(admin.ModelAdmin):
                     "stock",
                     "priority",
                     "is_active",
+                    "is_listed_on_cn",
+                    "is_listed_on_global",
                     "requires_shipping",
                     "coupon_type",
                 ),

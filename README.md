@@ -56,6 +56,7 @@ just worker         # 另开终端运行后台 DB worker
 - 对象存储：`AWS_*`（未配置则使用本地文件系统）
 - 缓存：`REDIS_URL`（未配置则回落到本地缓存）
 - 社交登录：`SOCIAL_AUTH_*`（逗号分隔 scope）
+- 双前端：分别配置 `FRONTEND_CN_APP_URL`、`FRONTEND_GLOBAL_APP_URL`，并将两个来源都加入 `CORS_ALLOWED_ORIGINS`
 - 分析：`CLICKHOUSE_*`（可选）
 
 ## 目录结构

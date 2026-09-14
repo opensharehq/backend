@@ -17,6 +17,13 @@ from ninja import Router, Schema
 from ninja.security import HttpBearer
 from social_django.models import UserSocialAuth
 
+from common.frontend_sites import (
+    FRONTEND_SITE_SESSION_KEY,
+    FrontendSite,
+    frontend_site_from_request,
+    parse_frontend_site,
+    request_frontend_site,
+)
 from config.api_common import (
     ApiError,
     ErrorResponseSchema,
@@ -126,6 +133,11 @@ SOCIAL_PROVIDERS = {
         "key": "SOCIAL_AUTH_HUGGINGFACE_KEY",
         "secret": "SOCIAL_AUTH_HUGGINGFACE_SECRET",
     },
+}
+
+SOCIAL_LOGIN_PROVIDERS_BY_SITE = {
+    FrontendSite.CN: frozenset({"github", "atomgit"}),
+    FrontendSite.GLOBAL: frozenset({"github"}),
 }
 
 
@@ -275,7 +287,10 @@ def _extract_social_profile_url(
     return None
 
 
-def _get_provider_or_error(provider: str) -> dict[str, str]:
+def _get_provider_or_error(
+    provider: str,
+    frontend_site: FrontendSite | None = None,
+) -> dict[str, str]:
     """Resolve a configured provider or raise an API error."""
     provider_info = SOCIAL_PROVIDERS.get(provider)
     if provider_info is None:
@@ -292,6 +307,15 @@ def _get_provider_or_error(provider: str) -> dict[str, str]:
             "This social-login provider is not configured.",
         )
 
+    if frontend_site is not None and provider not in SOCIAL_LOGIN_PROVIDERS_BY_SITE.get(
+        frontend_site, frozenset({"github"})
+    ):
+        raise ApiError(
+            "provider_not_available",
+            404,
+            "The requested provider is not available on this site.",
+        )
+
     return provider_info
 
 
@@ -300,10 +324,18 @@ def _social_callback_url(provider: str) -> str:
     return social_api_callback_path(provider)
 
 
-def _build_frontend_social_callback_url(provider: str, **params: str) -> str:
+def _build_frontend_social_callback_url(
+    provider: str,
+    frontend_site: FrontendSite | None = None,
+    **params: str,
+) -> str:
     """Return the SPA callback URL for social-login handoff."""
     try:
-        return build_social_callback_url(provider, **params)
+        return build_social_callback_url(
+            provider,
+            frontend_site=frontend_site,
+            **params,
+        )
     except FrontendSocialCallbackNotConfigured as exc:
         raise ApiError(
             "frontend_handoff_not_configured",
@@ -509,9 +541,11 @@ def social_start_endpoint(
     must pass this query parameter when the user initiates a bind flow from
     an authenticated page; omitting it yields the regular social-login flow.
     """
-    _get_provider_or_error(provider)
-    _build_frontend_social_callback_url(provider)
-
+    frontend_site = (
+        frontend_site_from_request(request, allow_query_marker=True)
+        or FrontendSite.GLOBAL
+    )
+    authed_user = None
     if access_token:
         authed_user = get_user_from_access_token(access_token)
         if (
@@ -525,6 +559,18 @@ def social_start_endpoint(
                 backend="django.contrib.auth.backends.ModelBackend",
             )
 
+    is_binding = bool(
+        authed_user is not None
+        and authed_user.is_active
+        and not authed_user.merged_into_id
+    )
+    _get_provider_or_error(provider, None if is_binding else frontend_site)
+    _build_frontend_social_callback_url(provider, frontend_site)
+
+    session = getattr(request, "session", None)
+    if session is not None:
+        session[FRONTEND_SITE_SESSION_KEY] = frontend_site.value
+
     query = urlencode({"next": _social_callback_url(provider)})
     return HttpResponseRedirect(f"{reverse('social:begin', args=[provider])}?{query}")
 
@@ -532,12 +578,20 @@ def social_start_endpoint(
 @router.get("/social/{provider}/callback")
 def social_callback_endpoint(request: HttpRequest, provider: str):
     """Bridge session-based social auth back into the SPA with an exchange code."""
+    session = getattr(request, "session", None)
+    frontend_site = parse_frontend_site(
+        session.get(FRONTEND_SITE_SESSION_KEY) if session is not None else None
+    )
+    frontend_site = (
+        frontend_site or request_frontend_site(request) or FrontendSite.GLOBAL
+    )
     _get_provider_or_error(provider)
 
     if not request.user.is_authenticated:
         return HttpResponseRedirect(
             _build_frontend_social_callback_url(
                 provider,
+                frontend_site,
                 error="authentication_failed",
             )
         )
@@ -546,6 +600,7 @@ def social_callback_endpoint(request: HttpRequest, provider: str):
         return HttpResponseRedirect(
             _build_frontend_social_callback_url(
                 provider,
+                frontend_site,
                 error="provider_not_connected",
             )
         )
@@ -561,6 +616,7 @@ def social_callback_endpoint(request: HttpRequest, provider: str):
         return HttpResponseRedirect(
             _build_frontend_social_callback_url(
                 provider,
+                frontend_site,
                 error="authentication_failed",
             )
         )
@@ -568,6 +624,7 @@ def social_callback_endpoint(request: HttpRequest, provider: str):
     return HttpResponseRedirect(
         _build_frontend_social_callback_url(
             provider,
+            frontend_site,
             exchange_code=exchange_code,
         )
     )

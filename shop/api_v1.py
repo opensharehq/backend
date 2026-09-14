@@ -12,6 +12,7 @@ from ninja import Router, Schema
 from accounts.api_serializers import serialize_shipping_address
 from accounts.api_v1 import jwt_bearer_auth
 from accounts.models import ShippingAddress
+from common.frontend_sites import FrontendSite, request_frontend_site
 from config.api_common import (
     ApiError,
     ErrorResponseSchema,
@@ -25,6 +26,17 @@ from .models import CouponCode, Redemption, ShopItem
 from .services import RedemptionError, redeem_item
 
 router = Router(tags=["shop"], auth=jwt_bearer_auth)
+
+
+def _listed_items_for_request(request):
+    """Return items listed on the originating frontend, failing closed."""
+    site = request_frontend_site(request)
+    queryset = ShopItem.objects.filter(is_active=True)
+    if site == FrontendSite.CN:
+        return queryset.filter(is_listed_on_cn=True)
+    if site == FrontendSite.GLOBAL:
+        return queryset.filter(is_listed_on_global=True)
+    return queryset.none()
 
 
 class RedemptionCreateSchema(Schema):
@@ -289,7 +301,7 @@ def shop_item_list_endpoint(request, page: int = 1, page_size: int = 20):
         status=CouponCode.Status.AVAILABLE,
     )
     items_qs = (
-        ShopItem.objects.filter(is_active=True)
+        _listed_items_for_request(request)
         .prefetch_related("allowed_tags")
         .annotate(
             sort_has_stock=Case(
@@ -325,7 +337,8 @@ def shop_item_list_endpoint(request, page: int = 1, page_size: int = 20):
 def shop_item_detail_endpoint(request, item_id: int):
     """Return a single active shop item."""
     item = get_object_or_404(
-        ShopItem.objects.prefetch_related("allowed_tags"), id=item_id, is_active=True
+        _listed_items_for_request(request).prefetch_related("allowed_tags"),
+        id=item_id,
     )
     payload = _serialize_shop_item(item)
     if item.requires_shipping:
@@ -399,6 +412,7 @@ def redemption_create_endpoint(request, payload: RedemptionCreateSchema):
     redeem_kwargs: dict = {
         "user": request.auth,
         "item_id": payload.item_id,
+        "frontend_site": request_frontend_site(request),
         "shipping_address_id": payload.shipping_address_id,
         "point_type": payload.point_type,
         "tag_slug": payload.tag_slug,

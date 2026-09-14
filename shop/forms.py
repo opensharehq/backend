@@ -31,6 +31,8 @@ class ShopItemAdminForm(forms.ModelForm):
             "stock",
             "priority",
             "is_active",
+            "is_listed_on_cn",
+            "is_listed_on_global",
             "requires_shipping",
             "message_title_template_zh",
             "message_title_template_en",

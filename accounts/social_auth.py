@@ -8,6 +8,14 @@ from urllib.parse import urlencode, urlparse
 from django.conf import settings
 from django.http import HttpResponseRedirect
 
+from common.frontend_sites import (
+    FRONTEND_SITE_SESSION_KEY,
+    FrontendSite,
+    default_frontend_site,
+    frontend_app_url,
+    parse_frontend_site,
+)
+
 logger = logging.getLogger(__name__)
 
 # social-django URL path prefixes that participate in the OAuth handshake.
@@ -33,16 +41,20 @@ def is_api_social_callback_target(target_url: str | None, provider: str) -> bool
     return path == social_api_callback_path(provider)
 
 
-def build_frontend_social_callback_url(provider: str, **params: str) -> str:
+def build_frontend_social_callback_url(
+    provider: str,
+    *,
+    frontend_site: FrontendSite | str | None = None,
+    **params: str,
+) -> str:
     """Return the frontend callback URL used after social auth completes."""
-    if not settings.FRONTEND_APP_URL:
+    site = parse_frontend_site(frontend_site) or default_frontend_site()
+    app_url = frontend_app_url(site)
+    if not app_url:
         raise FrontendSocialCallbackNotConfigured()
 
     query = urlencode({"provider": provider, **params})
-    return (
-        f"{settings.FRONTEND_APP_URL.rstrip('/')}"
-        f"{settings.FRONTEND_SOCIAL_CALLBACK_PATH}?{query}"
-    )
+    return f"{app_url}{settings.FRONTEND_SOCIAL_CALLBACK_PATH}?{query}"
 
 
 def _is_social_django_path(path: str) -> bool:
@@ -105,8 +117,14 @@ class SocialAuthGenericExceptionMiddleware:
         )
 
         try:
+            session = getattr(request, "session", None)
+            frontend_site = parse_frontend_site(
+                session.get(FRONTEND_SITE_SESSION_KEY) if session is not None else None
+            )
             url = build_frontend_social_callback_url(
-                provider, error="authentication_failed"
+                provider,
+                frontend_site=frontend_site,
+                error="authentication_failed",
             )
         except FrontendSocialCallbackNotConfigured:
             # Without a configured frontend URL there is nowhere safe to

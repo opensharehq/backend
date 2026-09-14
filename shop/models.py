@@ -5,6 +5,7 @@ import uuid
 from django.conf import settings
 from django.db import models
 
+from common.frontend_sites import FrontendSite, parse_frontend_site
 from points.models import PointType
 
 
@@ -52,7 +53,21 @@ class ShopItem(models.Model):
         verbose_name="优先级",
         help_text="数值越大，商城展示越靠前；售罄商品始终排在有库存商品之后",
     )
-    is_active = models.BooleanField(default=True, verbose_name="是否上架")
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name="全站上架总开关",
+        help_text="关闭后，中国站和国际站都不会展示或允许兑换该商品",
+    )
+    is_listed_on_cn = models.BooleanField(
+        default=True,
+        verbose_name="中国站上架",
+        help_text="在 open-share.cn 的商城中展示并允许兑换",
+    )
+    is_listed_on_global = models.BooleanField(
+        default=True,
+        verbose_name="国际站上架",
+        help_text="在 open-share.com 的商城中展示并允许兑换",
+    )
 
     requires_shipping = models.BooleanField(
         default=False,
@@ -110,6 +125,15 @@ class ShopItem(models.Model):
             or self.message_title_template_en
             or self.message_content_template_en
         )
+
+    def is_listed_on(self, frontend_site: FrontendSite | str | None) -> bool:
+        """Return whether this active item is available on a frontend site."""
+        site = parse_frontend_site(frontend_site)
+        if not self.is_active or site is None:
+            return False
+        if site == FrontendSite.CN:
+            return self.is_listed_on_cn
+        return self.is_listed_on_global
 
 
 class ShopItemAllowedTags(models.Model):

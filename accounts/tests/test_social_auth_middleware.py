@@ -53,6 +53,15 @@ class SocialAuthHelperTests(TestCase):
             "https://frontend.example/auth/social/callback?provider=github&error=boom",
         )
 
+    @override_settings(FRONTEND_GLOBAL_APP_URL="https://open-share.com/")
+    def test_build_frontend_social_callback_url_selects_global_site(self):
+        """An explicit site should choose that frontend's callback base URL."""
+        url = build_frontend_social_callback_url(
+            "github", frontend_site="global", exchange_code="code"
+        )
+
+        self.assertEqual(urlparse(url).netloc, "open-share.com")
+
     @override_settings(FRONTEND_APP_URL="")
     def test_build_frontend_social_callback_url_requires_frontend_app_url(self):
         """Missing frontend URL should raise a stable configuration error."""

@@ -6,6 +6,8 @@ from django.conf import settings
 from django.http import HttpResponse, HttpResponsePermanentRedirect
 from django.utils.cache import add_never_cache_headers, patch_vary_headers
 
+from common.frontend_sites import frontend_site_from_request
+
 
 class CanonicalHostRedirectMiddleware:
     """Redirect requests to the canonical domain while preserving path and query."""
@@ -37,7 +39,7 @@ class ApiCorsMiddleware:
 
     exposed_prefixes = ("/api/",)
     allowed_methods = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-    allowed_headers = "Authorization, Content-Type"
+    allowed_headers = "Authorization, Content-Type, X-OpenShare-Site"
 
     def __init__(self, get_response):
         """Initialize middleware state once per process."""
@@ -80,6 +82,19 @@ class ApiCorsMiddleware:
         response["Access-Control-Max-Age"] = "86400"
         response.headers.pop("Access-Control-Allow-Credentials", None)
         patch_vary_headers(response, ["Origin"])
+
+
+class FrontendSiteMiddleware:
+    """Attach the allowlisted originating frontend site to every request."""
+
+    def __init__(self, get_response):
+        """Store the next middleware callable."""
+        self.get_response = get_response
+
+    def __call__(self, request):
+        """Resolve and attach the frontend site before invoking the view."""
+        request.frontend_site = frontend_site_from_request(request)
+        return self.get_response(request)
 
 
 class ApiNoCacheMiddleware:

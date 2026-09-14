@@ -14,6 +14,7 @@ from social_django.models import UserSocialAuth
 
 from accounts.services.jwt_tokens import create_access_token, create_refresh_token
 from accounts.services.social_exchange import SocialExchangeUnavailableError
+from common.frontend_sites import FRONTEND_SITE_SESSION_KEY
 
 
 class _RedisClientWithoutEval:
@@ -336,6 +337,50 @@ class ApiV1AuthTests(TestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["code"], "social_exchange_unavailable")
+
+    @override_settings(
+        FRONTEND_CN_APP_URL="https://open-share.cn",
+        FRONTEND_GLOBAL_APP_URL="https://open-share.com",
+        SOCIAL_AUTH_ATOMGIT_KEY="key",
+        SOCIAL_AUTH_ATOMGIT_SECRET="secret",
+    )
+    def test_atomgit_login_can_only_start_from_cn_frontend(self):
+        """The global frontend must not be able to start an AtomGit login."""
+        global_response = self.client.get(
+            "/api/v1/auth/social/atomgit/start?frontend_site=global",
+            HTTP_REFERER="https://open-share.com/login",
+        )
+        cn_response = self.client.get(
+            "/api/v1/auth/social/atomgit/start?frontend_site=cn",
+            HTTP_REFERER="https://open-share.cn/login",
+        )
+
+        self.assertEqual(global_response.status_code, 404)
+        self.assertEqual(global_response.json()["code"], "provider_not_available")
+        self.assertEqual(cn_response.status_code, 302)
+
+    @override_settings(
+        FRONTEND_CN_APP_URL="https://open-share.cn",
+        FRONTEND_GLOBAL_APP_URL="https://open-share.com",
+        SOCIAL_AUTH_GITHUB_KEY="key",
+        SOCIAL_AUTH_GITHUB_SECRET="secret",
+    )
+    @patch("accounts.api_v1.create_exchange_code", return_value="global-code")
+    def test_social_callback_returns_to_the_frontend_saved_in_session(self, _mock):
+        """OAuth callbacks should return to the frontend that started the flow."""
+        self.client.force_login(self.user)
+        session = self.client.session
+        session[FRONTEND_SITE_SESSION_KEY] = "global"
+        session.save()
+        UserSocialAuth.objects.create(user=self.user, provider="github", uid="github")
+
+        response = self.client.get("/api/v1/auth/social/github/callback")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(urlparse(response.url).netloc, "open-share.com")
+        self.assertEqual(
+            parse_qs(urlparse(response.url).query)["exchange_code"], ["global-code"]
+        )
 
     @override_settings(
         FRONTEND_APP_URL="https://frontend.example",

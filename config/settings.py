@@ -85,7 +85,10 @@ env = environ.Env(
     JWT_REFRESH_TTL_SECONDS=(int, 2592000),
     SOCIAL_AUTH_EXCHANGE_CODE_TTL_SECONDS=(int, 300),
     FRONTEND_APP_URL=(str, ""),
-    FRONTEND_SOCIAL_CALLBACK_PATH=(str, "/auth/social/callback"),
+    FRONTEND_CN_APP_URL=(str, ""),
+    FRONTEND_GLOBAL_APP_URL=(str, ""),
+    FRONTEND_DEFAULT_SITE=(str, "cn"),
+    FRONTEND_SOCIAL_CALLBACK_PATH=(str, "/social-callback"),
     CORS_ALLOWED_ORIGINS=(list, []),
     SBY_INTER_KEY=(str, ""),
     SBY_MER_PRIVATE_KEY=(str, ""),
@@ -96,7 +99,6 @@ env = environ.Env(
     SBY_API_VERSION=(str, "V1.0"),
     SBY_PROVIDER_ID=(str, ""),
     SBY_FU_URL=(str, ""),
-    IP2REGION_XDB_PATH=(str, ""),
     OUTREACH_COST_PER_USER=(int, 2),
     OUTREACH_REWARD_RATIO=(float, 0.5),
     OUTREACH_REWARD_EXPIRY_DAYS=(int, 30),
@@ -117,6 +119,9 @@ JWT_ACCESS_TTL_SECONDS = env("JWT_ACCESS_TTL_SECONDS")
 JWT_REFRESH_TTL_SECONDS = env("JWT_REFRESH_TTL_SECONDS")
 SOCIAL_AUTH_EXCHANGE_CODE_TTL_SECONDS = env("SOCIAL_AUTH_EXCHANGE_CODE_TTL_SECONDS")
 FRONTEND_APP_URL = env("FRONTEND_APP_URL")
+FRONTEND_CN_APP_URL = env("FRONTEND_CN_APP_URL")
+FRONTEND_GLOBAL_APP_URL = env("FRONTEND_GLOBAL_APP_URL")
+FRONTEND_DEFAULT_SITE = env("FRONTEND_DEFAULT_SITE")
 FRONTEND_SOCIAL_CALLBACK_PATH = env("FRONTEND_SOCIAL_CALLBACK_PATH")
 CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS")
 AWS_S3_ACCESS_KEY_ID = env("AWS_S3_ACCESS_KEY_ID")
@@ -149,9 +154,6 @@ SBY_TASK_ID = env("SBY_TASK_ID")
 SBY_API_VERSION = env("SBY_API_VERSION")
 SBY_PROVIDER_ID = env("SBY_PROVIDER_ID")
 SBY_FU_URL = env("SBY_FU_URL")
-
-# IP 归属地 xdb 文件路径（可选）。未配置或文件不存在时，IP 区域判定接口返回 None。
-IP2REGION_XDB_PATH = env("IP2REGION_XDB_PATH")
 
 # Talent Outreach Configuration
 OUTREACH_COST_PER_USER = env("OUTREACH_COST_PER_USER")
@@ -197,6 +199,7 @@ _BASE_MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.http.ConditionalGetMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "common.middleware.FrontendSiteMiddleware",
     "common.middleware.ApiCorsMiddleware",
     "common.middleware.ApiNoCacheMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -244,6 +247,8 @@ WSGI_APPLICATION = "config.wsgi.application"
 CSRF_TRUSTED_ORIGINS = [
     "https://open-share.cn",
     "https://www.open-share.cn",
+    "https://open-share.com",
+    "https://www.open-share.com",
 ]
 
 # Respect proxy-provided headers so Django can reconstruct the original request

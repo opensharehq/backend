@@ -117,6 +117,64 @@ class ShopApiV1Tests(TestCase):
         )
         self.assertEqual(history_payload["pagination"]["total_items"], 1)
 
+    def test_items_are_independently_listed_and_redeemable_by_frontend(self):
+        """Each frontend should see and redeem only its configured products."""
+        cn_only = ShopItem.objects.create(
+            name_zh="China only",
+            name_en="China only",
+            description_zh="China only",
+            cost=10,
+            is_listed_on_cn=True,
+            is_listed_on_global=False,
+        )
+        global_only = ShopItem.objects.create(
+            name_zh="Global only",
+            name_en="Global only",
+            description_zh="Global only",
+            cost=10,
+            is_listed_on_cn=False,
+            is_listed_on_global=True,
+        )
+
+        cn_response = self.client.get(
+            "/api/v1/shop/items",
+            HTTP_ORIGIN="https://open-share.cn",
+            **self.headers,
+        )
+        global_response = self.client.get(
+            "/api/v1/shop/items",
+            HTTP_ORIGIN="https://open-share.com",
+            **self.headers,
+        )
+
+        cn_ids = {item["id"] for item in cn_response.json()["items"]}
+        global_ids = {item["id"] for item in global_response.json()["items"]}
+        self.assertIn(cn_only.id, cn_ids)
+        self.assertNotIn(global_only.id, cn_ids)
+        self.assertNotIn(cn_only.id, global_ids)
+        self.assertIn(global_only.id, global_ids)
+
+        hidden_detail = self.client.get(
+            f"/api/v1/shop/items/{cn_only.id}",
+            HTTP_ORIGIN="https://open-share.com",
+            **self.headers,
+        )
+        hidden_redemption = self.client.post(
+            "/api/v1/shop/redemptions",
+            {"item_id": cn_only.id},
+            content_type="application/json",
+            HTTP_ORIGIN="https://open-share.com",
+            **self.headers,
+        )
+
+        self.assertEqual(hidden_detail.status_code, 404)
+        self._assert_api_error(
+            hidden_redemption,
+            status_code=409,
+            code="item_unavailable",
+            message="This item is no longer available.",
+        )
+
     def test_item_listing_orders_stocked_items_before_sold_out_by_priority(self):
         """Stock status should outrank priority, including coupon-backed stock."""
         stocked_high = ShopItem.objects.create(

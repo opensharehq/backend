@@ -7,6 +7,7 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
+from common.frontend_sites import FrontendSite
 from points import services as points_services
 from points.models import PointType
 
@@ -94,6 +95,7 @@ def send_redemption_message(item, user, coupon, lang="zh"):
 def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
     user,
     item_id: int,
+    frontend_site: FrontendSite | str = FrontendSite.CN,
     shipping_address_id=None,
     lang="zh",
     point_type="gift",
@@ -109,6 +111,7 @@ def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
     Args:
         user (User): 执行兑换的用户.
         item_id (int): 要兑换的商品 ID.
+        frontend_site (FrontendSite | str): 发起兑换的前端站点.
         shipping_address_id (int, optional): 收货地址 ID (需要线下发货的商品必须提供).
         lang (str): 站内信语言, 默认 "zh".
         point_type (str): 支付积分类型, "gift" 或 "cash", 默认 "gift".
@@ -147,7 +150,7 @@ def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
         raise RedemptionError(msg) from err
 
     # 1. 前置条件检查
-    if not item.is_active:
+    if not item.is_listed_on(frontend_site):
         msg = "该商品已下架。"
         logger.warning(
             "兑换失败（商品已下架）: 用户=%s (ID=%s), 商品=%s (ID=%s)",

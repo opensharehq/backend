@@ -365,6 +365,22 @@ class ApiV1AuthTests(TestCase):
         SOCIAL_AUTH_GITHUB_KEY="key",
         SOCIAL_AUTH_GITHUB_SECRET="secret",
     )
+    def test_social_login_rejects_an_untrusted_frontend_origin(self):
+        """An explicit site marker must not override an unknown browser origin."""
+        response = self.client.get(
+            "/api/v1/auth/social/github/start?frontend_site=cn",
+            HTTP_REFERER="https://attacker.example/login",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "frontend_site_not_allowed")
+
+    @override_settings(
+        FRONTEND_CN_APP_URL="https://open-share.cn",
+        FRONTEND_GLOBAL_APP_URL="https://open-share.com",
+        SOCIAL_AUTH_GITHUB_KEY="key",
+        SOCIAL_AUTH_GITHUB_SECRET="secret",
+    )
     @patch("accounts.api_v1.create_exchange_code", return_value="global-code")
     def test_social_callback_returns_to_the_frontend_saved_in_session(self, _mock):
         """OAuth callbacks should return to the frontend that started the flow."""

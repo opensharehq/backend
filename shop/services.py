@@ -95,7 +95,7 @@ def send_redemption_message(item, user, coupon, lang="zh"):
 def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
     user,
     item_id: int,
-    frontend_site: FrontendSite | str = FrontendSite.CN,
+    frontend_site: FrontendSite | str | None = FrontendSite.CN,
     shipping_address_id=None,
     lang="zh",
     point_type="gift",
@@ -111,7 +111,7 @@ def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
     Args:
         user (User): 执行兑换的用户.
         item_id (int): 要兑换的商品 ID.
-        frontend_site (FrontendSite | str): 发起兑换的前端站点.
+        frontend_site (FrontendSite | str | None): 发起兑换的前端站点.
         shipping_address_id (int, optional): 收货地址 ID (需要线下发货的商品必须提供).
         lang (str): 站内信语言, 默认 "zh".
         point_type (str): 支付积分类型, "gift" 或 "cash", 默认 "gift".

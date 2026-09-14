@@ -541,10 +541,13 @@ def social_start_endpoint(
     must pass this query parameter when the user initiates a bind flow from
     an authenticated page; omitting it yields the regular social-login flow.
     """
-    frontend_site = (
-        frontend_site_from_request(request, allow_query_marker=True)
-        or FrontendSite.GLOBAL
-    )
+    frontend_site = frontend_site_from_request(request, allow_query_marker=True)
+    if frontend_site is None:
+        raise ApiError(
+            "frontend_site_not_allowed",
+            403,
+            "The request did not originate from an allowed frontend site.",
+        )
     authed_user = None
     if access_token:
         authed_user = get_user_from_access_token(access_token)

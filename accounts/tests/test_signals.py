@@ -8,6 +8,7 @@ from social_django.models import UserSocialAuth
 
 from accounts.signals import (
     claim_pending_points_on_login,
+    invalidate_current_developer_tier_owner,
     invalidate_developer_tier_on_disconnect,
 )
 from points.models import PendingPointGrant, PointAllocation, PointType
@@ -53,12 +54,31 @@ class ClaimPendingPointsSignalTests(TestCase):
 
     @mock.patch("accounts.services.profile_completion_reward.invalidate_cached_reward")
     def test_social_auth_save_invalidates_developer_tier(self, mock_invalidate):
-        """Both new bindings and moved bindings invalidate the current owner."""
+        """Any social-auth save invalidates the current owner's tier cache."""
         social_auth = self._build_instance()
 
-        claim_pending_points_on_login(UserSocialAuth, social_auth, created=False)
+        invalidate_current_developer_tier_owner(UserSocialAuth, social_auth)
 
         mock_invalidate.assert_called_once_with(self.user)
+
+    @mock.patch("accounts.services.profile_completion_reward.invalidate_cached_reward")
+    def test_social_auth_reassignment_invalidates_both_owners(self, mock_invalidate):
+        """Moving a binding invalidates both its previous and current owner."""
+        target = User.objects.create_user(username="target-user")
+        social_auth = UserSocialAuth.objects.create(
+            user=self.user,
+            provider="github",
+            uid="moved-account",
+        )
+        mock_invalidate.reset_mock()
+
+        social_auth.user = target
+        social_auth.save(update_fields=["user"])
+
+        invalidated_user_ids = [
+            call.args[0].id for call in mock_invalidate.call_args_list
+        ]
+        self.assertCountEqual(invalidated_user_ids, [self.user.id, target.id])
 
     @mock.patch("accounts.services.profile_completion_reward.invalidate_cached_reward")
     def test_social_auth_delete_invalidates_developer_tier(self, mock_invalidate):

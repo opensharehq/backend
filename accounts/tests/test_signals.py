@@ -6,7 +6,10 @@ from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
 from social_django.models import UserSocialAuth
 
-from accounts.signals import claim_pending_points_on_login
+from accounts.signals import (
+    claim_pending_points_on_login,
+    invalidate_developer_tier_on_disconnect,
+)
 from points.models import PendingPointGrant, PointAllocation, PointType
 from points.services import get_balance, grant_points
 
@@ -47,6 +50,24 @@ class ClaimPendingPointsSignalTests(TestCase):
         claim_pending_points_on_login(UserSocialAuth, social_auth, created=True)
 
         mock_logger.assert_not_called()
+
+    @mock.patch("accounts.services.profile_completion_reward.invalidate_cached_reward")
+    def test_social_auth_save_invalidates_developer_tier(self, mock_invalidate):
+        """Both new bindings and moved bindings invalidate the current owner."""
+        social_auth = self._build_instance()
+
+        claim_pending_points_on_login(UserSocialAuth, social_auth, created=False)
+
+        mock_invalidate.assert_called_once_with(self.user)
+
+    @mock.patch("accounts.services.profile_completion_reward.invalidate_cached_reward")
+    def test_social_auth_delete_invalidates_developer_tier(self, mock_invalidate):
+        """Disconnecting an account invalidates the cached highest tier."""
+        social_auth = self._build_instance()
+
+        invalidate_developer_tier_on_disconnect(UserSocialAuth, social_auth)
+
+        mock_invalidate.assert_called_once_with(self.user)
 
 
 class ClaimPendingPointsSignalIntegrationTests(TestCase):

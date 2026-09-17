@@ -7,8 +7,13 @@ from django.test import RequestFactory, TestCase
 from accounts.models import ShippingAddress
 from points import services as points_services
 from points.models import PointType
-from shop.admin import RedemptionAdmin, RedemptionInline, ShopItemAdmin
-from shop.models import Redemption, ShopItem
+from shop.admin import (
+    DeveloperTierDiscountConfigAdmin,
+    RedemptionAdmin,
+    RedemptionInline,
+    ShopItemAdmin,
+)
+from shop.models import DeveloperTierDiscountConfig, Redemption, ShopItem
 from shop.services import redeem_item
 
 
@@ -108,6 +113,27 @@ class ShopItemAdminTests(TestCase):
 
         assert self.admin.has_image(item) is False
         assert self.admin.redemption_count(item) == 0
+
+
+class DeveloperTierDiscountConfigAdminTests(TestCase):
+    """Validate singleton protections for the discount configuration."""
+
+    def setUp(self):
+        """Build the model admin against an isolated admin site."""
+        self.admin = DeveloperTierDiscountConfigAdmin(
+            DeveloperTierDiscountConfig,
+            AdminSite(),
+        )
+
+    def test_default_config_is_singleton_and_cannot_be_deleted(self):
+        """Migrations provide the only row and the admin protects it."""
+        config = DeveloperTierDiscountConfig.objects.get(
+            pk=DeveloperTierDiscountConfig.SINGLETON_PK
+        )
+
+        self.assertEqual(str(config.sss_multiplier), "0.80")
+        self.assertFalse(self.admin.has_add_permission(MockRequest()))
+        self.assertFalse(self.admin.has_delete_permission(MockRequest(), config))
 
 
 class RedemptionAdminTests(TestCase):

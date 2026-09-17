@@ -9,6 +9,7 @@ from django.utils.html import format_html
 from .forms import ShopItemAdminForm
 from .models import (
     CouponCode,
+    DeveloperTierDiscountConfig,
     Redemption,
     RedemptionPaymentLine,
     ShopItem,
@@ -23,7 +24,11 @@ class RedemptionInline(admin.TabularInline):
     extra = 0
     readonly_fields = (
         "user_profile",
+        "original_points_cost_at_redemption",
         "points_cost_at_redemption",
+        "discount_tier",
+        "discount_tier_year",
+        "discount_multiplier",
         "status",
         "point_type",
         "point_tag_slug",
@@ -166,6 +171,47 @@ class CouponCodeAdmin(admin.ModelAdmin):
     change_list_template = "admin/shop/couponcode/change_list.html"
 
 
+@admin.register(DeveloperTierDiscountConfig)
+class DeveloperTierDiscountConfigAdmin(admin.ModelAdmin):
+    """Admin editor for the singleton developer-tier discount table."""
+
+    list_display = (
+        "sss_multiplier",
+        "ss_multiplier",
+        "s_multiplier",
+        "a_multiplier",
+        "b_multiplier",
+        "updated_at",
+    )
+    readonly_fields = ("updated_at",)
+    fieldsets = (
+        (
+            "历年最高等级兑换倍率",
+            {
+                "fields": (
+                    "sss_multiplier",
+                    "ss_multiplier",
+                    "s_multiplier",
+                    "a_multiplier",
+                    "b_multiplier",
+                    "updated_at",
+                ),
+                "description": (
+                    "倍率必须大于 0 且不超过 1；折扣后的兑换积分按向上取整计算。"
+                ),
+            },
+        ),
+    )
+
+    def has_add_permission(self, request):
+        """Allow creation only when the singleton row is unexpectedly absent."""
+        return not DeveloperTierDiscountConfig.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        """Prevent removing the required singleton configuration."""
+        return False
+
+
 @admin.register(ShopItem)
 class ShopItemAdmin(admin.ModelAdmin):
     """Admin for ShopItem model."""
@@ -303,6 +349,7 @@ class RedemptionAdmin(admin.ModelAdmin):
         "id",
         "user_profile",
         "item",
+        "discount_summary",
         "points_cost_at_redemption",
         "payment_summary",
         "status_display",
@@ -317,7 +364,16 @@ class RedemptionAdmin(admin.ModelAdmin):
         "shipping_address__receiver_name",
         "shipping_address__phone",
     )
-    readonly_fields = ("created_at", "shipping_address_display", "payment_summary")
+    readonly_fields = (
+        "created_at",
+        "shipping_address_display",
+        "payment_summary",
+        "original_points_cost_at_redemption",
+        "discount_tier",
+        "discount_tier_year",
+        "discount_multiplier",
+        "discount_summary",
+    )
     ordering = ("-created_at",)
     date_hierarchy = "created_at"
     inlines = [RedemptionPaymentLineInline]
@@ -329,7 +385,12 @@ class RedemptionAdmin(admin.ModelAdmin):
                 "fields": (
                     "user_profile",
                     "item",
+                    "original_points_cost_at_redemption",
                     "points_cost_at_redemption",
+                    "discount_tier",
+                    "discount_tier_year",
+                    "discount_multiplier",
+                    "discount_summary",
                     "payment_summary",
                     "status",
                 ),
@@ -391,6 +452,14 @@ class RedemptionAdmin(admin.ModelAdmin):
                 label = "通用礼物积分"
             lines.append(f"{label}: {line.amount}")
         return " + ".join(lines) if lines else "-"
+
+    @admin.display(description="等级折扣")
+    def discount_summary(self, obj):
+        """Display the immutable discount snapshot used for this redemption."""
+        if not obj or not obj.discount_tier or obj.discount_multiplier is None:
+            return "无折扣"
+        year = f" ({obj.discount_tier_year})" if obj.discount_tier_year else ""
+        return f"{obj.discount_tier}{year} × {obj.discount_multiplier}"
 
     @admin.display(description="收货地址详情")
     def shipping_address_display(self, obj):

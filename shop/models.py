@@ -1,8 +1,10 @@
 """Data models for shop application."""
 
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from common.frontend_sites import FrontendSite, parse_frontend_site
@@ -19,6 +21,88 @@ def shop_item_detail_path(instance, filename):
     """Generate upload path for shop item detail image."""
     ext = filename.rsplit(".", 1)[-1].lower()
     return f"shop/items/{uuid.uuid4().hex}_detail.{ext}"
+
+
+class DeveloperTierDiscountConfig(models.Model):
+    """Singleton configuration for developer-tier shop discounts."""
+
+    SINGLETON_PK = 1
+    DEFAULT_MULTIPLIERS = {
+        "SSS": Decimal("0.80"),
+        "SS": Decimal("0.85"),
+        "S": Decimal("0.90"),
+        "A": Decimal("0.95"),
+        "B": Decimal("0.95"),
+    }
+    MULTIPLIER_FIELDS = {
+        "SSS": "sss_multiplier",
+        "SS": "ss_multiplier",
+        "S": "s_multiplier",
+        "A": "a_multiplier",
+        "B": "b_multiplier",
+    }
+
+    multiplier_validators = [
+        MinValueValidator(Decimal("0.01")),
+        MaxValueValidator(Decimal("1.00")),
+    ]
+    sss_multiplier = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        default=DEFAULT_MULTIPLIERS["SSS"],
+        validators=multiplier_validators,
+        verbose_name="SSS 等级兑换倍率",
+        help_text="例如 0.80 表示按原积分的 80% 兑换，结果向上取整",
+    )
+    ss_multiplier = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        default=DEFAULT_MULTIPLIERS["SS"],
+        validators=multiplier_validators,
+        verbose_name="SS 等级兑换倍率",
+    )
+    s_multiplier = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        default=DEFAULT_MULTIPLIERS["S"],
+        validators=multiplier_validators,
+        verbose_name="S 等级兑换倍率",
+    )
+    a_multiplier = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        default=DEFAULT_MULTIPLIERS["A"],
+        validators=multiplier_validators,
+        verbose_name="A 等级兑换倍率",
+    )
+    b_multiplier = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        default=DEFAULT_MULTIPLIERS["B"],
+        validators=multiplier_validators,
+        verbose_name="B 等级兑换倍率",
+    )
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        """Model metadata."""
+
+        verbose_name = "开发者等级商城折扣"
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        """Return a concise admin label."""
+        return "开发者等级商城折扣配置"
+
+    def save(self, *args, **kwargs):
+        """Keep the configuration as a single well-known row."""
+        self.pk = self.SINGLETON_PK
+        super().save(*args, **kwargs)
+
+    def multiplier_for_tier(self, tier: str | None) -> Decimal:
+        """Return the configured multiplier, or full price for an ineligible tier."""
+        field_name = self.MULTIPLIER_FIELDS.get(tier or "")
+        return Decimal(getattr(self, field_name)) if field_name else Decimal("1.00")
 
 
 class ShopItem(models.Model):
@@ -169,6 +253,30 @@ class Redemption(models.Model):
     )
     points_cost_at_redemption = models.PositiveIntegerField(
         verbose_name="兑换时积分成本"
+    )
+    original_points_cost_at_redemption = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="兑换时原始积分成本",
+        help_text="折扣前的商品积分价格快照；历史记录可能为空",
+    )
+    discount_tier = models.CharField(  # noqa: DJ001
+        max_length=3,
+        null=True,
+        blank=True,
+        verbose_name="兑换时开发者等级",
+    )
+    discount_tier_year = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="兑换时等级年份",
+    )
+    discount_multiplier = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="兑换时折扣倍率",
     )
     status = models.CharField(
         max_length=10, choices=StatusChoices.choices, default=StatusChoices.PENDING

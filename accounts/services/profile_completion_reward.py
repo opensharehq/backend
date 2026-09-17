@@ -40,6 +40,20 @@ TIER_POINTS = {
 TIER_LABELS = ["SSS", "SS", "S", "A", "B", "C", "D"]
 
 
+def _openrank_cache_key(user) -> str:
+    """Build a cache key that is not reused when a database user ID is recycled."""
+    joined_at = getattr(user, "date_joined", None)
+    joined_token = (
+        int(joined_at.timestamp() * 1_000_000) if joined_at is not None else "unknown"
+    )
+    return f"{OPENRANK_CACHE_PREFIX}:{user.id}:{joined_token}"
+
+
+def invalidate_cached_reward(user) -> None:
+    """Invalidate cached yearly tier data after social-account changes."""
+    cache.delete(_openrank_cache_key(user))
+
+
 def is_profile_complete(user) -> tuple[bool, list[str]]:
     """
     Check whether a user's profile information is complete.
@@ -204,7 +218,7 @@ def calculate_reward_points(user) -> dict:
 
     """
     # Check cache for user openrank data
-    openrank_cache_key = f"{OPENRANK_CACHE_PREFIX}:{user.id}"
+    openrank_cache_key = _openrank_cache_key(user)
     cached_result = cache.get(openrank_cache_key)
     if cached_result is not None:
         # Backward compatibility: old cache stored a plain int. Wrap it.

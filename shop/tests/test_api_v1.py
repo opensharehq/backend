@@ -1,5 +1,8 @@
 """Tests for shop API endpoints."""
 
+from decimal import Decimal
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
@@ -9,7 +12,12 @@ from config.api_common import ApiError
 from points.models import PointType, PointWallet, Tag
 from points.services import grant_points
 from shop.api_v1 import _raise_redemption_api_error
-from shop.models import CouponCode, Redemption, ShopItem
+from shop.models import (
+    CouponCode,
+    DeveloperTierDiscountConfig,
+    Redemption,
+    ShopItem,
+)
 
 
 class ShopApiV1Tests(TestCase):
@@ -116,6 +124,94 @@ class ShopApiV1Tests(TestCase):
             history_payload["items"][0]["item"]["name_zh"], self.item.name_zh
         )
         self.assertEqual(history_payload["pagination"]["total_items"], 1)
+
+    @patch("shop.pricing.calculate_reward_points")
+    def test_item_endpoints_return_user_specific_discount(self, mock_tier):
+        """List and detail prices include the authenticated user's tier discount."""
+        mock_tier.return_value = {
+            "points": 200,
+            "highest_level": "SSS",
+            "highest_level_year": 2025,
+        }
+        DeveloperTierDiscountConfig.objects.update_or_create(
+            pk=DeveloperTierDiscountConfig.SINGLETON_PK,
+            defaults={"sss_multiplier": Decimal("0.80")},
+        )
+
+        list_response = self.client.get("/api/v1/shop/items", **self.headers)
+        detail_response = self.client.get(
+            f"/api/v1/shop/items/{self.item.id}", **self.headers
+        )
+
+        self.assertEqual(list_response.status_code, 200)
+        list_item = next(
+            item for item in list_response.json()["items"] if item["id"] == self.item.id
+        )
+        for payload in (list_item, detail_response.json()):
+            self.assertEqual(payload["original_cost"], 100)
+            self.assertEqual(payload["cost"], 80)
+            self.assertEqual(payload["discount_tier"], "SSS")
+            self.assertEqual(payload["discount_tier_year"], 2025)
+            self.assertEqual(payload["discount_multiplier"], 0.8)
+
+    @patch("shop.pricing.calculate_reward_points")
+    def test_redemption_recalculates_and_snapshots_discount(self, mock_tier):
+        """The service charges its own discounted price and records its inputs."""
+        mock_tier.return_value = {
+            "points": 200,
+            "highest_level": "SSS",
+            "highest_level_year": 2025,
+        }
+
+        response = self.client.post(
+            "/api/v1/shop/redemptions",
+            {"item_id": self.item.id, "expected_points_cost": 80},
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["points_cost"], 80)
+        self.assertEqual(payload["item"]["original_cost"], 100)
+        self.assertEqual(payload["item"]["cost"], 80)
+        self.assertEqual(
+            payload["payment_lines"],
+            [{"point_type": "gift", "tag_slug": None, "amount": 80}],
+        )
+        redemption = Redemption.objects.get(item=self.item, user_profile=self.user)
+        self.assertEqual(redemption.points_cost_at_redemption, 80)
+        self.assertEqual(redemption.original_points_cost_at_redemption, 100)
+        self.assertEqual(redemption.discount_tier, "SSS")
+        self.assertEqual(redemption.discount_tier_year, 2025)
+        self.assertEqual(redemption.discount_multiplier, Decimal("0.80"))
+
+    @patch("shop.pricing.calculate_reward_points")
+    def test_redemption_rejects_stale_displayed_price(self, mock_tier):
+        """A stale or manipulated client price cannot be silently charged."""
+        mock_tier.return_value = {
+            "points": 200,
+            "highest_level": "SSS",
+            "highest_level_year": 2025,
+        }
+
+        response = self.client.post(
+            "/api/v1/shop/redemptions",
+            {"item_id": self.item.id, "expected_points_cost": 90},
+            content_type="application/json",
+            **self.headers,
+        )
+
+        payload = self._assert_api_error(
+            response,
+            status_code=409,
+            code="price_changed",
+            message="The item price has changed. Refresh the item and confirm again.",
+        )
+        self.assertEqual(payload["detail"]["current_points_cost"], 80)
+        self.assertFalse(
+            Redemption.objects.filter(item=self.item, user_profile=self.user).exists()
+        )
 
     def test_items_are_independently_listed_and_redeemable_by_frontend(self):
         """Each frontend should see and redeem only its configured products."""

@@ -12,6 +12,11 @@ from points import services as points_services
 from points.models import PointType
 
 from .models import Redemption, RedemptionPaymentLine, ShopItem
+from .pricing import (
+    UserTierDiscount,
+    calculate_shop_item_pricing,
+    resolve_user_tier_discount,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +96,7 @@ def send_redemption_message(item, user, coupon, lang="zh"):
     )
 
 
-@transaction.atomic
-def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
+def redeem_item(  # noqa: PLR0913
     user,
     item_id: int,
     frontend_site: FrontendSite | str | None = FrontendSite.CN,
@@ -102,6 +106,38 @@ def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
     tag_slug=None,
     use_untagged_gift=False,
     use_cash=False,
+    expected_points_cost=None,
+) -> dict:
+    """Resolve external tier data before entering the atomic redemption block."""
+    discount_context = resolve_user_tier_discount(user)
+    return _redeem_item_atomic(
+        user=user,
+        item_id=item_id,
+        frontend_site=frontend_site,
+        shipping_address_id=shipping_address_id,
+        lang=lang,
+        point_type=point_type,
+        tag_slug=tag_slug,
+        use_untagged_gift=use_untagged_gift,
+        use_cash=use_cash,
+        expected_points_cost=expected_points_cost,
+        discount_context=discount_context,
+    )
+
+
+@transaction.atomic
+def _redeem_item_atomic(  # noqa: C901, PLR0912, PLR0913, PLR0915
+    user,
+    item_id: int,
+    frontend_site: FrontendSite | str | None,
+    shipping_address_id,
+    lang,
+    point_type,
+    tag_slug,
+    use_untagged_gift,
+    use_cash,
+    expected_points_cost,
+    discount_context: UserTierDiscount,
 ) -> dict:
     """
     执行商品兑换的核心业务逻辑.
@@ -118,6 +154,8 @@ def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
         tag_slug (str, optional): 指定使用的标签积分 slug (仅 point_type="gift" 时有效).
         use_untagged_gift (bool): 标签积分不足时是否使用无标签礼物积分补足.
         use_cash (bool): 礼物积分不足时是否使用现金积分补足.
+        expected_points_cost (int, optional): 客户端展示的积分价格, 用于防止静默改价.
+        discount_context: 进入事务前解析出的后端可信折扣资格.
 
     Returns:
         dict: 包含 redemption 和 coupon_code 的字典.
@@ -159,6 +197,11 @@ def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
             item.name_zh,
             item.id,
         )
+        raise RedemptionError(msg)
+
+    pricing = calculate_shop_item_pricing(item.cost, discount_context)
+    if expected_points_cost is not None and int(expected_points_cost) != pricing.cost:
+        msg = f"商品积分价格已变化：当前需要 {pricing.cost}"
         raise RedemptionError(msg)
 
     # 兑换码领取
@@ -233,7 +276,11 @@ def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
     redemption = Redemption.objects.create(
         user_profile=user,
         item=item,
-        points_cost_at_redemption=item.cost,
+        points_cost_at_redemption=pricing.cost,
+        original_points_cost_at_redemption=pricing.original_cost,
+        discount_tier=pricing.tier,
+        discount_tier_year=pricing.tier_year,
+        discount_multiplier=pricing.multiplier,
         status=Redemption.StatusChoices.PENDING,
         shipping_address=shipping_address,
         point_type=point_type,
@@ -244,7 +291,7 @@ def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
     try:
         point_transactions = points_services.spend_points_with_fallback(
             owner=user,
-            amount=item.cost,
+            amount=pricing.cost,
             primary_point_type=point_type,
             description=f"兑换商品: {item.name_zh}",
             tag_slug=resolved_tag_slug,
@@ -311,7 +358,7 @@ def redeem_item(  # noqa: PLR0912, PLR0913, PLR0915
         user.id,
         item.name_zh,
         item.id,
-        item.cost,
+        pricing.cost,
         point_type,
         redemption.id,
     )

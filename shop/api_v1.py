@@ -23,6 +23,13 @@ from config.api_common import (
 from points import services as points_services
 
 from .models import CouponCode, Redemption, ShopItem
+from .pricing import (
+    FULL_PRICE_MULTIPLIER,
+    ShopItemPricing,
+    calculate_shop_item_pricing,
+    full_price,
+    resolve_user_tier_discount,
+)
 from .services import RedemptionError, redeem_item
 
 router = Router(tags=["shop"], auth=jwt_bearer_auth)
@@ -47,6 +54,7 @@ class RedemptionCreateSchema(Schema):
     tag_slug: str | None = None
     use_untagged_gift: bool = False
     use_cash: bool = False
+    expected_points_cost: int | None = None
 
 
 class ShopItemAllowedTagSchema(Schema):
@@ -85,6 +93,10 @@ class ShopItemSchema(Schema):
     description_zh: str
     description_en: str
     cost: int
+    original_cost: int
+    discount_tier: str | None = None
+    discount_tier_year: int | None = None
+    discount_multiplier: float
     stock: int | None = None
     priority: int
     is_active: bool
@@ -162,7 +174,9 @@ def _batch_coupon_stock(items: list[ShopItem]) -> dict[str, int]:
 
 
 def _serialize_shop_item(
-    item: ShopItem, stock_map: dict[str, int] | None = None
+    item: ShopItem,
+    stock_map: dict[str, int] | None = None,
+    pricing: ShopItemPricing | None = None,
 ) -> dict:
     """
     Serialize a ShopItem to dict.
@@ -175,6 +189,9 @@ def _serialize_shop_item(
     else:
         stock = _get_dynamic_stock(item)
 
+    if pricing is None:
+        pricing = full_price(item.cost)
+
     allowed_tags = list(item.allowed_tags.all())
     return {
         "id": item.id,
@@ -184,7 +201,11 @@ def _serialize_shop_item(
         "brief_en": item.brief_en,
         "description_zh": item.description_zh,
         "description_en": item.description_en,
-        "cost": item.cost,
+        "cost": pricing.cost,
+        "original_cost": pricing.original_cost,
+        "discount_tier": pricing.tier,
+        "discount_tier_year": pricing.tier_year,
+        "discount_multiplier": float(pricing.multiplier),
         "stock": stock,
         "priority": item.priority,
         "is_active": item.is_active,
@@ -209,12 +230,28 @@ def _serialize_redemption(
     coupon_code: str | None = None,
     stock_map: dict[str, int] | None = None,
 ) -> dict:
+    original_cost = (
+        redemption.original_points_cost_at_redemption
+        if redemption.original_points_cost_at_redemption is not None
+        else redemption.points_cost_at_redemption
+    )
+    pricing = ShopItemPricing(
+        original_cost=original_cost,
+        cost=redemption.points_cost_at_redemption,
+        tier=redemption.discount_tier,
+        tier_year=redemption.discount_tier_year,
+        multiplier=redemption.discount_multiplier or FULL_PRICE_MULTIPLIER,
+    )
     return {
         "id": redemption.id,
         "status": redemption.status,
         "points_cost": redemption.points_cost_at_redemption,
         "created_at": redemption.created_at.isoformat(),
-        "item": _serialize_shop_item(redemption.item, stock_map=stock_map),
+        "item": _serialize_shop_item(
+            redemption.item,
+            stock_map=stock_map,
+            pricing=pricing,
+        ),
         "shipping_address": (
             serialize_shipping_address(redemption.shipping_address)
             if redemption.shipping_address
@@ -274,6 +311,15 @@ def _raise_redemption_api_error(message: str) -> None:
         raise ApiError(
             "insufficient_points", 409, "Not enough points to redeem this item."
         )
+    price_match = re.match(r"^商品积分价格已变化：当前需要 (?P<cost>\d+)$", normalized)
+    if price_match:
+        current_cost = int(price_match.group("cost"))
+        raise ApiError(
+            "price_changed",
+            409,
+            "The item price has changed. Refresh the item and confirm again.",
+            detail={"current_points_cost": current_cost},
+        )
     if normalized == "只有礼物积分可以设置标签":
         raise ApiError(
             "invalid_point_type",
@@ -318,9 +364,17 @@ def shop_item_list_endpoint(request, page: int = 1, page_size: int = 20):
     )
     page_items = list(page_obj.object_list)
     stock_map = _batch_coupon_stock(page_items)
+    discount = resolve_user_tier_discount(request.auth)
     response = build_paginated_response(
         page_obj,
-        [_serialize_shop_item(item, stock_map=stock_map) for item in page_items],
+        [
+            _serialize_shop_item(
+                item,
+                stock_map=stock_map,
+                pricing=calculate_shop_item_pricing(item.cost, discount),
+            )
+            for item in page_items
+        ],
     )
     response["balance"] = points_services.get_detailed_balance_or_zero(request.auth)
     return response
@@ -340,7 +394,11 @@ def shop_item_detail_endpoint(request, item_id: int):
         _listed_items_for_request(request).prefetch_related("allowed_tags"),
         id=item_id,
     )
-    payload = _serialize_shop_item(item)
+    discount = resolve_user_tier_discount(request.auth)
+    payload = _serialize_shop_item(
+        item,
+        pricing=calculate_shop_item_pricing(item.cost, discount),
+    )
     if item.requires_shipping:
         payload["shipping_addresses"] = [
             serialize_shipping_address(address)
@@ -418,6 +476,7 @@ def redemption_create_endpoint(request, payload: RedemptionCreateSchema):
         "tag_slug": payload.tag_slug,
         "use_untagged_gift": payload.use_untagged_gift,
         "use_cash": payload.use_cash,
+        "expected_points_cost": payload.expected_points_cost,
     }
     if "lang" in inspect.signature(redeem_item).parameters:
         redeem_kwargs["lang"] = payload.lang

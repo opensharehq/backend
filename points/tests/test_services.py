@@ -1,7 +1,10 @@
 """Tests for points services."""
 
 from collections import defaultdict
+from unittest.mock import patch
 
+from django.db import connection
+from django.db.models.query import QuerySet
 from django.test import TestCase
 from django.utils import timezone
 
@@ -360,6 +363,29 @@ class SpendPointsTests(TestCase):
         self.assertEqual(
             services.get_balance(self.user, PointType.GIFT, tag_slug="event"), 50
         )
+
+    def test_spend_points_with_fallback_locks_only_point_sources(self):
+        """Nullable tag joins must not be included in PostgreSQL row locks."""
+        original_select_for_update = QuerySet.select_for_update
+        with (
+            patch.object(connection.features, "has_select_for_update_of", True),
+            patch.object(
+                QuerySet,
+                "select_for_update",
+                autospec=True,
+                side_effect=original_select_for_update,
+            ) as select_for_update,
+        ):
+            transactions = services.spend_points_with_fallback(
+                owner=self.user,
+                amount=50,
+                primary_point_type=PointType.GIFT,
+                description="PostgreSQL lock regression",
+            )
+
+        self.assertEqual(sum(abs(txn.amount) for txn in transactions), 50)
+        select_for_update.assert_called_once()
+        self.assertEqual(select_for_update.call_args.kwargs, {"of": ("self",)})
 
     def test_spend_points_fifo(self):
         """Test that points are spent in FIFO order."""

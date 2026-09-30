@@ -4,7 +4,7 @@ import logging
 from collections import defaultdict
 
 from django.contrib.contenttypes.models import ContentType
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
@@ -517,12 +517,20 @@ def spend_points_with_fallback(  # noqa: PLR0912, PLR0913, PLR0915
         else:
             eligible |= Q(point_type=PointType.GIFT, tag__isnull=True)
 
-    locked_sources = list(
-        wallet.sources.select_for_update()
-        .filter(eligible, remaining_amount__gt=0)
+    sources_queryset = (
+        wallet.sources.filter(eligible, remaining_amount__gt=0)
         .select_related("tag")
         .order_by("created_at", "id")
     )
+    if connection.features.has_select_for_update_of:
+        # ``tag`` is nullable, so PostgreSQL rejects an unrestricted FOR UPDATE
+        # on the LEFT OUTER JOIN introduced by select_related(). Only PointSource
+        # rows are mutated and therefore need to be locked.
+        sources_queryset = sources_queryset.select_for_update(of=("self",))
+    else:
+        sources_queryset = sources_queryset.select_for_update()
+
+    locked_sources = list(sources_queryset)
     sources_by_bucket: dict[tuple[str, str | None], list[PointSource]] = defaultdict(
         list
     )

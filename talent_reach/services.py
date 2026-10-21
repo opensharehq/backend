@@ -588,10 +588,11 @@ def _reading_reward_lots(recipient):
     return lots
 
 
-def claim_reading_reward(user, user_message_id: int) -> dict | None:
+def claim_reading_reward(user, user_message_id: int) -> dict | None:  # noqa: PLR0911
     """
     Claim reading reward when a user marks an outreach message as read.
 
+    Keep each eligibility/funding guard explicit before mutating the claim.
     Returns reward info dict or None if not applicable.
     """
     try:
@@ -617,9 +618,21 @@ def claim_reading_reward(user, user_message_id: int) -> dict | None:
         recipient.save(update_fields=["reward_expired"])
         return None
 
+    try:
+        funding_lots = _reading_reward_lots(recipient)
+    except ValueError as exc:
+        # Preserve the unclaimed reward for a retry after funding is reconciled.
+        logger.error(
+            "触达奖励对账失败，跳过发放: campaign_id=%s recipient_id=%s: %s",
+            campaign.pk,
+            recipient.pk,
+            exc,
+        )
+        return None
+
     lots = [
         (source, amount)
-        for source, amount in _reading_reward_lots(recipient)
+        for source, amount in funding_lots
         if source.expires_at is None or source.expires_at > timezone.now()
     ]
     granted_amount = sum(amount for _, amount in lots)

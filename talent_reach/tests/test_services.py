@@ -11,8 +11,8 @@ from social_django.models import UserSocialAuth
 
 from messages.models import Message, UserMessage
 from messages.services import send_message
-from points.models import PointType
-from points.services import grant_points, spend_points
+from points.models import PointTransaction, PointType
+from points.services import get_balance, grant_points, spend_points
 from talent_reach.models import OutreachCampaign, OutreachDraft, OutreachRecipient
 from talent_reach.services import (
     _largest_remainder_allocation,
@@ -746,3 +746,57 @@ class TestClaimReadingReward(TestCase):
         self.campaign.refresh_from_db()
         self.assertEqual(self.campaign.read_count, 1)
         self.assertEqual(self.campaign.rewarded_count, 1)
+
+    def test_reconciliation_failure_leaves_reward_unclaimed(self):
+        """Invalid funding must neither issue points nor consume the claim."""
+        initial_transactions = PointTransaction.objects.count()
+        valid_funding = {
+            "reference_id": self.campaign.reference_id,
+            "total_cost": self.campaign.total_cost,
+            "reward_pool": self.campaign.reward_pool,
+        }
+        for field, invalid_value in (
+            ("reference_id", ""),
+            ("total_cost", 3),
+            ("reward_pool", 3),
+            ("reward_pool", 0),
+        ):
+            with self.subTest(field=field, value=invalid_value):
+                OutreachCampaign.objects.filter(pk=self.campaign.pk).update(
+                    **{**valid_funding, field: invalid_value}
+                )
+                with self.assertLogs("talent_reach.services", level="ERROR") as logs:
+                    result = claim_reading_reward(
+                        self.recipient_user, self.user_message.pk
+                    )
+                self.assertIsNone(result)
+                self.assertIn(f"campaign_id={self.campaign.pk}", logs.output[0])
+                self.assertIn(
+                    f"recipient_id={self.recipient_record.pk}", logs.output[0]
+                )
+                self.recipient_record.refresh_from_db()
+                self.campaign.refresh_from_db()
+                self.assertFalse(self.recipient_record.is_rewarded)
+                self.assertFalse(self.recipient_record.reward_expired)
+                self.assertIsNone(self.recipient_record.rewarded_at)
+                self.assertEqual(self.campaign.read_count, 0)
+                self.assertEqual(self.campaign.rewarded_count, 0)
+                self.assertEqual(get_balance(self.recipient_user), 0)
+                self.assertEqual(PointTransaction.objects.count(), initial_transactions)
+
+    def test_grant_error_is_not_swallowed_and_rolls_back_claim(self):
+        """Only reconciliation errors are handled; ledger errors still roll back."""
+        with (
+            patch(
+                "talent_reach.services.grant_points",
+                side_effect=ValueError("ledger error"),
+            ),
+            self.assertRaisesMessage(ValueError, "ledger error"),
+        ):
+            claim_reading_reward(self.recipient_user, self.user_message.pk)
+        self.recipient_record.refresh_from_db()
+        self.campaign.refresh_from_db()
+        self.assertFalse(self.recipient_record.is_rewarded)
+        self.assertIsNone(self.recipient_record.rewarded_at)
+        self.assertEqual(self.campaign.rewarded_count, 0)
+        self.assertEqual(get_balance(self.recipient_user), 0)

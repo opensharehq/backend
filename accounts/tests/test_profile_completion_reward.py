@@ -293,7 +293,9 @@ class ProfileRewardApiTests(TestCase):
             "HTTP_AUTHORIZATION": f"Bearer {create_access_token(self.user)}"
         }
 
-    @patch("accounts.services.profile_completion_reward.calculate_reward_points")
+    # A spawned worker may import shop.pricing during this first API request.
+    # Mock data computation so that import cannot retain a temporary public-function mock.
+    @patch("accounts.services.profile_completion_reward._compute_reward_points")
     def test_api_profile_completion_reward_endpoint(self, mock_calc):
         """GET /api/v1/me/profile-completion-reward returns reward info."""
         mock_calc.return_value = {

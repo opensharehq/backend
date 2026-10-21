@@ -204,11 +204,8 @@ class ShenbianyunClient:
                 logger.error(msg)
                 raise ShenbianyunSignatureError(msg)
         else:
-            logger.warning(
-                "身边云响应缺少签名字段: reqId=%s, funCode=%s",
-                req_id,
-                fun_code,
-            )
+            msg = "身边云响应缺少签名字段"
+            raise ShenbianyunSignatureError(msg)
 
         # 2. Base64 解码
         try:
@@ -281,276 +278,241 @@ def _generate_order_id():
     return f"{timestamp}{random_part}"
 
 
-def batch_payment():  # noqa: PLR0915
-    """批量付款定时任务: 从已批准的提现申请中取20条, 调用 6001 接口."""
-    from django.conf import settings
+def _reserve_payments():
+    """Claim withdrawals atomically; commit stable order IDs before external I/O."""
     from django.db import transaction
 
-    from points.models import WithdrawalRequest, WithdrawalStatus
+    from points.models import WithdrawalRefund, WithdrawalRequest, WithdrawalStatus
+    from points.services import WithdrawalError, get_withdrawal_debits
 
+    from .models import PaymentRecord
+
+    candidates = (
+        WithdrawalRequest.objects.filter(
+            status=WithdrawalStatus.APPROVED,
+        )
+        .exclude(pk__in=PaymentRecord.objects.values("withdrawal_request_id"))
+        .order_by("created_at", "pk")
+        .values_list("pk", flat=True)[:PAYMENT_BATCH_SIZE]
+    )
+    batch_id = _generate_batch_id()
+    records = []
+    for pk in list(candidates):
+        with transaction.atomic():
+            withdrawal = WithdrawalRequest.objects.select_for_update().get(pk=pk)
+            if (
+                withdrawal.status != WithdrawalStatus.APPROVED
+                or PaymentRecord.objects.filter(withdrawal_request=withdrawal).exists()
+                or WithdrawalRefund.objects.filter(withdrawal=withdrawal).exists()
+            ):
+                continue
+            try:
+                get_withdrawal_debits(withdrawal)
+            except WithdrawalError:
+                logger.error("拒绝未足额扣款的提现付款: withdrawal_id=%s", pk)
+                continue
+            records.append(
+                PaymentRecord.objects.create(
+                    mer_batch_id=batch_id,
+                    mer_order_id=f"osh-wd-{pk}",
+                    withdrawal_request=withdrawal,
+                    amount=withdrawal.amount * 10,
+                    payee_name=withdrawal.real_name,
+                    payee_acc=withdrawal.bank_account,
+                    id_card=withdrawal.id_card,
+                    mobile=withdrawal.phone,
+                )
+            )
+    return records
+
+
+def batch_payment():
+    """Submit reserved orders once; ambiguous responses remain reconcilable."""
     from .models import PaymentRecord, PaymentState
 
-    # 1. 获取已有PaymentRecord的提现申请ID，排除它们
-    existing_wr_ids = PaymentRecord.objects.values_list(
-        "withdrawal_request_id", flat=True
-    )
-
-    # 2. 查询最多20条已批准且未发起过付款的提现申请（按创建时间升序）
-    withdrawals = (
-        WithdrawalRequest.objects.filter(status=WithdrawalStatus.APPROVED)
-        .exclude(id__in=existing_wr_ids)
-        .select_related("withdrawal_account")
-        .order_by("created_at")[:PAYMENT_BATCH_SIZE]
-    )
-    withdrawals = list(withdrawals)
-
-    if not withdrawals:
+    # Validate configuration before claiming any business orders.
+    task_id, provider_id = int(settings.SBY_TASK_ID), int(settings.SBY_PROVIDER_ID)
+    records = _reserve_payments()
+    if not records:
         return {"batched": 0, "message": "无待付款的提现申请"}
-
-    # 3. 生成批次号
-    mer_batch_id = _generate_batch_id()
-
-    # 4. 构造 payItems 并预创建 PaymentRecord (state=INITIATED, order_no 暂为空)
-    #    预创建可保证：即使后续调用 6001 后本地崩溃，下次定时任务也不会因为提现
-    #    无 PaymentRecord 而被重复付款。
-    pay_items = []
-    order_id_map = {}  # mer_order_id -> withdrawal
-    record_map = {}  # mer_order_id -> PaymentRecord
-
-    for wr in withdrawals:
-        mer_order_id = _generate_order_id()
-        order_id_map[mer_order_id] = wr
-
-        # 收款人信息优先从 WithdrawalAccount 获取
-        if wr.withdrawal_account:
-            payee_name = wr.withdrawal_account.real_name
-            payee_acc = wr.withdrawal_account.bank_card
-            id_card = wr.withdrawal_account.id_card
-            mobile = wr.withdrawal_account.phone
-        else:
-            payee_name = wr.real_name
-            payee_acc = wr.bank_account
-            id_card = wr.id_card
-            mobile = wr.phone
-
-        amt = wr.amount * 10  # 积分值 * 10 = 分
-
-        pay_items.append(
+    batch_id = records[0].mer_batch_id
+    req_data = {
+        "merBatchId": batch_id,
+        "taskId": task_id,
+        "providerId": provider_id,
+        "payItems": [
             {
-                "merOrderId": mer_order_id,
-                "amt": amt,
-                "payeeName": payee_name,
-                "payeeAcc": payee_acc,
-                "idCard": id_card,
-                "mobile": mobile,
-                "paymentType": 0,  # 银行卡
+                "merOrderId": r.mer_order_id,
+                "amt": r.amount,
+                "payeeName": r.payee_name,
+                "payeeAcc": r.payee_acc,
+                "idCard": r.id_card,
+                "mobile": r.mobile,
+                "paymentType": r.payment_type,
                 "memo": f"OpenShare {datetime.now().year}",
             }
-        )
-
-        record = PaymentRecord.objects.create(
-            mer_batch_id=mer_batch_id,
-            mer_order_id=mer_order_id,
-            order_no="",
-            withdrawal_request=wr,
-            amount=amt,
-            fee=0,
-            state=PaymentState.INITIATED,
-            res_msg="",
-            payee_name=payee_name,
-            payee_acc=payee_acc,
-            id_card=id_card,
-            mobile=mobile,
-            payment_type=0,
-        )
-        record_map[mer_order_id] = record
-
-    # 5. 构造请求数据
-    req_data = {
-        "merBatchId": mer_batch_id,
-        "payItems": pay_items,
-        "taskId": int(settings.SBY_TASK_ID),
-        "providerId": int(settings.SBY_PROVIDER_ID),
+            for r in records
+        ],
     }
-
-    # 6. 发送请求
-    client = ShenbianyunClient()
+    record_map = {r.mer_order_id: r for r in records}
     try:
-        res_data = client.request(fun_code=FUN_CODE_BATCH_PAYMENT, req_data=req_data)
-    except Exception:
-        logger.exception("批量付款请求失败, mer_batch_id=%s", mer_batch_id)
-        # 整体请求失败：将这批预创建的 PaymentRecord 标记为 FAILED，
-        # 并将对应的 WithdrawalRequest 标记为 rejected。
-        for mer_order_id, record in record_map.items():
-            wr = order_id_map[mer_order_id]
-            with transaction.atomic():
-                record.state = PaymentState.FAILED
-                record.res_msg = "请求失败"
-                record.save(update_fields=["state", "res_msg", "updated_at"])
-                wr.status = WithdrawalStatus.REJECTED
-                wr.admin_note = "付款失败: 请求失败"
-                wr.save(update_fields=["status", "admin_note", "updated_at"])
-                # 退回已扣除的积分
-                from points.services import refund_withdrawal
-
-                refund_withdrawal(wr, reason="付款失败: 请求失败")
-        return {"batched": 0, "error": "请求失败"}
-
-    # 7. 解析响应，更新预创建的 PaymentRecord
-    res_data_inner = res_data.get("res_data") or {}
-    pay_result_list = res_data_inner.get("payResultList", [])
-    updated_count = 0
-
-    for result in pay_result_list:
-        mer_order_id = result.get("merOrderId", "")
-        record = record_map.get(mer_order_id)
-        if not record:
-            continue
-
-        # 找到对应的 pay_item 获取兜底金额
-        pay_item = next((p for p in pay_items if p["merOrderId"] == mer_order_id), None)
-        if not pay_item:
-            continue
-
-        record.order_no = str(result.get("orderNo", ""))
-        record.amount = result.get("amt", pay_item["amt"])
-        record.fee = result.get("fee", 0) or 0
-        record.res_msg = result.get("resMsg", "") or ""
-        record.save(
-            update_fields=["order_no", "amount", "fee", "res_msg", "updated_at"]
+        response = ShenbianyunClient().request(
+            fun_code=FUN_CODE_BATCH_PAYMENT,
+            req_data=req_data,
         )
-        updated_count += 1
+        results = (response.get("res_data") or {}).get("payResultList", [])
+        updated = 0
+        for result in results:
+            record = record_map.get(result.get("merOrderId"))
+            if not record:
+                continue
+            if result.get("amt", record.amount) != record.amount:
+                msg = "付款响应金额与申请不一致"
+                raise ShenbianyunResponseError(msg)
+            # Never overwrite a terminal state written by a concurrent poll.
+            updated += PaymentRecord.objects.filter(
+                pk=record.pk,
+                state__in=[PaymentState.INITIATED, PaymentState.UNKNOWN],
+            ).update(
+                order_no=str(result.get("orderNo") or ""),
+                fee=result.get("fee") or 0,
+                res_msg=result.get("resMsg") or "",
+            )
+        return {"batched": updated, "mer_batch_id": batch_id}
+    except Exception:
+        logger.exception("付款结果未知，保留扣款等待对账: mer_batch_id=%s", batch_id)
+        PaymentRecord.objects.filter(
+            pk__in=[r.pk for r in records],
+            state=PaymentState.INITIATED,
+        ).update(state=PaymentState.UNKNOWN, res_msg="请求结果未知，等待对账")
+        return {
+            "batched": 0,
+            "error": "请求结果未知，等待对账",
+            "mer_batch_id": batch_id,
+        }
 
-    logger.info(
-        "批量付款完成: mer_batch_id=%s, 提交=%d, 受理=%d",
-        mer_batch_id,
-        len(withdrawals),
-        updated_count,
-    )
-    return {"batched": updated_count, "mer_batch_id": mer_batch_id}
+
+def _find_payment_record(batch_id, item):
+    """Match only within the queried batch; empty platform IDs are not identities."""
+    from .models import PaymentRecord
+
+    records = PaymentRecord.objects.filter(mer_batch_id=batch_id)
+    merchant_id = item.get("merOrderId")
+    platform_id = str(item.get("orderNo") or "")
+    if merchant_id:
+        record = records.filter(mer_order_id=merchant_id).first()
+        if (
+            record
+            and platform_id
+            and record.order_no
+            and record.order_no != platform_id
+        ):
+            return None
+        return record
+    if platform_id:
+        matches = list(records.filter(order_no=platform_id)[:2])
+        if len(matches) == 1:
+            return matches[0]
+    return None
 
 
-def check_payment_status():  # noqa: PLR0915, PLR0912
-    """定时查询付款结果: 查询所有未完成的 PaymentRecord 状态."""
+def _settle_payment(record, item):
+    """Serialize terminal transitions and their ledger effects with the withdrawal."""
     from django.db import transaction
     from django.utils import timezone
 
-    from points.models import WithdrawalStatus
+    from points.models import WithdrawalRefund, WithdrawalRequest, WithdrawalStatus
+    from points.services import (
+        WithdrawalError,
+        get_withdrawal_debits,
+        refund_withdrawal,
+    )
 
     from .models import PaymentRecord, PaymentState
 
-    # 1. 查询未完成的记录（PENDING_CONFIRM 也纳入轮询，作为防御性兜底）
-    pending_records = PaymentRecord.objects.filter(
+    try:
+        state = int(item.get("state"))
+    except (ValueError, TypeError):
+        return False
+    if state not in PaymentState.values or state == PaymentState.UNKNOWN:
+        return False
+    terminal = (PaymentState.SUCCESS, PaymentState.FAILED, PaymentState.CANCELLED)
+    with transaction.atomic():
+        withdrawal = WithdrawalRequest.objects.select_for_update().get(
+            pk=record.withdrawal_request_id,
+        )
+        record = PaymentRecord.objects.select_for_update().get(pk=record.pk)
+        if record.state in terminal:
+            return False
+        if (
+            withdrawal.status != WithdrawalStatus.APPROVED
+            or WithdrawalRefund.objects.filter(withdrawal=withdrawal).exists()
+        ):
+            logger.error("付款与提现状态冲突，需要人工对账: payment_id=%s", record.pk)
+            return False
+        get_withdrawal_debits(withdrawal)
+        if item.get("amt", record.amount) != record.amount:
+            msg = "付款查询金额与申请不一致"
+            raise WithdrawalError(msg)
+        record.state = state
+        record.order_no = str(item.get("orderNo") or record.order_no)
+        record.res_msg = item.get("resMsg") or ""
+        record.fee = item.get("fee") or 0
+        record.user_fee = item.get("userFee") or 0
+        record.user_due_amt = item.get("userDueAmt") or 0
+        if item.get("endTime"):
+            try:
+                record.end_time = timezone.make_aware(
+                    datetime.strptime(item["endTime"], "%Y-%m-%d %H:%M:%S")
+                )
+            except (ValueError, TypeError):
+                pass
+        if state == PaymentState.SUCCESS:
+            withdrawal.status = WithdrawalStatus.COMPLETED
+            withdrawal.processed_at = timezone.now()
+            withdrawal.save(update_fields=["status", "processed_at", "updated_at"])
+        elif state in (PaymentState.FAILED, PaymentState.CANCELLED):
+            refund_withdrawal(withdrawal, reason=f"付款失败: {record.res_msg}")
+        record.save()
+        return state in terminal
+
+
+def check_payment_status():
+    """Keep querying unknown results; only definitive failures may refund points."""
+    from .models import PaymentRecord, PaymentState
+
+    pending = PaymentRecord.objects.filter(
         state__in=[
             PaymentState.INITIATED,
+            PaymentState.UNKNOWN,
             PaymentState.PAYING,
             PaymentState.PENDING_CONFIRM,
         ]
     )
-
-    if not pending_records.exists():
+    batch_ids = list(pending.values_list("mer_batch_id", flat=True).distinct())
+    if not batch_ids:
         return {"checked": 0, "message": "无待查询的付款记录"}
-
-    # 2. 去重获取批次号
-    batch_ids = list(pending_records.values_list("mer_batch_id", flat=True).distinct())
-
-    client = ShenbianyunClient()
-    total_updated = 0
-
-    # 3. 逐批次查询
-    for mer_batch_id in batch_ids:
+    total = 0
+    for batch_id in batch_ids:
         try:
-            res_data = client.request(
+            response = ShenbianyunClient().request(
                 fun_code=FUN_CODE_PAYMENT_QUERY,
-                req_data={"merBatchId": mer_batch_id},
+                req_data={"merBatchId": batch_id},
             )
-        except Exception:
-            logger.exception("付款状态查询失败, mer_batch_id=%s", mer_batch_id)
-            continue
-
-        # 4. 解析 queryItems
-        res_data_inner = res_data.get("res_data") or {}
-        query_items = res_data_inner.get("queryItems", [])
-        if not isinstance(query_items, list):
-            query_items = [query_items] if query_items else []
-
-        for item in query_items:
-            order_no = str(item.get("orderNo", ""))
-            state = item.get("state")
-            if state is None:
-                continue
-
-            state = int(state)
-
-            # 通过 mer_batch_id + order_no 定位记录
-            try:
-                record = PaymentRecord.objects.get(
-                    mer_batch_id=mer_batch_id, order_no=order_no
-                )
-            except PaymentRecord.DoesNotExist:
-                # 也尝试通过 merOrderId 匹配
-                mer_order_id = item.get("merOrderId", "")
-                try:
-                    record = PaymentRecord.objects.get(mer_order_id=mer_order_id)
-                except PaymentRecord.DoesNotExist:
-                    logger.warning(
-                        "未找到付款记录: mer_batch_id=%s, order_no=%s",
-                        mer_batch_id,
-                        order_no,
-                    )
+            items = (response.get("res_data") or {}).get("queryItems", [])
+            if not isinstance(items, list):
+                items = [items] if items else []
+            for item in items:
+                if not isinstance(item, dict):
                     continue
-                # 回写 order_no 便于后续按平台订单号检索
-                if order_no and not record.order_no:
-                    record.order_no = order_no
-
-            # 5. 更新 PaymentRecord 状态和详细信息
-            record.state = state
-            record.res_msg = item.get("resMsg", "") or ""
-            record.fee = item.get("fee", 0) or 0
-            record.user_fee = item.get("userFee", 0) or 0
-            record.user_due_amt = item.get("userDueAmt", 0) or 0
-
-            end_time_str = item.get("endTime")
-            if end_time_str:
-                try:
-                    record.end_time = timezone.datetime.strptime(
-                        end_time_str, "%Y-%m-%d %H:%M:%S"
-                    )
-                except (ValueError, TypeError):
-                    pass
-
-            # 6. 终态时同步更新提现申请，事务保护避免出现 PaymentRecord
-            #    与 WithdrawalRequest 状态不一致的中间态。
-            wr = record.withdrawal_request
-            if state == PaymentState.SUCCESS:
-                with transaction.atomic():
-                    record.save()
-                    wr.status = WithdrawalStatus.COMPLETED
-                    wr.processed_at = timezone.now()
-                    wr.save(update_fields=["status", "processed_at", "updated_at"])
-                total_updated += 1
-            elif state in (PaymentState.FAILED, PaymentState.CANCELLED):
-                with transaction.atomic():
-                    record.save()
-                    wr.status = WithdrawalStatus.REJECTED
-                    fail_reason = (
-                        f"付款失败: {record.res_msg}" if record.res_msg else "付款失败"
-                    )
-                    wr.admin_note = fail_reason
-                    wr.save(update_fields=["status", "admin_note", "updated_at"])
-                    # 退回已扣除的积分
-                    from points.services import refund_withdrawal
-
-                    refund_withdrawal(wr, reason=fail_reason)
-                total_updated += 1
-            else:
-                # 非终态 (PAYING / PENDING_CONFIRM) 仅保存状态变更
-                record.save()
-
-    logger.info(
-        "付款状态查询完成: 批次数=%d, 状态更新=%d", len(batch_ids), total_updated
-    )
-    return {"checked": len(batch_ids), "updated": total_updated}
+                record = _find_payment_record(batch_id, item)
+                if record:
+                    total += _settle_payment(record, item)
+        except Exception:
+            logger.exception(
+                "付款查询/结算失败，保留状态等待对账: mer_batch_id=%s", batch_id
+            )
+    return {"checked": total}
 
 
 def get_signed_users(  # noqa: PLR0913, PLR0912

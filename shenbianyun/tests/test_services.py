@@ -183,3 +183,11 @@ class ShenbianyunClientTests(TestCase):
         with patch("shenbianyun.services.requests.post", side_effect=fake_post):
             with self.assertRaises(ShenbianyunResponseError):
                 self.client.request("FUN001", {"name": "test"})
+
+    def test_response_without_signature_is_rejected(self):
+        response = _build_platform_response(
+            {"queryItems": []}, self.platform_private, "test-request", "6002"
+        )
+        del response["sign"]
+        with self.assertRaises(ShenbianyunSignatureError):
+            self.client._process_response(response, "test-request", "6002")

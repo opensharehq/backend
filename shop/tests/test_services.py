@@ -21,6 +21,18 @@ class RedeemItemServiceTests(TestCase):
         self.user = get_user_model().objects.create_user(
             username="testuser", email="test@example.com", password="password123"
         )
+        # These tests exercise full-price ledger behavior. Tier resolution has
+        # separate tests; keep cached/external contribution data out of fixtures.
+        self.enterContext(
+            patch(
+                "shop.pricing.calculate_reward_points",
+                return_value={
+                    "points": 0,
+                    "highest_level": None,
+                    "highest_level_year": None,
+                },
+            )
+        )
         # Grant gift points for redemption tests
         points_services.grant_points(self.user, 10000, PointType.GIFT, "Test points")
 

@@ -66,4 +66,16 @@ class PaymentRecordAdmin(admin.ModelAdmin):
     ]
     list_filter = ["state"]
     search_fields = ["mer_batch_id", "mer_order_id", "order_no"]
-    readonly_fields = ["mer_batch_id", "mer_order_id", "order_no", "withdrawal_request"]
+    readonly_fields = [field.name for field in PaymentRecord._meta.fields]
+
+    def has_add_permission(self, request):
+        """Payment identities may only be reserved by the payment service."""
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """Only verified provider results may change settlement state."""
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """Keep dispatch evidence so a withdrawal cannot be submitted again."""
+        return False

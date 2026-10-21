@@ -17,6 +17,7 @@ from .models import (
     PointWallet,
     Tag,
     TransactionType,
+    WithdrawalRefund,
     WithdrawalRequest,
     WithdrawalStatus,
 )
@@ -132,10 +133,14 @@ def get_detailed_balance(owner: User | Organization) -> dict:
     cash_balance = wallet.get_cash_balance()
 
     # 获取礼物积分（按标签分组）
-    gift_sources = wallet.sources.filter(
-        point_type=PointType.GIFT,
-        remaining_amount__gt=0,
-    ).select_related("tag")
+    gift_sources = (
+        wallet.sources.available()
+        .filter(
+            point_type=PointType.GIFT,
+            remaining_amount__gt=0,
+        )
+        .select_related("tag")
+    )
 
     gift_total = 0
     by_tag = defaultdict(int)
@@ -175,10 +180,14 @@ def get_detailed_balance_or_zero(owner: User | Organization) -> dict:
 
     # Mirror get_detailed_balance while keeping the call read-only.
     cash_balance = wallet.get_cash_balance()
-    gift_sources = wallet.sources.filter(
-        point_type=PointType.GIFT,
-        remaining_amount__gt=0,
-    ).select_related("tag")
+    gift_sources = (
+        wallet.sources.available()
+        .filter(
+            point_type=PointType.GIFT,
+            remaining_amount__gt=0,
+        )
+        .select_related("tag")
+    )
 
     gift_total = 0
     by_tag = defaultdict(int)
@@ -313,11 +322,13 @@ def _get_available_balance(
         return wallet.get_gift_balance(tag_slug=tag_slug)
     if point_type == PointType.GIFT and tag_is_null:
         return (
-            wallet.sources.filter(
+            wallet.sources.available()
+            .filter(
                 point_type=PointType.GIFT,
                 remaining_amount__gt=0,
                 tag__isnull=True,
-            ).aggregate(total=Sum("remaining_amount"))["total"]
+            )
+            .aggregate(total=Sum("remaining_amount"))["total"]
             or 0
         )
     if point_type == PointType.CASH:
@@ -331,10 +342,14 @@ def _get_spend_sources_queryset(
     tag_slug: str | None,
     tag_is_null: bool,
 ):
-    sources_queryset = wallet.sources.filter(
-        point_type=point_type,
-        remaining_amount__gt=0,
-    ).order_by("created_at")
+    sources_queryset = (
+        wallet.sources.available()
+        .filter(
+            point_type=point_type,
+            remaining_amount__gt=0,
+        )
+        .order_by("created_at")
+    )
 
     if tag_slug:
         return sources_queryset.filter(tag__slug=tag_slug)
@@ -518,7 +533,8 @@ def spend_points_with_fallback(  # noqa: PLR0912, PLR0913, PLR0915
             eligible |= Q(point_type=PointType.GIFT, tag__isnull=True)
 
     sources_queryset = (
-        wallet.sources.filter(eligible, remaining_amount__gt=0)
+        wallet.sources.available()
+        .filter(eligible, remaining_amount__gt=0)
         .select_related("tag")
         .order_by("created_at", "id")
     )
@@ -798,6 +814,14 @@ def complete_withdrawal(
         msg = f"提现申请状态无效: {withdrawal.get_status_display()}"
         raise WithdrawalError(msg)
 
+    get_withdrawal_debits(withdrawal)
+    if WithdrawalRefund.objects.filter(withdrawal=withdrawal).exists():
+        msg = "已退款的提现不能完成"
+        raise WithdrawalError(msg)
+    if withdrawal.paymentrecord_set.exists():
+        msg = "已进入自动付款流程，请等待平台对账"
+        raise WithdrawalError(msg)
+
     withdrawal.status = WithdrawalStatus.COMPLETED
     if note:
         withdrawal.admin_note = f"{withdrawal.admin_note}\n{note}".strip()
@@ -861,59 +885,80 @@ def reject_withdrawal(
     return withdrawal
 
 
+def get_withdrawal_debits(withdrawal: WithdrawalRequest) -> list[PointTransaction]:
+    """Require the complete, immutable debit evidence before paying or refunding."""
+    debits = list(
+        PointTransaction.objects.filter(
+            wallet_id=withdrawal.wallet_id,
+            reference_id=f"withdrawal:{withdrawal.pk}",
+            transaction_type=TransactionType.SPEND,
+            point_type=PointType.CASH,
+        ).select_related("source")
+    )
+    if (
+        not debits
+        or withdrawal.transaction_id not in {entry.pk for entry in debits}
+        or sum(-entry.amount for entry in debits) != withdrawal.amount
+        or any(
+            entry.amount >= 0
+            or entry.source is None
+            or entry.source.wallet_id != withdrawal.wallet_id
+            or entry.source.point_type != PointType.CASH
+            for entry in debits
+        )
+    ):
+        msg = "提现申请缺少足额、有效的扣款流水"
+        raise WithdrawalError(msg)
+    return debits
+
+
 @transaction.atomic
-def refund_withdrawal(withdrawal: WithdrawalRequest, reason: str = "") -> None:
-    """
-    提现付款失败时退回已扣除的积分.
-
-    仅适用于已批准(积分已扣除)但付款失败的提现申请.
-    通过创建新的 PointSource 将积分退回用户钱包,并记录 REFUND 类型的交易.
-
-    Args:
-        withdrawal: WithdrawalRequest 实例(必须是 APPROVED 状态)
-        reason: 退回原因
-
-    """
+def refund_withdrawal(withdrawal: WithdrawalRequest, reason: str = "") -> bool:
+    """Refund a debited withdrawal exactly once, preserving each lot's expiry."""
+    withdrawal = WithdrawalRequest.objects.select_for_update().get(pk=withdrawal.pk)
+    reference = f"refund:withdrawal:{withdrawal.pk}"
+    if WithdrawalRefund.objects.filter(withdrawal=withdrawal).exists():
+        return False
+    # Historical refunds predate the unique event table. Never issue them again.
+    if PointSource.objects.filter(
+        wallet_id=withdrawal.wallet_id, reference_id=reference
+    ).exists():
+        WithdrawalRefund.objects.create(withdrawal=withdrawal)
+        return False
+    if withdrawal.status != WithdrawalStatus.APPROVED:
+        msg = "只有已扣款且尚未结算的提现可以退款"
+        raise WithdrawalError(msg)
+    debits = get_withdrawal_debits(withdrawal)
+    WithdrawalRefund.objects.create(withdrawal=withdrawal)
     wallet = withdrawal.wallet
-    amount = withdrawal.amount
     refund_reason = reason or f"提现付款失败退回 (#{withdrawal.id})"
-
-    # 创建新的积分来源，将积分退回钱包
-    source = PointSource.objects.create(
-        wallet=wallet,
-        point_type=PointType.CASH,
-        tag=None,
-        original_amount=amount,
-        remaining_amount=amount,
-        reason=refund_reason,
-        reference_id=f"refund:withdrawal:{withdrawal.id}",
-        expires_at=None,
-        created_by=None,
+    for debit in debits:
+        source = PointSource.objects.create(
+            wallet=wallet,
+            point_type=PointType.CASH,
+            original_amount=-debit.amount,
+            remaining_amount=-debit.amount,
+            reason=refund_reason,
+            reference_id=reference,
+            expires_at=debit.source.expires_at,
+        )
+        PointTransaction.objects.create(
+            wallet=wallet,
+            transaction_type=TransactionType.REFUND,
+            point_type=PointType.CASH,
+            amount=-debit.amount,
+            balance_after=wallet.get_cash_balance(),
+            description=refund_reason,
+            reference_id=reference,
+            source=source,
+        )
+    withdrawal.status = WithdrawalStatus.REJECTED
+    withdrawal.admin_note = refund_reason
+    withdrawal.processed_at = timezone.now()
+    withdrawal.save(
+        update_fields=["status", "admin_note", "processed_at", "updated_at"]
     )
-
-    # 获取新余额
-    balance_after = wallet.get_cash_balance()
-
-    # 创建 REFUND 类型的交易记录
-    PointTransaction.objects.create(
-        wallet=wallet,
-        transaction_type=TransactionType.REFUND,
-        point_type=PointType.CASH,
-        amount=amount,
-        balance_after=balance_after,
-        description=refund_reason,
-        reference_id=f"refund:withdrawal:{withdrawal.id}",
-        source=source,
-        tag=None,
-        created_by=None,
-    )
-
-    logger.info(
-        "提现退款成功: withdrawal_id=%s, amount=%s, wallet_id=%s",
-        withdrawal.id,
-        amount,
-        wallet.id,
-    )
+    return True
 
 
 @transaction.atomic

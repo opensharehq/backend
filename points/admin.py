@@ -391,6 +391,9 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         "bank_account",
         "invoice_file",
         "withdrawal_account",
+        "status",
+        "processed_by",
+        "processed_at",
         "transaction",
         "created_at",
         "updated_at",
@@ -486,7 +489,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         """Disable add permission - use user interface to create withdrawals."""
         return False
 
-    @admin.action(description="批准选中的提现申请")
+    @admin.action(description="批准选中的提现申请", permissions=["change"])
     def approve_selected(self, request, queryset):
         """Approve selected withdrawal requests."""
         success_count = 0
@@ -503,7 +506,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         if success_count:
             self.message_user(request, f"成功批准 {success_count} 个提现申请")
 
-    @admin.action(description="拒绝选中的提现申请")
+    @admin.action(description="拒绝选中的提现申请", permissions=["change"])
     def reject_selected(self, request, queryset):
         """Reject selected withdrawal requests."""
         success_count = 0
@@ -520,7 +523,7 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
         if success_count:
             self.message_user(request, f"成功拒绝 {success_count} 个提现申请")
 
-    @admin.action(description="完成选中的提现申请")
+    @admin.action(description="完成选中的提现申请", permissions=["change"])
     def complete_selected(self, request, queryset):
         """Complete selected withdrawal requests."""
         success_count = 0
@@ -540,7 +543,11 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
 
 def grant_points_to_users_view(request):
     """给选中的用户发放积分."""
-    if not request.user.is_staff:
+    if not (
+        request.user.is_active
+        and request.user.is_staff
+        and request.user.has_perm("points.grant_points")
+    ):
         return HttpResponseForbidden()
 
     # Import here to avoid circular dependency
@@ -610,7 +617,11 @@ def grant_points_to_users_view(request):
 
 def grant_points_to_orgs_view(request):
     """给选中的组织发放积分."""
-    if not request.user.is_staff:
+    if not (
+        request.user.is_active
+        and request.user.is_staff
+        and request.user.has_perm("points.grant_points")
+    ):
         return HttpResponseForbidden()
 
     # Import here to avoid circular dependency

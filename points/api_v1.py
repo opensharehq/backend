@@ -368,11 +368,15 @@ def _resolve_source_pool(
             404,
             "The requested point pool was not found.",
         )
-    sources = PointSource.objects.filter(
-        wallet=wallet,
-        point_type=selector.point_type,
-        remaining_amount__gt=0,
-    ).select_related("wallet__content_type", "tag")
+    sources = (
+        PointSource.objects.available()
+        .filter(
+            wallet=wallet,
+            point_type=selector.point_type,
+            remaining_amount__gt=0,
+        )
+        .select_related("wallet__content_type", "tag")
+    )
 
     if selector.point_type == PointType.GIFT:
         if selector.tag_slug is None:
@@ -934,7 +938,8 @@ def point_pools_endpoint(request):
         if wallet is None:
             continue
         rows = (
-            PointSource.objects.filter(wallet=wallet, remaining_amount__gt=0)
+            PointSource.objects.available()
+            .filter(wallet=wallet)
             .values("point_type", "tag__slug", "tag__name")
             .annotate(available_balance=Sum("remaining_amount"), first_id=Min("id"))
             .order_by("point_type", "tag__slug")

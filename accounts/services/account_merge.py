@@ -14,6 +14,7 @@ from accounts.models import (
     AccountMergeLog,
     AccountMergeRequest,
     OrganizationMembership,
+    ProfileRewardIdentity,
     ShippingAddress,
     UserProfile,
 )
@@ -217,6 +218,7 @@ def _deactivate_source(source, target):
     source.save(update_fields=["is_active", "merged_into"])
 
 
+@transaction.atomic
 def merge_users(
     source,
     target,
@@ -228,6 +230,14 @@ def merge_users(
     if source.pk == target.pk:
         msg = "不能合并到自己的账号"
         raise AccountMergeError(msg)
+    # Use the same user lock as reward issuance, in a stable order.
+    locked_users = {
+        u.pk: u
+        for u in User.objects.select_for_update()
+        .filter(pk__in=[source.pk, target.pk])
+        .order_by("pk")
+    }
+    source, target = locked_users[source.pk], locked_users[target.pk]
     if source.is_staff or source.is_superuser:
         msg = "不允许合并管理员账号"
         raise AccountMergeError(msg)
@@ -241,6 +251,24 @@ def merge_users(
         msg = "不允许合并到管理员账号"
         raise AccountMergeError(msg)
 
+    from .profile_completion_reward import has_claimed_reward
+
+    rewarded = False
+    for account in (source, target):
+        if has_claimed_reward(account):
+            rewarded = True
+            for identity in UserSocialAuth.objects.filter(user=account):
+                ProfileRewardIdentity.objects.get_or_create(
+                    provider=identity.provider,
+                    uid=str(identity.uid),
+                    defaults={"claimed_by": account},
+                )
+    if rewarded:
+        profile, _ = UserProfile.objects.get_or_create(user=target)
+        UserProfile.objects.filter(pk=profile.pk).update(
+            profile_completion_rewarded=True
+        )
+
     _migrate_social_accounts(merge_request, source, target)
     _migrate_redemptions(merge_request, source, target)
     _migrate_shipping_addresses(merge_request, source, target)
@@ -252,10 +280,8 @@ def merge_users(
 @transaction.atomic
 def perform_merge(request_obj: AccountMergeRequest) -> AccountMergeRequest:
     """Execute merge steps inside a single transaction."""
-    merge_request = (
-        AccountMergeRequest.objects.select_for_update()
-        .select_related("source_user", "target_user")
-        .get(pk=request_obj.pk)
+    merge_request = AccountMergeRequest.objects.select_for_update().get(
+        pk=request_obj.pk
     )
 
     if merge_request.status == AccountMergeRequest.Status.ACCEPTED:
@@ -276,16 +302,8 @@ def perform_merge(request_obj: AccountMergeRequest) -> AccountMergeRequest:
         msg = "合并请求已被处理，无法再次执行"
         raise AccountMergeError(msg)
 
-    source = (
-        User.objects.select_for_update()
-        .select_related("profile")
-        .get(pk=merge_request.source_user_id)
-    )
-    target = (
-        User.objects.select_for_update()
-        .select_related("profile")
-        .get(pk=merge_request.target_user_id)
-    )
+    source = merge_request.source_user
+    target = merge_request.target_user
 
     merge_users(source, target, merge_request=merge_request)
 

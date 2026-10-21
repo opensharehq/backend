@@ -10,7 +10,10 @@ from datetime import date
 
 import requests
 from django.core.cache import cache
+from django.db import IntegrityError, transaction
+from django.db.models import Q
 
+from accounts.models import ProfileRewardIdentity, User, UserProfile
 from chdb.services import query_user_yearly_openrank
 from points.models import PointSource, PointWallet
 from points.services import grant_points
@@ -117,7 +120,13 @@ def has_claimed_reward(user) -> bool:
 
     """
     # Fast path: check the denormalized flag on the profile
-    if user.profile.profile_completion_rewarded:
+    if UserProfile.objects.filter(user=user, profile_completion_rewarded=True).exists():
+        return True
+
+    identities = Q(pk__isnull=True)
+    for provider, uid in _get_user_platform_ids(user):
+        identities |= Q(provider=provider, uid=uid)
+    if ProfileRewardIdentity.objects.filter(identities).exists():
         return True
 
     # Fallback: query PointSource by reference_id
@@ -148,7 +157,7 @@ def _get_user_platform_ids(user) -> list[tuple[str, str]]:
         provider = auth.provider  # e.g. 'github', 'gitee'
         uid = str(auth.uid)
         platform_ids.append((provider, uid))
-    return platform_ids
+    return sorted(platform_ids)
 
 
 def _fetch_baseline_tiers() -> dict | None:
@@ -329,30 +338,50 @@ def grant_profile_completion_reward(user) -> dict | None:
     """
     # Step 1: Check profile completeness
     complete, _missing = is_profile_complete(user)
-    if not complete:
+    if not complete or has_claimed_reward(user):
         return None
 
-    # Step 2: Check if already claimed
-    if has_claimed_reward(user):
-        return None
-
-    # Step 3: Calculate reward points
+    # Compute externally before taking database locks. Discard a stale result
+    # if bindings change while the contribution provider is being queried.
+    identities = _get_user_platform_ids(user)
     points = calculate_reward_points(user)["points"]
     if points <= 0:
         return None
 
-    # Step 4: Grant points
-    grant_points(
-        owner=user,
-        amount=points,
-        point_type="gift",
-        reason="Profile completion reward",
-        reference_id=f"profile_completion_reward:{user.id}",
-    )
-
-    # Step 5: Mark profile as rewarded
+    try:
+        with transaction.atomic():
+            locked_user = User.objects.select_for_update().get(pk=user.pk)
+            if (
+                not locked_user.is_active
+                or locked_user.merged_into_id
+                or identities != _get_user_platform_ids(locked_user)
+                or has_claimed_reward(locked_user)
+                or not is_profile_complete(locked_user)[0]
+            ):
+                return None
+            claimed = UserProfile.objects.filter(
+                user=locked_user, profile_completion_rewarded=False
+            ).update(profile_completion_rewarded=True)
+            if not claimed:
+                return None
+            # The unique identity keys also guard against concurrent relinking.
+            for provider, uid in identities:
+                ProfileRewardIdentity.objects.create(
+                    provider=provider, uid=uid, claimed_by=locked_user
+                )
+            grant_points(
+                owner=locked_user,
+                amount=points,
+                point_type="gift",
+                reason="Profile completion reward",
+                reference_id=f"profile_completion_reward:{user.id}",
+            )
+    except IntegrityError:
+        # The competing identity claim won; all local writes have rolled back.
+        if has_claimed_reward(user):
+            return None
+        raise
     user.profile.profile_completion_rewarded = True
-    user.profile.save(update_fields=["profile_completion_rewarded"])
 
     return {"rewarded": True, "points": points}
 

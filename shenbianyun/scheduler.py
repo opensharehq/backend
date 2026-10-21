@@ -33,16 +33,10 @@ def _distributed_lock(name: str, timeout: int):
     """
     cache = caches["scheduler_lock"]
     key = f"{_LOCK_PREFIX}{name}"
-    acquired = cache.add(key, _NODE_ID, timeout)
-    try:
-        yield acquired
-    finally:
-        if acquired:
-            try:
-                cache.delete(key)
-            except Exception:
-                # 锁释放失败不影响业务, TTL 会兜底
-                logger.warning("释放分布式锁失败: %s", key, exc_info=True)
+    # A lease expires naturally. A get-then-delete release is not atomic and
+    # could delete a successor's lease after this task outlives its TTL.
+    # Jobs run less often than their TTL, so early release is unnecessary.
+    yield cache.add(key, _NODE_ID, timeout)
 
 
 def sync_signed_users_job():

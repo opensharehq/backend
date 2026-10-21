@@ -63,6 +63,7 @@ class PaymentState(models.IntegerChoices):
     """身边云付款记录状态枚举."""
 
     INITIATED = 0, "已发起"
+    UNKNOWN = -1, "结果未知，待对账"
     PAYING = 1, "付款中"
     SUCCESS = 3, "成功"
     FAILED = 4, "失败"
@@ -124,6 +125,11 @@ class PaymentRecord(models.Model):
 
         verbose_name = "付款记录"
         verbose_name_plural = "付款记录"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["withdrawal_request"], name="unique_withdrawal_payment"
+            )
+        ]
         indexes = [
             models.Index(fields=["mer_batch_id", "order_no"]),
             models.Index(fields=["state"]),

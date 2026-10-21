@@ -4,6 +4,7 @@ from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from django.utils import timezone
 
 
 class PointType(models.TextChoices):
@@ -147,16 +148,18 @@ class PointWallet(models.Model):
     def get_cash_balance(self):
         """获取现金积分余额."""
         return (
-            self.sources.filter(
+            self.sources.available()
+            .filter(
                 point_type=PointType.CASH,
                 remaining_amount__gt=0,
-            ).aggregate(total=models.Sum("remaining_amount"))["total"]
+            )
+            .aggregate(total=models.Sum("remaining_amount"))["total"]
             or 0
         )
 
     def get_gift_balance(self, tag_slug=None, tag_is_null=False):
         """获取礼物积分余额, 可按标签筛选或仅统计无标签积分."""
-        queryset = self.sources.filter(
+        queryset = self.sources.available().filter(
             point_type=PointType.GIFT,
             remaining_amount__gt=0,
         )
@@ -169,6 +172,17 @@ class PointWallet(models.Model):
     def get_total_balance(self):
         """获取总积分余额."""
         return self.get_cash_balance() + self.get_gift_balance()
+
+
+class PointSourceQuerySet(models.QuerySet):
+    """Shared eligibility rule for balances and every spending path."""
+
+    def available(self, at=None):
+        """Exclude depleted and expired lots, including the expiry instant."""
+        return self.filter(remaining_amount__gt=0).filter(
+            models.Q(expires_at__isnull=True)
+            | models.Q(expires_at__gt=at or timezone.now())
+        )
 
 
 class PointSource(models.Model):
@@ -220,12 +234,15 @@ class PointSource(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
 
+    objects = PointSourceQuerySet.as_manager()
+
     class Meta:
         """Model metadata."""
 
         verbose_name = "积分来源"
         verbose_name_plural = verbose_name
         ordering = ["created_at"]
+        permissions = [("grant_points", "Can grant points to users and organizations")]
         indexes = [
             models.Index(fields=["wallet", "point_type", "remaining_amount"]),
             models.Index(fields=["expires_at"]),
@@ -398,6 +415,15 @@ class WithdrawalRequest(models.Model):
     def __str__(self):
         """Return string representation."""
         return f"提现申请 #{self.id}: {self.amount} ({self.get_status_display()})"
+
+
+class WithdrawalRefund(models.Model):
+    """Unique settlement event; all refund lots are written in its transaction."""
+
+    withdrawal = models.OneToOneField(
+        WithdrawalRequest, on_delete=models.PROTECT, related_name="refund_event"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class PendingPointGrant(models.Model):

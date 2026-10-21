@@ -12,7 +12,7 @@ from social_django.models import UserSocialAuth
 from messages.models import Message, UserMessage
 from messages.services import send_message
 from points.models import PointType
-from points.services import grant_points
+from points.services import grant_points, spend_points
 from talent_reach.models import OutreachCampaign, OutreachDraft, OutreachRecipient
 from talent_reach.services import (
     _largest_remainder_allocation,
@@ -637,6 +637,17 @@ class TestClaimReadingReward(TestCase):
             reward_expiry_days=30,
             total_recipients=1,
             status=OutreachCampaign.Status.COMPLETED,
+        )
+
+        self.campaign.reference_id = f"outreach_{self.campaign.pk}"
+        self.campaign.save(update_fields=["reference_id"])
+        grant_points(self.author, 2, PointType.CASH, "campaign funding")
+        spend_points(
+            self.author,
+            2,
+            PointType.CASH,
+            "campaign debit",
+            reference_id=self.campaign.reference_id,
         )
 
         # Create a message and user_message

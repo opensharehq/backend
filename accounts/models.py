@@ -9,6 +9,26 @@ from django.db.models import Q
 from .email_addresses import normalize_email_address
 
 
+class ProfileRewardIdentity(models.Model):
+    """Permanent reward eligibility marker, surviving unlinking and user deletion."""
+
+    provider = models.CharField(max_length=32)
+    uid = models.CharField(max_length=255)
+    claimed_by = models.ForeignKey(
+        "User", null=True, on_delete=models.SET_NULL, related_name="reward_identities"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        """One reward per stable contribution identity."""
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider", "uid"], name="unique_profile_reward_identity"
+            )
+        ]
+
+
 class User(AbstractUser):
     """Custom user model extending AbstractUser."""
 

@@ -61,7 +61,11 @@ class UserAdmin(BaseUserAdmin):
 
         return services.get_balance(obj)
 
-    @admin.action(description="发放积分")
+    def has_grant_permission(self, request):
+        """Restrict issuance to the explicit points permission."""
+        return request.user.has_perm("points.grant_points")
+
+    @admin.action(description="发放积分", permissions=["grant"])
     def grant_points_action(self, request, queryset):
         """给选中的用户发放积分."""
         selected = queryset.values_list("id", flat=True)
@@ -379,7 +383,11 @@ class OrganizationAdmin(admin.ModelAdmin):
         """Display count of organization members."""
         return obj.memberships.count()
 
-    @admin.action(description="发放积分")
+    def has_grant_permission(self, request):
+        """Restrict issuance to the explicit points permission."""
+        return request.user.has_perm("points.grant_points")
+
+    @admin.action(description="发放积分", permissions=["grant"])
     def grant_points_action(self, request, queryset):
         """给选中的组织发放积分."""
         selected = queryset.values_list("id", flat=True)

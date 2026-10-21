@@ -8,15 +8,15 @@ import time
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import OperationalError, close_old_connections, transaction
-from django.db.models import F, QuerySet
+from django.db import OperationalError, close_old_connections, connection, transaction
+from django.db.models import F, QuerySet, Sum
 from django.utils import timezone
 from social_django.models import UserSocialAuth
 
 from chdb.services import query_developers_for_outreach
 from messages.models import Message, UserMessage
 from messages.services import send_message
-from points.models import PointType
+from points.models import PointTransaction, PointType, TransactionType
 from points.services import grant_points, spend_points
 
 from .models import OutreachCampaign, OutreachDraft, OutreachRecipient
@@ -425,6 +425,12 @@ def send_outreach(
     return campaign
 
 
+def _close_worker_connection():
+    """Do not close a transaction borrowed by the synchronous caller."""
+    if not connection.in_atomic_block:
+        close_old_connections()
+
+
 def _send_outreach_async(
     campaign: OutreachCampaign,
     developers: list[dict],
@@ -438,7 +444,7 @@ def _send_outreach_async(
     RETRY_DELAY = 0.5  # seconds
 
     try:
-        close_old_connections()
+        _close_worker_connection()
 
         # Defensive check: abort early if no recipients resolved
         if not recipient_users:
@@ -518,7 +524,7 @@ def _send_outreach_async(
                         campaign.id,
                     )
                     time.sleep(RETRY_DELAY * (attempt + 1))
-                    close_old_connections()
+                    _close_worker_connection()
                 else:
                     raise
 
@@ -527,12 +533,59 @@ def _send_outreach_async(
         campaign.status = OutreachCampaign.Status.FAILED
         campaign.save(update_fields=["status"])
     finally:
-        close_old_connections()
+        _close_worker_connection()
 
 
 # ---------------------------------------------------------------------------
 # Reading reward
 # ---------------------------------------------------------------------------
+
+
+def _reading_reward_lots(recipient):
+    """Map each recipient to a disjoint slice of the actual funding debits."""
+    campaign = recipient.campaign
+    debits = list(
+        PointTransaction.objects.filter(
+            reference_id=campaign.reference_id,
+            transaction_type=TransactionType.SPEND,
+            point_type=campaign.point_type,
+            amount__lt=0,
+        )
+        .select_related("source")
+        .order_by("id")
+    )
+    if (
+        not campaign.reference_id
+        or sum(-d.amount for d in debits) != campaign.total_cost
+        or any(d.source is None for d in debits)
+    ):
+        msg = "触达奖励缺少有效的扣款来源，需要人工核对"
+        raise ValueError(msg)
+    offset = (
+        campaign.recipient_records.filter(pk__lt=recipient.pk).aggregate(
+            total=Sum("reward_amount")
+        )["total"]
+        or 0
+    )
+    remaining = recipient.reward_amount
+    if (
+        offset + remaining > campaign.reward_pool
+        or campaign.reward_pool > campaign.total_cost
+    ):
+        msg = "触达奖励超过已扣款的奖励池"
+        raise ValueError(msg)
+    lots = []
+    for debit in debits:
+        amount = -debit.amount
+        skip = min(offset, amount)
+        offset -= skip
+        take = min(amount - skip, remaining)
+        if take:
+            lots.append((debit.source, take))
+            remaining -= take
+        if not remaining:
+            break
+    return lots
 
 
 def claim_reading_reward(user, user_message_id: int) -> dict | None:
@@ -549,19 +602,31 @@ def claim_reading_reward(user, user_message_id: int) -> dict | None:
         return None
 
     # Already rewarded or expired
-    if recipient.is_rewarded or recipient.reward_expired:
+    if (
+        recipient.is_rewarded
+        or recipient.reward_expired
+        or recipient.reward_amount <= 0
+    ):
         return None
 
     # Check expiry
     campaign = recipient.campaign
     expiry_date = campaign.created_at + timedelta(days=campaign.reward_expiry_days)
-    if timezone.now() > expiry_date:
+    if timezone.now() >= expiry_date:
         recipient.reward_expired = True
         recipient.save(update_fields=["reward_expired"])
         return None
 
-    # Zero reward amount means no reward to grant
-    if recipient.reward_amount <= 0:
+    lots = [
+        (source, amount)
+        for source, amount in _reading_reward_lots(recipient)
+        if source.expires_at is None or source.expires_at > timezone.now()
+    ]
+    granted_amount = sum(amount for _, amount in lots)
+    if not granted_amount:
+        OutreachRecipient.objects.filter(pk=recipient.pk, is_rewarded=False).update(
+            reward_expired=True
+        )
         return None
 
     # Atomically claim the reward by conditionally updating is_rewarded.
@@ -578,13 +643,16 @@ def claim_reading_reward(user, user_message_id: int) -> dict | None:
             return None
 
         # Grant points inside the transaction so it rolls back on failure
-        grant_points(
-            owner=user,
-            amount=recipient.reward_amount,
-            point_type=campaign.point_type,
-            reason=f"Outreach reading reward: {campaign.title}",
-            reference_id=f"outreach_reward_{campaign.id}",
-        )
+        for source, amount in lots:
+            grant_points(
+                owner=user,
+                amount=amount,
+                point_type=campaign.point_type,
+                tag_slug=campaign.tag_slug or None,
+                expires_at=source.expires_at,
+                reason=f"Outreach reading reward: {campaign.title}",
+                reference_id=f"outreach_reward_{campaign.id}",
+            )
 
         # Update campaign counters atomically
         OutreachCampaign.objects.filter(id=campaign.id).update(
@@ -593,7 +661,7 @@ def claim_reading_reward(user, user_message_id: int) -> dict | None:
         )
 
     return {
-        "reward_amount": recipient.reward_amount,
+        "reward_amount": granted_amount,
         "point_type": campaign.point_type,
     }
 

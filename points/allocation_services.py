@@ -19,6 +19,7 @@ from .models import (
 )
 from .services import (
     InsufficientPointsError,
+    _get_spend_sources_queryset,
     get_wallet_or_none,
     grant_points,
     spend_points,
@@ -323,44 +324,56 @@ class AllocationService:
     def _apply_allocation_items(
         allocation: PointAllocation, allocations: list[dict]
     ) -> dict:
-        success_count = 0
-        pending_count = 0
-        failed_count = 0
-        total_points = 0
-        pending_buffer: list[PendingPointGrant] = []
-
+        """Transfer actual FIFO lots, retaining each lot's restrictions."""
+        source = allocation.source_pool
+        lots = [
+            [lot, lot.remaining_amount]
+            for lot in _get_spend_sources_queryset(
+                source.wallet,
+                source.point_type,
+                source.tag.slug if source.tag else None,
+                source.point_type == PointType.GIFT and source.tag is None,
+            ).select_for_update()
+        ]
+        stats = {"success": 0, "pending": 0, "failed": 0, "total_points": 0}
+        pending_buffer = []
         for item in allocations:
             amount = item["amount"]
             if amount <= 0:
                 continue
-
+            remaining = amount
+            portions = []
+            for lot, available in lots:
+                take = min(available, remaining)
+                if take:
+                    portions.append((lot, take))
+                    remaining -= take
+                if not remaining:
+                    break
+            if remaining:
+                msg = "可用积分不足，无法完成分配"
+                raise InsufficientPointsError(msg)
             if item["is_registered"] and item.get("user_id"):
-                success = AllocationService._grant_registered_points(
-                    allocation, item, amount
-                )
-                if success:
-                    success_count += 1
-                    total_points += amount
-                else:
-                    failed_count += 1
-                continue
-
-            pending_buffer.append(
-                AllocationService._build_pending_grant_instance(
-                    allocation, item, amount
-                )
-            )
-            pending_count += 1
-            total_points += amount
-
+                if not AllocationService._grant_registered_points(
+                    allocation, item, amount, funding_lots=portions
+                ):
+                    stats["failed"] += 1
+                    continue
+                stats["success"] += 1
+            else:
+                for lot, take in portions:
+                    pending_buffer.append(
+                        AllocationService._build_pending_grant_instance(
+                            allocation, item, take, funding_source=lot
+                        )
+                    )
+                stats["pending"] += 1
+            used = {lot.pk: take for lot, take in portions}
+            for entry in lots:
+                entry[1] -= used.get(entry[0].pk, 0)
+            stats["total_points"] += amount
         AllocationService._bulk_create_pending_grants(pending_buffer)
-
-        return {
-            "success": success_count,
-            "pending": pending_count,
-            "failed": failed_count,
-            "total_points": total_points,
-        }
+        return stats
 
     @staticmethod
     def _bulk_create_pending_grants(
@@ -419,27 +432,26 @@ class AllocationService:
 
     @staticmethod
     def _grant_registered_points(
-        allocation: PointAllocation, item: dict, amount: int
+        allocation: PointAllocation, item: dict, amount: int, *, funding_lots=None
     ) -> bool:
         try:
             from accounts.models import User
 
             user = User.objects.get(id=item["user_id"])
-            grant_points(
-                owner=user,
-                amount=amount,
-                point_type=allocation.source_pool.point_type,
-                reason=(
-                    f"贡献度奖励 ({allocation.start_month} - {allocation.end_month})"
-                ),
-                tag_slug=(
-                    allocation.source_pool.tag.slug
-                    if allocation.source_pool.tag
-                    else None
-                ),
-                reference_id=f"allocation_{allocation.id}",
-                created_by=None,
-            )
+            with transaction.atomic():
+                for source, portion in funding_lots or [
+                    (allocation.source_pool, amount)
+                ]:
+                    grant_points(
+                        owner=user,
+                        amount=portion,
+                        point_type=source.point_type,
+                        reason=f"贡献度奖励 ({allocation.start_month} - {allocation.end_month})",
+                        tag_slug=source.tag.slug if source.tag else None,
+                        expires_at=source.expires_at,
+                        reference_id=f"allocation_{allocation.id}",
+                        created_by=None,
+                    )
         except Exception:
             logger.exception(
                 "Failed to grant points for allocation %s to user %s",
@@ -451,7 +463,7 @@ class AllocationService:
 
     @staticmethod
     def _build_pending_grant_instance(
-        allocation: PointAllocation, item: dict, amount: int
+        allocation: PointAllocation, item: dict, amount: int, *, funding_source=None
     ) -> PendingPointGrant:
         """构建未持久化的 PendingPointGrant 实例,供批量写入复用."""
         platform = (item.get("platform") or "").strip()
@@ -462,15 +474,17 @@ class AllocationService:
             )
             raise ValueError(msg)
 
+        source = funding_source or allocation.source_pool
         return PendingPointGrant(
             platform=platform.lower(),
             actor_id=item.get("actor_id", ""),
             actor_login=item.get("actor_login", ""),
             email=item.get("email", ""),
             amount=amount,
-            point_type=allocation.source_pool.point_type,
+            point_type=source.point_type,
             reason=(f"贡献度奖励 ({allocation.start_month} - {allocation.end_month})"),
-            tag=allocation.source_pool.tag,
+            tag=source.tag,
+            expires_at=source.expires_at,
             reference_id=f"allocation_{allocation.id}",
             granter_type=allocation.initiator_type,
             granter_id=allocation.initiator_id,
@@ -605,6 +619,7 @@ class AllocationService:
             amount=grant.amount,
             point_type=grant.point_type,
             reason=grant.reason,
+            expires_at=grant.expires_at,
             tag_slug=grant.tag.slug if grant.tag else None,
             reference_id=grant.reference_id,
             created_by=None,
@@ -774,11 +789,15 @@ class AllocationService:
         if wallet is None:
             return 0
 
-        sources_queryset = PointSource.objects.filter(
-            wallet=wallet,
-            point_type=point_type,
-            remaining_amount__gt=0,
-        ).order_by("created_at", "id")
+        sources_queryset = (
+            PointSource.objects.available()
+            .filter(
+                wallet=wallet,
+                point_type=point_type,
+                remaining_amount__gt=0,
+            )
+            .order_by("created_at", "id")
+        )
 
         if point_type == PointType.GIFT:
             if tag_slug:

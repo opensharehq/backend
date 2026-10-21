@@ -223,6 +223,7 @@ class ShopItemAdmin(admin.ModelAdmin):
         "name_zh",
         "cost",
         "stock_display",
+        "max_redemptions_per_user",
         "priority",
         "is_active",
         "is_listed_on_cn",
@@ -283,6 +284,7 @@ class ShopItemAdmin(admin.ModelAdmin):
                 "fields": (
                     "cost",
                     "stock",
+                    "max_redemptions_per_user",
                     "priority",
                     "is_active",
                     "is_listed_on_cn",

@@ -132,6 +132,11 @@ class ShopItem(models.Model):
     stock = models.PositiveIntegerField(
         null=True, blank=True, verbose_name="库存", help_text="留空表示无限库存"
     )
+    max_redemptions_per_user = models.PositiveIntegerField(
+        default=0,
+        verbose_name="每用户最多兑换次数",
+        help_text="0 表示不限制；累计统计该用户处理中和已完成的兑换，已取消的不计入",
+    )
     priority = models.IntegerField(
         default=1,
         verbose_name="优先级",
@@ -242,6 +247,8 @@ class Redemption(models.Model):
         PENDING = "PENDING", "处理中"
         COMPLETED = "COMPLETED", "已完成"
         CANCELLED = "CANCELLED", "已取消"
+
+    LIMIT_COUNTING_STATUSES = (StatusChoices.PENDING, StatusChoices.COMPLETED)
 
     user_profile = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="redemptions"

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 
-from django.db.models import BooleanField, Case, Exists, OuterRef, Q, Value, When
+from django.db.models import BooleanField, Case, Count, Exists, OuterRef, Q, Value, When
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
 
@@ -98,6 +98,7 @@ class ShopItemSchema(Schema):
     discount_tier_year: int | None = None
     discount_multiplier: float
     stock: int | None = None
+    max_redemptions_per_user: int
     priority: int
     is_active: bool
     image_card_url: str | None = None
@@ -108,12 +109,17 @@ class ShopItemSchema(Schema):
     updated_at: str
 
 
-class ShopItemDetailSchema(ShopItemSchema):
+class ShopItemAvailabilitySchema(ShopItemSchema):
+    user_redemption_count: int
+    redemption_limit_reached: bool
+
+
+class ShopItemDetailSchema(ShopItemAvailabilitySchema):
     shipping_addresses: list[ShippingAddressSchema] | None = None
 
 
 class ShopItemListResponseSchema(Schema):
-    items: list[ShopItemSchema]
+    items: list[ShopItemAvailabilitySchema]
     pagination: PaginationSchema
     balance: DetailedBalanceSchema
 
@@ -160,8 +166,6 @@ def _batch_coupon_stock(items: list[ShopItem]) -> dict[str, int]:
     coupon_types = {item.coupon_type for item in items if item.coupon_type}
     if not coupon_types:
         return {}
-    from django.db.models import Count
-
     counts = (
         CouponCode.objects.filter(
             code_type__in=coupon_types,
@@ -171,6 +175,37 @@ def _batch_coupon_stock(items: list[ShopItem]) -> dict[str, int]:
         .annotate(available=Count("id"))
     )
     return {row["code_type"]: row["available"] for row in counts}
+
+
+def _batch_user_redemption_counts(items: list[ShopItem], user) -> dict[int, int]:
+    """Count this user's non-cancelled redemptions in one query for the page."""
+    counts = (
+        Redemption.objects.filter(
+            user_profile=user,
+            item_id__in=[item.id for item in items],
+            status__in=Redemption.LIMIT_COUNTING_STATUSES,
+        )
+        .values("item_id")
+        .annotate(total=Count("id"))
+    )
+    return {row["item_id"]: row["total"] for row in counts}
+
+
+def _serialize_shop_item_availability(
+    item: ShopItem,
+    redemption_count: int,
+    pricing: ShopItemPricing,
+    stock_map: dict[str, int] | None = None,
+) -> dict:
+    """Add the authenticated user's redemption availability to an item."""
+    return {
+        **_serialize_shop_item(item, stock_map=stock_map, pricing=pricing),
+        "user_redemption_count": redemption_count,
+        "redemption_limit_reached": (
+            item.max_redemptions_per_user > 0
+            and redemption_count >= item.max_redemptions_per_user
+        ),
+    }
 
 
 def _serialize_shop_item(
@@ -207,6 +242,7 @@ def _serialize_shop_item(
         "discount_tier_year": pricing.tier_year,
         "discount_multiplier": float(pricing.multiplier),
         "stock": stock,
+        "max_redemptions_per_user": item.max_redemptions_per_user,
         "priority": item.priority,
         "is_active": item.is_active,
         "image_card_url": item.image_card.url if item.image_card else None,
@@ -275,6 +311,12 @@ def _raise_redemption_api_error(message: str) -> None:
         raise ApiError("not_found", 404, "The requested item was not found.")
     if normalized == "该商品已下架。":
         raise ApiError("item_unavailable", 409, "This item is no longer available.")
+    if normalized == "已达兑换上限。":
+        raise ApiError(
+            "redemption_limit_reached",
+            409,
+            "You have reached the redemption limit for this item.",
+        )
     if normalized == "该商品已售罄。":
         raise ApiError("out_of_stock", 409, "This item is out of stock.")
     if normalized == "此商品需要收货地址。":
@@ -364,12 +406,14 @@ def shop_item_list_endpoint(request, page: int = 1, page_size: int = 20):
     )
     page_items = list(page_obj.object_list)
     stock_map = _batch_coupon_stock(page_items)
+    redemption_counts = _batch_user_redemption_counts(page_items, request.auth)
     discount = resolve_user_tier_discount(request.auth)
     response = build_paginated_response(
         page_obj,
         [
-            _serialize_shop_item(
+            _serialize_shop_item_availability(
                 item,
+                redemption_count=redemption_counts.get(item.id, 0),
                 stock_map=stock_map,
                 pricing=calculate_shop_item_pricing(item.cost, discount),
             )
@@ -395,8 +439,10 @@ def shop_item_detail_endpoint(request, item_id: int):
         id=item_id,
     )
     discount = resolve_user_tier_discount(request.auth)
-    payload = _serialize_shop_item(
+    redemption_counts = _batch_user_redemption_counts([item], request.auth)
+    payload = _serialize_shop_item_availability(
         item,
+        redemption_count=redemption_counts.get(item.id, 0),
         pricing=calculate_shop_item_pricing(item.cost, discount),
     )
     if item.requires_shipping:

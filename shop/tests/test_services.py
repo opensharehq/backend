@@ -164,10 +164,8 @@ class RedeemItemServiceTests(TestCase):
         stale_item_1 = ShopItem.objects.get(id=item.id)
         stale_item_2 = ShopItem.objects.get(id=item.id)
 
-        with patch(
-            "shop.services.ShopItem.objects.get",
-            side_effect=[stale_item_1, stale_item_2],
-        ):
+        with patch("shop.services.ShopItem.objects.select_for_update") as lock_items:
+            lock_items.return_value.get.side_effect = [stale_item_1, stale_item_2]
             redeem_item(user=self.user, item_id=item.id)
             try:
                 redeem_item(user=self.user, item_id=item.id)

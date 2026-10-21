@@ -29,6 +29,7 @@ class ShopItemAdminForm(forms.ModelForm):
             "image_detail",
             "cost",
             "stock",
+            "max_redemptions_per_user",
             "priority",
             "is_active",
             "is_listed_on_cn",

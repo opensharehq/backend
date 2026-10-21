@@ -182,7 +182,9 @@ def _redeem_item_atomic(  # noqa: C901, PLR0912, PLR0913, PLR0915
         raise RedemptionError(msg)
 
     try:
-        item = ShopItem.objects.get(id=item_id)
+        # Serialize redemptions for this item before counting, including when
+        # stock is unlimited or supplied by coupon codes.
+        item = ShopItem.objects.select_for_update().get(id=item_id)
     except ShopItem.DoesNotExist as err:
         msg = "商品不存在。"
         raise RedemptionError(msg) from err
@@ -198,6 +200,16 @@ def _redeem_item_atomic(  # noqa: C901, PLR0912, PLR0913, PLR0915
             item.id,
         )
         raise RedemptionError(msg)
+
+    if item.max_redemptions_per_user:
+        redemption_count = Redemption.objects.filter(
+            user_profile=user,
+            item=item,
+            status__in=Redemption.LIMIT_COUNTING_STATUSES,
+        ).count()
+        if redemption_count >= item.max_redemptions_per_user:
+            msg = "已达兑换上限。"
+            raise RedemptionError(msg)
 
     pricing = calculate_shop_item_pricing(item.cost, discount_context)
     if expected_points_cost is not None and int(expected_points_cost) != pricing.cost:

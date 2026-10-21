@@ -1,5 +1,7 @@
 """Integration tests for shop app workflows."""
 
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
@@ -14,6 +16,17 @@ class ShopRedemptionFlowTests(TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
+        # These workflows assert full-price debits; tier pricing is tested separately.
+        self.enterContext(
+            patch(
+                "shop.pricing.calculate_reward_points",
+                return_value={
+                    "points": 0,
+                    "highest_level": None,
+                    "highest_level_year": None,
+                },
+            )
+        )
         User = get_user_model()
         self.user = User.objects.create_user(
             username="testuser",

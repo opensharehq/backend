@@ -577,6 +577,59 @@ class PointsSecurityTests(TestCase):
             WithdrawalRefund.objects.filter(withdrawal=withdrawal).exists()
         )
 
+    def test_invalid_payment_end_time_warns_without_blocking_settlement(self):
+        for state in (PaymentState.SUCCESS, PaymentState.FAILED):
+            for index, invalid_time in enumerate(("invalid-time", 123456)):
+                with self.subTest(state=state, end_time=invalid_time):
+                    name = f"invalid_time_{state}_{index}"
+                    user, withdrawal = self.approved(name)
+                    record = self.record(withdrawal, name)
+                    previous_time = timezone.now() - timedelta(days=1)
+                    record.end_time = previous_time
+                    record.save(update_fields=["end_time"])
+                    with self.assertLogs(
+                        "shenbianyun.services", level="WARNING"
+                    ) as logs:
+                        settled = payments._settle_payment(
+                            record, {"state": state, "endTime": invalid_time}
+                        )
+                    self.assertTrue(settled)
+                    self.assertEqual(len(logs.records), 1)
+                    self.assertIn(f"payment_id={record.pk}", logs.output[0])
+                    record.refresh_from_db()
+                    withdrawal.refresh_from_db()
+                    self.assertEqual(record.end_time, previous_time)
+                    self.assertEqual(record.state, state)
+                    failed = state == PaymentState.FAILED
+                    self.assertEqual(
+                        withdrawal.status,
+                        WithdrawalStatus.REJECTED
+                        if failed
+                        else WithdrawalStatus.COMPLETED,
+                    )
+                    self.assertEqual(points.get_balance(user), 200 if failed else 0)
+                    self.assertEqual(
+                        WithdrawalRefund.objects.filter(withdrawal=withdrawal).count(),
+                        int(failed),
+                    )
+
+    def test_valid_payment_end_time_is_saved_as_aware_datetime(self):
+        _, withdrawal = self.approved("valid_time")
+        record = self.record(withdrawal, "valid_time")
+        with self.assertNoLogs("shenbianyun.services", level="WARNING"):
+            self.assertTrue(
+                payments._settle_payment(
+                    record,
+                    {"state": PaymentState.SUCCESS, "endTime": "2026-10-21 12:34:56"},
+                )
+            )
+        record.refresh_from_db()
+        self.assertTrue(timezone.is_aware(record.end_time))
+        self.assertEqual(
+            timezone.localtime(record.end_time).strftime("%Y-%m-%d %H:%M:%S"),
+            "2026-10-21 12:34:56",
+        )
+
     def test_payment_uses_frozen_withdrawal_account(self):
         user, withdrawal = self.approved("snapshot")
         account = WithdrawalAccount.objects.create(

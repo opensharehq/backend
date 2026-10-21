@@ -466,7 +466,12 @@ def _settle_payment(record, item):
                     datetime.strptime(item["endTime"], "%Y-%m-%d %H:%M:%S")
                 )
             except (ValueError, TypeError):
-                pass
+                # Optional provider metadata must not block a verified settlement.
+                # Keep any previously recorded time and log only our record ID.
+                logger.warning(
+                    "付款完成时间格式无效，保留原时间并继续结算: payment_id=%s",
+                    record.pk,
+                )
         if state == PaymentState.SUCCESS:
             withdrawal.status = WithdrawalStatus.COMPLETED
             withdrawal.processed_at = timezone.now()

@@ -72,8 +72,12 @@ def resolve_user_tier_discount(user) -> UserTierDiscount:
 def calculate_shop_item_pricing(
     original_cost: int,
     discount: UserTierDiscount,
+    *,
+    participates_in_tier_discount: bool = True,
 ) -> ShopItemPricing:
-    """Apply a multiplier to an integer point cost, always rounding upward."""
+    """Apply eligible tier discounts, rounding upward, or return the original price."""
+    if not participates_in_tier_discount:
+        discount = UserTierDiscount()
     effective_cost = int(
         (Decimal(original_cost) * discount.multiplier).to_integral_value(
             rounding=ROUND_CEILING

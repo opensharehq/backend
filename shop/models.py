@@ -129,6 +129,11 @@ class ShopItem(models.Model):
     )
 
     cost = models.PositiveIntegerField(verbose_name="所需积分")
+    participates_in_tier_discount = models.BooleanField(
+        default=True,
+        verbose_name="参与用户等级折扣",
+        help_text="默认参与；关闭后，所有用户均按原价展示和兑换该商品",
+    )
     stock = models.PositiveIntegerField(
         null=True, blank=True, verbose_name="库存", help_text="留空表示无限库存"
     )

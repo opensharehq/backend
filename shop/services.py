@@ -211,7 +211,11 @@ def _redeem_item_atomic(  # noqa: C901, PLR0912, PLR0913, PLR0915
             msg = "已达兑换上限。"
             raise RedemptionError(msg)
 
-    pricing = calculate_shop_item_pricing(item.cost, discount_context)
+    pricing = calculate_shop_item_pricing(
+        item.cost,
+        discount_context,
+        participates_in_tier_discount=item.participates_in_tier_discount,
+    )
     if expected_points_cost is not None and int(expected_points_cost) != pricing.cost:
         msg = f"商品积分价格已变化：当前需要 {pricing.cost}"
         raise RedemptionError(msg)

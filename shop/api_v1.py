@@ -97,6 +97,7 @@ class ShopItemSchema(Schema):
     discount_tier: str | None = None
     discount_tier_year: int | None = None
     discount_multiplier: float
+    participates_in_tier_discount: bool
     stock: int | None = None
     max_redemptions_per_user: int
     priority: int
@@ -241,6 +242,7 @@ def _serialize_shop_item(
         "discount_tier": pricing.tier,
         "discount_tier_year": pricing.tier_year,
         "discount_multiplier": float(pricing.multiplier),
+        "participates_in_tier_discount": item.participates_in_tier_discount,
         "stock": stock,
         "max_redemptions_per_user": item.max_redemptions_per_user,
         "priority": item.priority,
@@ -415,7 +417,11 @@ def shop_item_list_endpoint(request, page: int = 1, page_size: int = 20):
                 item,
                 redemption_count=redemption_counts.get(item.id, 0),
                 stock_map=stock_map,
-                pricing=calculate_shop_item_pricing(item.cost, discount),
+                pricing=calculate_shop_item_pricing(
+                    item.cost,
+                    discount,
+                    participates_in_tier_discount=item.participates_in_tier_discount,
+                ),
             )
             for item in page_items
         ],
@@ -443,7 +449,11 @@ def shop_item_detail_endpoint(request, item_id: int):
     payload = _serialize_shop_item_availability(
         item,
         redemption_count=redemption_counts.get(item.id, 0),
-        pricing=calculate_shop_item_pricing(item.cost, discount),
+        pricing=calculate_shop_item_pricing(
+            item.cost,
+            discount,
+            participates_in_tier_discount=item.participates_in_tier_discount,
+        ),
     )
     if item.requires_shipping:
         payload["shipping_addresses"] = [

@@ -222,6 +222,7 @@ class ShopItemAdmin(admin.ModelAdmin):
         "id",
         "name_zh",
         "cost",
+        "participates_in_tier_discount",
         "stock_display",
         "max_redemptions_per_user",
         "priority",
@@ -235,6 +236,7 @@ class ShopItemAdmin(admin.ModelAdmin):
         "updated_at",
     )
     list_filter = (
+        "participates_in_tier_discount",
         "is_active",
         "is_listed_on_cn",
         "is_listed_on_global",
@@ -283,6 +285,7 @@ class ShopItemAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     "cost",
+                    "participates_in_tier_discount",
                     "stock",
                     "max_redemptions_per_user",
                     "priority",

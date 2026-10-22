@@ -28,6 +28,7 @@ class ShopItemAdminForm(forms.ModelForm):
             "image_card",
             "image_detail",
             "cost",
+            "participates_in_tier_discount",
             "stock",
             "max_redemptions_per_user",
             "priority",

@@ -10,7 +10,7 @@ from accounts.models import ShippingAddress
 from accounts.services.jwt_tokens import create_access_token
 from config.api_common import ApiError
 from points.models import PointType, PointWallet, Tag
-from points.services import grant_points
+from points.services import get_balance, grant_points
 from shop.api_v1 import _raise_redemption_api_error
 from shop.models import (
     CouponCode,
@@ -148,11 +148,155 @@ class ShopApiV1Tests(TestCase):
             item for item in list_response.json()["items"] if item["id"] == self.item.id
         )
         for payload in (list_item, detail_response.json()):
+            self.assertTrue(payload["participates_in_tier_discount"])
             self.assertEqual(payload["original_cost"], 100)
             self.assertEqual(payload["cost"], 80)
             self.assertEqual(payload["discount_tier"], "SSS")
             self.assertEqual(payload["discount_tier_year"], 2025)
             self.assertEqual(payload["discount_multiplier"], 0.8)
+
+    @patch("shop.pricing.calculate_reward_points")
+    def test_excluded_item_endpoints_show_full_price_for_every_tier(self, mock_tier):
+        """An excluded item is full price even alongside an eligible item."""
+        excluded_item = ShopItem.objects.create(
+            name_zh="Full price item",
+            name_en="Full price item",
+            description_zh="Excluded from tier discounts",
+            cost=101,
+            participates_in_tier_discount=False,
+        )
+        for tier in ("SSS", "SS", "S", "A", "B", "C", "D", None):
+            with self.subTest(tier=tier):
+                mock_tier.return_value = {
+                    "points": 200,
+                    "highest_level": tier,
+                    "highest_level_year": 2025,
+                }
+                list_response = self.client.get("/api/v1/shop/items", **self.headers)
+                detail_response = self.client.get(
+                    f"/api/v1/shop/items/{excluded_item.id}", **self.headers
+                )
+                self.assertEqual(list_response.status_code, 200)
+                self.assertEqual(detail_response.status_code, 200)
+                items = {item["id"]: item for item in list_response.json()["items"]}
+                for payload in (items[excluded_item.id], detail_response.json()):
+                    self.assertFalse(payload["participates_in_tier_discount"])
+                    self.assertEqual(payload["original_cost"], 101)
+                    self.assertEqual(payload["cost"], 101)
+                    self.assertIsNone(payload["discount_tier"])
+                    self.assertIsNone(payload["discount_tier_year"])
+                    self.assertEqual(payload["discount_multiplier"], 1)
+                if tier in DeveloperTierDiscountConfig.DEFAULT_MULTIPLIERS:
+                    self.assertLess(items[self.item.id]["cost"], self.item.cost)
+                else:
+                    self.assertEqual(items[self.item.id]["cost"], self.item.cost)
+
+    @patch("shop.pricing.calculate_reward_points")
+    def test_excluded_item_redemption_charges_and_snapshots_full_price(self, mock_tier):
+        """Excluding an item controls the charge and preserves its history."""
+        mock_tier.return_value = {
+            "points": 200,
+            "highest_level": "SSS",
+            "highest_level_year": 2025,
+        }
+        self.item.participates_in_tier_discount = False
+        self.item.save()
+
+        response = self.client.post(
+            "/api/v1/shop/redemptions",
+            {"item_id": self.item.id, "expected_points_cost": 100},
+            content_type="application/json",
+            **self.headers,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["points_cost"], 100)
+        self.assertEqual(payload["item"]["cost"], 100)
+        self.assertEqual(
+            payload["payment_lines"],
+            [{"point_type": "gift", "tag_slug": None, "amount": 100}],
+        )
+        self.assertEqual(get_balance(self.user, PointType.GIFT), 400)
+        redemption = Redemption.objects.get(pk=payload["id"])
+        self.assertEqual(redemption.original_points_cost_at_redemption, 100)
+        self.assertEqual(redemption.points_cost_at_redemption, 100)
+        self.assertIsNone(redemption.discount_tier)
+        self.assertIsNone(redemption.discount_tier_year)
+        self.assertEqual(redemption.discount_multiplier, Decimal("1.00"))
+
+        self.item.participates_in_tier_discount = True
+        self.item.save()
+        history = self.client.get("/api/v1/shop/redemptions", **self.headers)
+        self.assertEqual(history.status_code, 200)
+        historical_item = history.json()["items"][0]["item"]
+        self.assertEqual(historical_item["cost"], 100)
+        self.assertIsNone(historical_item["discount_tier"])
+        self.assertEqual(historical_item["discount_multiplier"], 1)
+
+    @patch("shop.pricing.calculate_reward_points")
+    def test_excluded_item_requires_enough_points_for_full_price(self, mock_tier):
+        """A balance covering only the discounted price cannot buy an excluded item."""
+        mock_tier.return_value = {
+            "points": 200,
+            "highest_level": "SSS",
+            "highest_level_year": 2025,
+        }
+        self.item.participates_in_tier_discount = False
+        self.item.save()
+        grant_points(self.zero_user, 80, PointType.GIFT, "Discounted price only")
+
+        response = self.client.post(
+            "/api/v1/shop/redemptions",
+            {"item_id": self.item.id},
+            content_type="application/json",
+            **self.zero_headers,
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "insufficient_points")
+        self.assertFalse(Redemption.objects.exists())
+        self.assertEqual(get_balance(self.zero_user, PointType.GIFT), 80)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.stock, 5)
+
+    @patch("shop.pricing.calculate_reward_points")
+    def test_redemption_rejects_price_after_discount_participation_changes(
+        self, mock_tier
+    ):
+        """Toggling eligibility in either direction requires price confirmation again."""
+        mock_tier.return_value = {
+            "points": 200,
+            "highest_level": "SSS",
+            "highest_level_year": 2025,
+        }
+        for participates, current_cost in ((False, 100), (True, 80)):
+            with self.subTest(participates=participates):
+                detail = self.client.get(
+                    f"/api/v1/shop/items/{self.item.id}", **self.headers
+                )
+                self.assertEqual(detail.status_code, 200)
+                self.item.participates_in_tier_discount = participates
+                self.item.save()
+
+                response = self.client.post(
+                    "/api/v1/shop/redemptions",
+                    {
+                        "item_id": self.item.id,
+                        "expected_points_cost": detail.json()["cost"],
+                    },
+                    content_type="application/json",
+                    **self.headers,
+                )
+
+                self.assertEqual(response.status_code, 409)
+                payload = response.json()
+                self.assertEqual(payload["code"], "price_changed")
+                self.assertEqual(payload["detail"]["current_points_cost"], current_cost)
+                self.assertFalse(Redemption.objects.exists())
+                self.assertEqual(get_balance(self.user, PointType.GIFT), 500)
+                self.item.refresh_from_db()
+                self.assertEqual(self.item.stock, 5)
 
     @patch("shop.pricing.calculate_reward_points")
     def test_redemption_recalculates_and_snapshots_discount(self, mock_tier):

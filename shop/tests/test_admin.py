@@ -58,6 +58,31 @@ class ShopItemAdminTests(TestCase):
         assert "priority" in self.admin.list_display
         assert "priority" in all_fields
 
+    def test_tier_discount_participation_defaults_on_and_can_be_changed(self):
+        """The admin checkbox defaults on and persists both opt-out and opt-in."""
+        form_class = self.admin.get_form(self.factory.get("/admin/shop/shopitem/add/"))
+        self.assertTrue(form_class()["participates_in_tier_discount"].value())
+        data = {
+            "name_zh": "Test Item",
+            "name_en": "Test Item",
+            "description_zh": "Test",
+            "cost": 100,
+            "max_redemptions_per_user": 0,
+            "priority": 1,
+        }
+        form = form_class(data=data)
+        self.assertTrue(form.is_valid(), form.errors)
+        item = form.save()
+        item.refresh_from_db()
+        self.assertFalse(item.participates_in_tier_discount)
+
+        data["participates_in_tier_discount"] = "on"
+        form = form_class(data=data, instance=item)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        item.refresh_from_db()
+        self.assertTrue(item.participates_in_tier_discount)
+
     def test_stock_display_with_shipping(self):
         """Test stock display method works with requires_shipping field."""
         item = ShopItem.objects.create(

@@ -113,6 +113,63 @@ class PointsApiV1Tests(TestCase):
             list_response.json()["items"][0]["status"], WithdrawalStatus.CANCELLED
         )
 
+    @patch("chdb.services.ClickHouseDB.query")
+    def test_allocation_limits_follow_operator_role_for_personal_and_org_pools(
+        self, mock_query
+    ):
+        """Only platform admins bypass the cap, including on organization pools."""
+        mock_query.return_value.result_rows = []
+        for is_staff, is_superuser, expected_limit in [
+            (False, False, 300_000),
+            (True, False, None),
+            (False, True, None),
+            (True, True, None),
+        ]:
+            self.user.is_staff = is_staff
+            self.user.is_superuser = is_superuser
+            self.user.save(update_fields=["is_staff", "is_superuser"])
+            pools_response = self.client.get("/api/v1/points/pools", **self.headers)
+            self.assertEqual(pools_response.status_code, 200)
+            self.assertEqual(
+                pools_response.json()["allocation_recipient_limit"], expected_limit
+            )
+            for owner_type in ["user", "organization"]:
+                with self.subTest(
+                    staff=is_staff, superuser=is_superuser, owner_type=owner_type
+                ):
+                    mock_query.reset_mock()
+                    response = self.client.post(
+                        "/api/v1/points/allocations/preview",
+                        {
+                            "source_selector": {
+                                "owner_type": owner_type,
+                                "owner_slug": self.organization.slug
+                                if owner_type == "organization"
+                                else None,
+                                "point_type": "cash",
+                            },
+                            "project_scope": {"tags": ["repo:test"]},
+                            "start_month": "2025-01-01",
+                            "end_month": "2025-01-31",
+                            "top_n": 300_001,
+                            # Client-supplied privilege/limit overrides are ignored.
+                            "max_recipients": None,
+                            "is_staff": True,
+                        },
+                        content_type="application/json",
+                        **self.headers,
+                    )
+                    self.assertEqual(response.status_code, 200)
+                    mock_query.assert_called_once()
+                    sql = mock_query.call_args.args[0]
+                    parameters = mock_query.call_args.kwargs["parameters"]
+                    if expected_limit is None:
+                        self.assertNotIn("LIMIT", sql)
+                        self.assertNotIn("limit", parameters)
+                    else:
+                        self.assertIn("LIMIT {limit:UInt64}", sql)
+                        self.assertEqual(parameters["limit"], expected_limit)
+
     def test_pool_listing_and_allocation_execute(self):
         """Allocation APIs should preview and execute against a stable source selector."""
         pools_response = self.client.get("/api/v1/points/pools", **self.headers)

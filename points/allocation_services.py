@@ -33,6 +33,7 @@ class AllocationService:
     """积分分配服务."""
 
     CONTRIBUTION_TO_POINTS_RATIO = 100  # 1 贡献度 = 100 积分
+    DEFAULT_RECIPIENT_LIMIT = 300_000
     SOCIAL_AUTH_PREFETCH_ATTR = "prefetched_code_hosting_social_auth"
     # Deprecated: kept for backward compatibility with management commands
     GITHUB_SOCIAL_AUTH_PREFETCH_ATTR = "prefetched_code_hosting_social_auth"
@@ -40,15 +41,26 @@ class AllocationService:
     PENDING_GRANT_BULK_BATCH_SIZE = 500
 
     @staticmethod
+    def get_recipient_limit(user) -> int | None:
+        """平台管理员可不限量分配,其他用户保留默认上限."""
+        if user.is_staff or user.is_superuser:
+            return None
+        return AllocationService.DEFAULT_RECIPIENT_LIMIT
+
+    @staticmethod
     def preview_allocation(
-        allocation: PointAllocation, *, top_n: int = -1
+        allocation: PointAllocation,
+        *,
+        top_n: int = -1,
+        max_recipients: int | None = DEFAULT_RECIPIENT_LIMIT,
     ) -> list[dict]:
         """
         预览积分分配.
 
         Args:
             allocation: PointAllocation 记录
-            top_n: 返回开发者数量限制, -1 表示不限制(使用后端 30 万上限)
+            top_n: 返回开发者数量限制, -1 表示返回权限范围内的全部开发者
+            max_recipients: 服务端按当前操作者权限确定的上限, None 表示不限量
 
         Returns:
             [
@@ -70,18 +82,19 @@ class AllocationService:
         if not projects:
             return []
 
-        contributions = AllocationService._get_contributions(allocation, projects)
+        contributions = AllocationService._get_contributions(
+            allocation, projects, max_recipients=max_recipients
+        )
         contributions = AllocationService._filter_contributions_by_user_scope(
             allocation, contributions
         )
         if not contributions:
             return []
 
-        # 应用 Top N 截断: 取用户指定的 top_n 和后端 30 万上限中较小的一个
-        max_limit = 300000
+        if max_recipients is not None:
+            contributions = contributions[:max_recipients]
         if top_n > 0:
-            effective_limit = min(top_n, max_limit)
-            contributions = contributions[:effective_limit]
+            contributions = contributions[:top_n]
 
         total_contribution = AllocationService._total_contribution(contributions)
         if total_contribution == 0:
@@ -214,7 +227,10 @@ class AllocationService:
 
     @staticmethod
     def _get_contributions(
-        allocation: PointAllocation, projects: list[str]
+        allocation: PointAllocation,
+        projects: list[str],
+        *,
+        max_recipients: int | None = DEFAULT_RECIPIENT_LIMIT,
     ) -> list[dict]:
         from chdb import services as chdb_services
         from contributions.services import ContributionService
@@ -227,6 +243,7 @@ class AllocationService:
             operators=operators,
             start_month=int(allocation.start_month.strftime("%Y%m")),
             end_month=int(allocation.end_month.strftime("%Y%m")),
+            limit=max_recipients,
         )
         if not raw:
             return []

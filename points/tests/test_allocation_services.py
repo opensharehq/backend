@@ -1868,6 +1868,7 @@ class AllocationServiceThinIntegrationTests(TestCase):
             operators=[],
             start_month=202401,
             end_month=202401,
+            limit=300_000,
         )
         self.assertEqual(len(preview), 2)
         by_login = {item["actor_login"]: item for item in preview}
@@ -1937,6 +1938,7 @@ class AllocationServiceThinIntegrationTests(TestCase):
                 operators=["OR"],
                 start_month=202401,
                 end_month=202402,
+                limit=300_000,
             )
 
     def test_execute_allocation_handles_registered_and_pending_recipients(self):

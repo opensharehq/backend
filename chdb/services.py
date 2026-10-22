@@ -572,6 +572,8 @@ def query_contributions_with_operators(
     operators: list[str],
     start_month: int,
     end_month: int,
+    *,
+    limit: int | None = 300_000,
 ) -> list[dict[str, Any]]:
     """
     使用标签运算符查询贡献度数据.
@@ -586,6 +588,7 @@ def query_contributions_with_operators(
         operators: 运算符列表, 长度为 len(tag_ids) - 1
         start_month: 起始月份 (格式: 202401)
         end_month: 结束月份 (格式: 202412)
+        limit: 返回贡献者数量上限, None 表示不限制
 
     Returns:
         贡献者列表, 每个贡献者包含 platform, actor_id, actor_login,
@@ -620,16 +623,16 @@ def query_contributions_with_operators(
           AND (platform, actor_id) NOT IN (SELECT platform, entity_id FROM flatten_labels WHERE entity_type='User' AND id=':bot')
         GROUP BY platform, actor_id
         ORDER BY total_or DESC
-        LIMIT 300000
     """  # noqa: S608
+    parameters = {"start_month": start_month, "end_month": end_month}
+    if limit is not None:
+        sql += " LIMIT {limit:UInt64}"
+        parameters["limit"] = limit
 
     try:
         result = ClickHouseDB.query(
             sql,
-            parameters={
-                "start_month": start_month,
-                "end_month": end_month,
-            },
+            parameters=parameters,
         )
         logger.info(
             "标签运算查询贡献度: %s 个标签, 运算符 %s, 月份 %s-%s",

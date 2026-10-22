@@ -64,7 +64,7 @@ class AllocationPreviewRequestSchema(Schema):
     user_scope: AllocationScopeSchema | None = None
     start_month: date
     end_month: date
-    top_n: int = -1  # -1 表示不限制(使用后端 30 万上限); >0 取 min(top_n, 300000)
+    top_n: int = -1  # -1 表示权限范围内的全部; 平台管理员无默认上限
 
 
 class AllocationItemSchema(Schema):
@@ -954,7 +954,12 @@ def point_pools_endpoint(request):
                     row["available_balance"],
                 )
             )
-    return {"items": items}
+    return {
+        "items": items,
+        "allocation_recipient_limit": AllocationService.get_recipient_limit(
+            request.auth
+        ),
+    }
 
 
 @router.get("/tags")
@@ -1023,7 +1028,11 @@ def allocation_preview_endpoint(request, payload: AllocationPreviewRequestSchema
     allocation = _build_unsaved_preview_allocation(payload, source_pool)
     try:
         preview = _normalize_preview_items(
-            AllocationService.preview_allocation(allocation, top_n=payload.top_n)
+            AllocationService.preview_allocation(
+                allocation,
+                top_n=payload.top_n,
+                max_recipients=AllocationService.get_recipient_limit(request.auth),
+            )
         )
     except ContributionDataUnavailableError as exc:
         raise ApiError(

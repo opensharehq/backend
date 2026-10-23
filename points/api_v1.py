@@ -14,9 +14,10 @@ from django.db.models import Min, Sum
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
 
-from accounts.api_v1 import jwt_bearer_auth
+from accounts.api_v1 import _configured_providers, jwt_bearer_auth
 from accounts.models import Organization, OrganizationMembership, User
 from accounts.services.masking import mask_card, mask_name
+from common.constants import CODE_HOSTING_PROVIDERS
 from config.api_common import (
     ApiError,
     ErrorResponseSchema,
@@ -58,9 +59,13 @@ class AllocationScopeSchema(Schema):
     operators: list[str] | None = None  # 新增：每对标签间的运算符
 
 
+class AllocationProjectScopeSchema(AllocationScopeSchema):
+    platforms: list[str] | None = None  # None 表示全部平台
+
+
 class AllocationPreviewRequestSchema(Schema):
     source_selector: SourceSelectorSchema
-    project_scope: AllocationScopeSchema
+    project_scope: AllocationProjectScopeSchema
     user_scope: AllocationScopeSchema | None = None
     start_month: date
     end_month: date
@@ -80,7 +85,7 @@ class AllocationItemSchema(Schema):
 
 class AllocationExecuteRequestSchema(Schema):
     source_selector: SourceSelectorSchema
-    project_scope: AllocationScopeSchema
+    project_scope: AllocationProjectScopeSchema
     user_scope: AllocationScopeSchema | None = None
     start_month: date
     end_month: date
@@ -453,6 +458,30 @@ def _validate_allocation_scope(
     return scope.model_dump()
 
 
+def _allocation_platforms() -> list[str]:
+    return [
+        info["name"]
+        for provider, info in _configured_providers()
+        if provider in CODE_HOSTING_PROVIDERS
+    ]
+
+
+def _validate_project_platforms(platforms: list[str] | None) -> None:
+    if platforms is None:
+        return
+    supported = _allocation_platforms()
+    if not platforms or any(platform not in supported for platform in platforms):
+        raise ApiError(
+            "validation_error",
+            422,
+            "Request validation failed.",
+            _validation_detail(
+                "project_scope.platforms",
+                "Select at least one configured code-hosting platform, or use null for all platforms.",
+            ),
+        )
+
+
 def _validate_preview_request(payload: AllocationPreviewRequestSchema) -> None:
     if payload.start_month > payload.end_month:
         raise ApiError(
@@ -466,6 +495,7 @@ def _validate_preview_request(payload: AllocationPreviewRequestSchema) -> None:
         )
     _validate_allocation_scope("project_scope", payload.project_scope, required=True)
     _validate_allocation_scope("user_scope", payload.user_scope, required=False)
+    _validate_project_platforms(payload.project_scope.platforms)
 
 
 def _validate_execute_request(payload: AllocationExecuteRequestSchema) -> None:
@@ -518,6 +548,21 @@ def _validate_execute_request(payload: AllocationExecuteRequestSchema) -> None:
         )
     _validate_allocation_scope("project_scope", payload.project_scope, required=True)
     _validate_allocation_scope("user_scope", payload.user_scope, required=False)
+    _validate_project_platforms(payload.project_scope.platforms)
+    platforms = payload.project_scope.platforms
+    selected_platforms = {platform.lower() for platform in platforms or []}
+    if platforms is not None and any(
+        item.platform.lower() not in selected_platforms for item in payload.allocations
+    ):
+        raise ApiError(
+            "validation_error",
+            422,
+            "Request validation failed.",
+            _validation_detail(
+                "allocations.platform",
+                "Each allocation must belong to a selected platform.",
+            ),
+        )
 
 
 def _build_unsaved_preview_allocation(
@@ -956,6 +1001,7 @@ def point_pools_endpoint(request):
             )
     return {
         "items": items,
+        "allocation_platforms": _allocation_platforms(),
         "allocation_recipient_limit": AllocationService.get_recipient_limit(
             request.auth
         ),

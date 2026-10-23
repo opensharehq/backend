@@ -244,6 +244,7 @@ class AllocationService:
             start_month=int(allocation.start_month.strftime("%Y%m")),
             end_month=int(allocation.end_month.strftime("%Y%m")),
             limit=max_recipients,
+            platforms=project_scope.get("platforms"),
         )
         if not raw:
             return []

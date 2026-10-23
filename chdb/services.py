@@ -567,13 +567,14 @@ def _build_tag_expression_sql(tag_ids: list[str], operators: list[str]) -> str:
     return result
 
 
-def query_contributions_with_operators(
+def query_contributions_with_operators(  # noqa: PLR0913
     tag_ids: list[str],
     operators: list[str],
     start_month: int,
     end_month: int,
     *,
     limit: int | None = 300_000,
+    platforms: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     使用标签运算符查询贡献度数据.
@@ -589,16 +590,19 @@ def query_contributions_with_operators(
         start_month: 起始月份 (格式: 202401)
         end_month: 结束月份 (格式: 202412)
         limit: 返回贡献者数量上限, None 表示不限制
+        platforms: 平台名称列表, None 表示全部平台, 空列表不返回贡献者
 
     Returns:
         贡献者列表, 每个贡献者包含 platform, actor_id, actor_login,
         contribution_score, details, top_repos
 
     """
-    if not tag_ids:
+    if not tag_ids or platforms == []:
         return []
 
     where_clause = _build_tag_expression_sql(tag_ids, operators)
+    if platforms is not None:
+        where_clause += " AND platform IN {platforms:Array(String)}"
     sql = f"""
         SELECT
             platform,
@@ -625,6 +629,8 @@ def query_contributions_with_operators(
         ORDER BY total_or DESC
     """  # noqa: S608
     parameters = {"start_month": start_month, "end_month": end_month}
+    if platforms is not None:
+        parameters["platforms"] = platforms
     if limit is not None:
         sql += " LIMIT {limit:UInt64}"
         parameters["limit"] = limit

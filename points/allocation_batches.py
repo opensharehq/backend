@@ -160,8 +160,8 @@ def execute_batched_allocation(allocation_id):
                 return
             funding_lots = load_funding(allocation)
             stats = {"success": 0, "pending": 0, "failed": 0, "total_points": 0}
-            # Keyset iteration avoids materializing all JSON in database drivers
-            # without server-side cursors. Each query loads at most 1,000 rows.
+            # Fetch one batch row by index per iteration. Its JSON holds at most
+            # BATCH_SIZE recipients, keeping recipient reads bounded.
             for index in range(allocation.batch_count):
                 batch = allocation.batches.get(index=index)
                 result = AllocationService._apply_allocation_items(

@@ -174,7 +174,6 @@ INSTALLED_APPS = [
     # third party app
     "django_extensions",
     "django_tasks",
-    "django_tasks.backends.database",
     "django_apscheduler",
     "social_django",
     "anymail",
@@ -183,6 +182,8 @@ INSTALLED_APPS = [
     "homepage",
     "accounts",
     "points",
+    # Let points override db_worker with crash recovery for point allocations.
+    "django_tasks.backends.database",
     "shop",
     "chdb",
     "contributions",
@@ -579,6 +580,8 @@ if TESTING:
         LOGGING["loggers"][logger_name]["level"] = "ERROR"
 
     LOGGING["root"]["level"] = "ERROR"
+
+DEBUG_TOOLBAR_CONFIG = {"SHOW_TOOLBAR_CALLBACK": "common.middleware.show_debug_toolbar"}
 
 if DEBUG and not TESTING:
     try:

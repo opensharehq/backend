@@ -9,6 +9,15 @@ from django.utils.cache import add_never_cache_headers, patch_vary_headers
 from common.frontend_sites import frontend_site_from_request
 
 
+def show_debug_toolbar(request):
+    """Avoid retaining large API bodies and SQL histories in development."""
+    if request.path.startswith("/api/"):
+        return False
+    from debug_toolbar.middleware import show_toolbar
+
+    return show_toolbar(request)
+
+
 class CanonicalHostRedirectMiddleware:
     """Redirect requests to the canonical domain while preserving path and query."""
 

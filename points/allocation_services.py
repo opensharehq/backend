@@ -340,19 +340,23 @@ class AllocationService:
 
     @staticmethod
     def _apply_allocation_items(
-        allocation: PointAllocation, allocations: list[dict]
+        allocation: PointAllocation, allocations: list[dict], *, funding_lots=None
     ) -> dict:
         """Transfer actual FIFO lots, retaining each lot's restrictions."""
         source = allocation.source_pool
-        lots = [
-            [lot, lot.remaining_amount]
-            for lot in _get_spend_sources_queryset(
-                source.wallet,
-                source.point_type,
-                source.tag.slug if source.tag else None,
-                source.point_type == PointType.GIFT and source.tag is None,
-            ).select_for_update()
-        ]
+        lots = (
+            funding_lots
+            if funding_lots is not None
+            else [
+                [lot, lot.remaining_amount]
+                for lot in _get_spend_sources_queryset(
+                    source.wallet,
+                    source.point_type,
+                    source.tag.slug if source.tag else None,
+                    source.point_type == PointType.GIFT and source.tag is None,
+                ).select_for_update()
+            ]
+        )
         stats = {"success": 0, "pending": 0, "failed": 0, "total_points": 0}
         pending_buffer = []
         for item in allocations:
@@ -449,6 +453,11 @@ class AllocationService:
         )
 
     @staticmethod
+    def _reward_reason(allocation: PointAllocation) -> str:
+        reason = f"贡献度奖励 ({allocation.start_month} - {allocation.end_month})"
+        return f"{reason}；备注：{allocation.note}" if allocation.note else reason
+
+    @staticmethod
     def _grant_registered_points(
         allocation: PointAllocation, item: dict, amount: int, *, funding_lots=None
     ) -> bool:
@@ -464,7 +473,7 @@ class AllocationService:
                         owner=user,
                         amount=portion,
                         point_type=source.point_type,
-                        reason=f"贡献度奖励 ({allocation.start_month} - {allocation.end_month})",
+                        reason=AllocationService._reward_reason(allocation),
                         tag_slug=source.tag.slug if source.tag else None,
                         expires_at=source.expires_at,
                         reference_id=f"allocation_{allocation.id}",
@@ -500,7 +509,7 @@ class AllocationService:
             email=item.get("email", ""),
             amount=amount,
             point_type=source.point_type,
-            reason=(f"贡献度奖励 ({allocation.start_month} - {allocation.end_month})"),
+            reason=AllocationService._reward_reason(allocation),
             tag=source.tag,
             expires_at=source.expires_at,
             reference_id=f"allocation_{allocation.id}",

@@ -1,6 +1,7 @@
 """Django Ninja API configuration for v1."""
 
-from django.core.exceptions import PermissionDenied
+from django.conf import settings
+from django.core.exceptions import PermissionDenied, RequestDataTooBig
 from django.http import Http404, HttpRequest
 from ninja import NinjaAPI
 from ninja.errors import AuthenticationError, ValidationError
@@ -75,6 +76,20 @@ def _not_found_handler(request: HttpRequest, exc: Http404):
     )
 
 
+def _request_too_large_handler(request: HttpRequest, exc: RequestDataTooBig):
+    """Return an actionable error when a legacy client sends an oversized body."""
+    return api_v1.create_response(
+        request,
+        {
+            "code": "request_too_large",
+            "message": "Request body is too large. Use batched allocation uploads for large distributions.",
+            "detail": {"max_bytes": settings.DATA_UPLOAD_MAX_MEMORY_SIZE},
+        },
+        status=413,
+    )
+
+
+api_v1.add_exception_handler(RequestDataTooBig, _request_too_large_handler)
 api_v1.add_exception_handler(ApiError, _api_error_handler)
 api_v1.add_exception_handler(AuthenticationError, _authentication_error_handler)
 api_v1.add_exception_handler(Http404, _not_found_handler)

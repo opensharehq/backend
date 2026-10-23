@@ -28,6 +28,7 @@ class AllocationStatus(models.TextChoices):
 
     DRAFT = "draft", "草稿"
     PREVIEWING = "previewing", "预览中"
+    QUEUED = "queued", "等待执行"
     EXECUTING = "executing", "执行中"
     COMPLETED = "completed", "已完成"
     FAILED = "failed", "失败"
@@ -585,6 +586,19 @@ class PointAllocation(models.Model):
         verbose_name="本次分配总额",
         help_text="本次分配总额",
     )
+    note = models.CharField(
+        max_length=40,
+        blank=True,
+        default="",
+        verbose_name="备注说明",
+    )
+    submission_id = models.UUIDField(null=True, blank=True, unique=True)
+    batch_count = models.PositiveIntegerField(default=0)
+    request_config = models.JSONField(default=dict, blank=True)
+    execution_error = models.CharField(max_length=200, blank=True, default="")
+    failed_recipients = models.PositiveIntegerField(default=0)
+    funds_reserved = models.BooleanField(default=False)
+    refunded_amount = models.PositiveBigIntegerField(default=0)
 
     # 项目范围（JSON）
     project_scope = models.JSONField(
@@ -676,6 +690,53 @@ class PointAllocation(models.Model):
     def __str__(self):
         """Return string representation."""
         return f"分配 #{self.id}: {self.total_amount} ({self.get_status_display()})"
+
+
+class AllocationFundingLot(models.Model):
+    """Track prepaid funds separately from the initiator's spendable sources."""
+
+    allocation = models.ForeignKey(
+        PointAllocation, on_delete=models.PROTECT, related_name="funding_lots"
+    )
+    source = models.ForeignKey(PointSource, on_delete=models.PROTECT)
+    debit = models.OneToOneField(PointTransaction, on_delete=models.PROTECT)
+    amount = models.PositiveIntegerField()
+    remaining_amount = models.PositiveIntegerField()
+
+    class Meta:
+        """Preserve FIFO funding order and enforce reservation bounds."""
+
+        ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(remaining_amount__lte=models.F("amount")),
+                name="allocation_funding_remaining_lte_amount",
+            )
+        ]
+
+
+class AllocationBatch(models.Model):
+    """Bounded, immutable recipient batches retained for allocation audit."""
+
+    allocation = models.ForeignKey(
+        PointAllocation, on_delete=models.CASCADE, related_name="batches"
+    )
+    index = models.PositiveIntegerField()
+    items = models.JSONField()
+    digest = models.CharField(max_length=64)
+    total_amount = models.PositiveBigIntegerField()
+    recipient_count = models.PositiveIntegerField()
+    registered_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        """Keep each upload slot unique and ordered."""
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["allocation", "index"], name="unique_allocation_batch"
+            )
+        ]
+        ordering = ["index"]
 
 
 class ContributionCache(models.Model):

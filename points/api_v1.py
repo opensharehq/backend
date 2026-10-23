@@ -8,11 +8,14 @@ import re
 from datetime import date
 from decimal import Decimal
 from json import JSONDecodeError
+from uuid import UUID
 
 from django.contrib.contenttypes.models import ContentType
-from django.db.models import Min, Sum
+from django.db.models import Case, CharField, Count, F, Min, Sum, When, Window
+from django.db.models.functions import Cast, RowNumber
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
+from pydantic import Field
 
 from accounts.api_v1 import configured_providers, jwt_bearer_auth
 from accounts.models import Organization, OrganizationMembership, User
@@ -29,6 +32,13 @@ from config.api_common import (
 from contributions.services import ContributionDataUnavailableError
 
 from . import services
+from .allocation_batches import (
+    BATCH_SIZE,
+    batch_status,
+    queue_allocation,
+    registered_page,
+    store_batch,
+)
 from .allocation_services import AllocationService
 from .forms import WithdrawalRequestForm
 from .models import (
@@ -92,6 +102,19 @@ class AllocationExecuteRequestSchema(Schema):
     adjustment_ratio: float = 1.0
     total_amount: int
     allocations: list[AllocationItemSchema]
+    note: str = Field(default="", max_length=40)
+
+
+class AllocationUploadRequestSchema(AllocationPreviewRequestSchema):
+    submission_id: UUID
+    total_recipients: int = Field(gt=0)
+    total_amount: int = Field(gt=0)
+    adjustment_ratio: float = 1.0
+    note: str = Field(default="", max_length=40)
+
+
+class AllocationBatchRequestSchema(Schema):
+    allocations: list[AllocationItemSchema] = Field(min_length=1, max_length=BATCH_SIZE)
 
 
 def _validation_detail(field: str, message: str, code: str = "invalid") -> dict:
@@ -127,6 +150,53 @@ def _serialize_transaction(transaction: PointTransaction) -> dict:
         ),
         "created_at": transaction.created_at.isoformat(),
     }
+
+
+def _transaction_history_response(transactions, *, page, page_size, group_allocations):
+    """Group allocation debits and refunds separately before paginating rows."""
+    if group_allocations:
+        transactions = transactions.annotate(
+            history_group=Case(
+                When(
+                    transaction_type__in=[
+                        TransactionType.SPEND,
+                        TransactionType.REFUND,
+                    ],
+                    reference_id__regex=r"^allocation_[0-9]+$",
+                    then=F("reference_id"),
+                ),
+                default=Cast("pk", CharField()),
+                output_field=CharField(),
+            )
+        )
+        partition = [
+            F("wallet_id"),
+            F("point_type"),
+            F("transaction_type"),
+            F("history_group"),
+        ]
+        transactions = transactions.annotate(
+            merged_amount=Window(Sum("amount"), partition_by=partition),
+            merged_count=Window(Count("pk"), partition_by=partition),
+            history_row=Window(
+                RowNumber(),
+                partition_by=partition,
+                order_by=[F("created_at").desc(), F("pk").desc()],
+            ),
+        ).filter(history_row=1)
+    page_obj = paginate_queryset(
+        transactions.order_by("-created_at", "-pk"),
+        page=page,
+        page_size=page_size,
+        max_page_size=100,
+    )
+    items = []
+    for txn in page_obj.object_list:
+        item = _serialize_transaction(txn)
+        if group_allocations:
+            item.update(amount=txn.merged_amount, merged_count=txn.merged_count)
+        items.append(item)
+    return build_paginated_response(page_obj, items)
 
 
 def _serialize_withdrawal(withdrawal: WithdrawalRequest) -> dict:
@@ -201,12 +271,29 @@ def _serialize_pool(
     }
 
 
-def _serialize_allocation(allocation: PointAllocation) -> dict:
+def _serialize_allocation(
+    allocation: PointAllocation, registered_page_number=1, pending_page_number=1
+) -> dict:
     source_owner = allocation.source_pool.wallet.owner
-    pending_grants = list(allocation.pending_grants.select_related("tag").all())
+    pending_query = allocation.pending_grants.select_related("tag").all()
+    page_size = 20
+    if allocation.batch_count:
+        pending_count = pending_query.count()
+        pending_start = (pending_page_number - 1) * page_size
+        pending_query = pending_query.order_by("id")[
+            pending_start : pending_start + page_size
+        ]
+        contribution_data = registered_page(
+            allocation, registered_page_number, page_size
+        )
+    else:
+        pending_count = None
+        contribution_data = allocation.contribution_data
+    pending_grants = list(pending_query)
     return {
         "id": allocation.id,
         "status": allocation.status,
+        "note": allocation.note,
         "source_selector": _build_source_selector(
             source_owner,
             allocation.source_pool.point_type,
@@ -219,7 +306,15 @@ def _serialize_allocation(allocation: PointAllocation) -> dict:
         "end_month": allocation.end_month.isoformat(),
         "adjustment_ratio": float(allocation.adjustment_ratio),
         "individual_adjustments": allocation.individual_adjustments,
-        "contribution_data": allocation.contribution_data,
+        "contribution_data": contribution_data,
+        "paginated": bool(allocation.batch_count),
+        "page_size": page_size,
+        "pending_count": pending_count,
+        "registered_count": allocation.batches.aggregate(count=Sum("registered_count"))[
+            "count"
+        ]
+        if allocation.batch_count
+        else None,
         "total_recipients": allocation.total_recipients,
         "registered_recipients": allocation.registered_recipients,
         "unregistered_recipients": allocation.unregistered_recipients,
@@ -685,6 +780,7 @@ def current_user_transactions_endpoint(
     transaction_type: str = "",
     page: int = 1,
     page_size: int = 20,
+    group_allocations: bool = False,
 ):
     """List the current user's points transactions."""
     wallet = services.get_wallet_or_none(request.auth)
@@ -697,12 +793,11 @@ def current_user_transactions_endpoint(
         transactions = transactions.filter(point_type=point_type)
     if transaction_type:
         transactions = transactions.filter(transaction_type=transaction_type)
-    page_obj = paginate_queryset(
-        transactions, page=page, page_size=page_size, max_page_size=100
-    )
-    response = build_paginated_response(
-        page_obj,
-        [_serialize_transaction(txn) for txn in page_obj.object_list],
+    response = _transaction_history_response(
+        transactions,
+        page=page,
+        page_size=page_size,
+        group_allocations=group_allocations,
     )
     response["filters"] = {
         "point_type": point_type,
@@ -842,6 +937,7 @@ def organization_transactions_endpoint(
     transaction_type: str = "",
     page: int = 1,
     page_size: int = 20,
+    group_allocations: bool = False,
 ):
     """List organization transactions for current members."""
     organization, membership = _get_org_member_or_error(request.auth, slug)
@@ -855,12 +951,11 @@ def organization_transactions_endpoint(
         transactions = transactions.filter(point_type=point_type)
     if transaction_type:
         transactions = transactions.filter(transaction_type=transaction_type)
-    page_obj = paginate_queryset(
-        transactions, page=page, page_size=page_size, max_page_size=100
-    )
-    response = build_paginated_response(
-        page_obj,
-        [_serialize_transaction(txn) for txn in page_obj.object_list],
+    response = _transaction_history_response(
+        transactions,
+        page=page,
+        page_size=page_size,
+        group_allocations=group_allocations,
     )
     response["organization"] = {"slug": organization.slug, "name": organization.name}
     response["membership"] = {
@@ -1053,6 +1148,109 @@ def point_tag_search_endpoint(request, q: str = ""):
         ) from exc
 
 
+def _get_upload(request, allocation_id):
+    return get_object_or_404(
+        PointAllocation.objects.filter(batch_count__gt=0),
+        id=allocation_id,
+        initiator_type=ContentType.objects.get_for_model(request.auth),
+        initiator_id=request.auth.id,
+    )
+
+
+@router.post("/allocation-uploads", response={200: dict, 201: dict})
+def allocation_upload_endpoint(request, payload: AllocationUploadRequestSchema):
+    """Create or resume a submission without transferring any points."""
+    config = payload.model_dump(mode="json")
+    existing = PointAllocation.objects.filter(
+        submission_id=payload.submission_id
+    ).first()
+    if existing:
+        if (
+            existing.initiator_id != request.auth.id
+            or existing.request_config != config
+        ):
+            raise ApiError(
+                "submission_conflict",
+                409,
+                "This submission ID is already in use. Resume the original allocation.",
+            )
+        return 200, batch_status(existing)
+    _validate_preview_request(payload)
+    limit = AllocationService.get_recipient_limit(request.auth)
+    if limit is not None and payload.total_recipients > limit:
+        raise ApiError(
+            "validation_error", 422, "Recipient count exceeds your allocation limit."
+        )
+    source_pool, balance = _resolve_source_pool(request.auth, payload.source_selector)
+    if payload.total_amount > balance:
+        raise ApiError(
+            "insufficient_points",
+            409,
+            "The selected point pool does not have enough balance.",
+        )
+    allocation, created = PointAllocation.objects.get_or_create(
+        submission_id=payload.submission_id,
+        defaults={
+            "initiator_type": ContentType.objects.get_for_model(request.auth),
+            "initiator_id": request.auth.id,
+            "source_pool": source_pool,
+            "total_amount": payload.total_amount,
+            "total_recipients": payload.total_recipients,
+            "batch_count": (payload.total_recipients + BATCH_SIZE - 1) // BATCH_SIZE,
+            "request_config": config,
+            "project_scope": payload.project_scope.model_dump(),
+            "user_scope": payload.user_scope.model_dump()
+            if payload.user_scope
+            else None,
+            "start_month": payload.start_month,
+            "end_month": payload.end_month,
+            "adjustment_ratio": Decimal(str(payload.adjustment_ratio)),
+            "note": payload.note.strip(),
+        },
+    )
+    if (
+        allocation.initiator_id != request.auth.id
+        or allocation.request_config != config
+    ):
+        raise ApiError(
+            "submission_conflict", 409, "This submission ID is already in use."
+        )
+    return (201 if created else 200), batch_status(allocation)
+
+
+@router.get("/allocation-uploads/{allocation_id}")
+def allocation_upload_status_endpoint(request, allocation_id: int):
+    """Poll small upload/execution summaries without retrieving recipient rows."""
+    return batch_status(_get_upload(request, allocation_id))
+
+
+@router.put("/allocation-uploads/{allocation_id}/batches/{index}")
+def allocation_batch_endpoint(
+    request, allocation_id: int, index: int, payload: AllocationBatchRequestSchema
+):
+    """Upload a fixed-size, idempotent batch."""
+    allocation = _get_upload(request, allocation_id)
+    store_batch(allocation, index, [item.model_dump() for item in payload.allocations])
+    return {"index": index, "accepted": True}
+
+
+@router.post("/allocation-uploads/{allocation_id}/execute")
+def allocation_upload_execute_endpoint(request, allocation_id: int):
+    """Queue execution after all batches and totals have been verified."""
+    allocation = _get_upload(request, allocation_id)
+    owner = allocation.source_pool.wallet.owner
+    if isinstance(owner, Organization):
+        _get_org_admin_or_error(request.auth, owner.slug)
+    elif owner != request.auth:
+        raise ApiError("forbidden", 403, "You cannot spend from this point pool.")
+    limit = AllocationService.get_recipient_limit(request.auth)
+    if limit is not None and allocation.total_recipients > limit:
+        raise ApiError(
+            "validation_error", 422, "Recipient count exceeds your allocation limit."
+        )
+    return batch_status(queue_allocation(allocation))
+
+
 @router.post(
     "/allocations/preview",
     response={
@@ -1132,6 +1330,7 @@ def allocation_execute_endpoint(request, payload: AllocationExecuteRequestSchema
         initiator_id=request.auth.id,
         source_pool=source_pool,
         total_amount=payload.total_amount,
+        note=payload.note.strip(),
         project_scope=payload.project_scope.model_dump(),
         user_scope=payload.user_scope.model_dump() if payload.user_scope else None,
         start_month=payload.start_month,
@@ -1216,6 +1415,7 @@ def _serialize_allocation_summary(allocation: PointAllocation) -> dict:
     return {
         "id": allocation.id,
         "status": allocation.status,
+        "note": allocation.note,
         "source_pool": {
             "owner_type": "organization" if is_org else "user",
             "owner_slug": source_owner.slug if is_org else None,
@@ -1240,7 +1440,9 @@ def _serialize_allocation_summary(allocation: PointAllocation) -> dict:
 
 
 @router.get("/allocations/{allocation_id}")
-def allocation_detail_endpoint(request, allocation_id: int):
+def allocation_detail_endpoint(
+    request, allocation_id: int, registered_page: int = 1, pending_page: int = 1
+):
     """Return a single allocation record."""
     allocation = get_object_or_404(
         PointAllocation.objects.select_related(
@@ -1254,7 +1456,9 @@ def allocation_detail_endpoint(request, allocation_id: int):
             403,
             "You do not have permission to view this allocation.",
         )
-    return _serialize_allocation(allocation)
+    return _serialize_allocation(
+        allocation, max(1, registered_page), max(1, pending_page)
+    )
 
 
 @router.get("/allocations/{allocation_id}/summary")

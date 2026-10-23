@@ -13,7 +13,7 @@ CONVERSION_TRANSACTION_TYPE = "spend"
 CONVERSION_DESCRIPTION = (
     "积分计价调整：1 RMB = 10 积分改为 1 USD = 10 积分（余额 ÷ 6.7 向下取整）"
 )
-BLOCKING_ALLOCATION_STATUSES = ("draft", "previewing", "executing")
+BLOCKING_ALLOCATION_STATUSES = ("draft", "previewing", "queued", "executing")
 BLOCKING_WITHDRAWAL_STATUSES = ("pending", "approved")
 BATCH_SIZE = 1000
 

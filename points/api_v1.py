@@ -14,7 +14,7 @@ from django.db.models import Min, Sum
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
 
-from accounts.api_v1 import _configured_providers, jwt_bearer_auth
+from accounts.api_v1 import configured_providers, jwt_bearer_auth
 from accounts.models import Organization, OrganizationMembership, User
 from accounts.services.masking import mask_card, mask_name
 from common.constants import CODE_HOSTING_PROVIDERS
@@ -461,7 +461,7 @@ def _validate_allocation_scope(
 def _allocation_platforms() -> list[str]:
     return [
         info["name"]
-        for provider, info in _configured_providers()
+        for provider, info in configured_providers()
         if provider in CODE_HOSTING_PROVIDERS
     ]
 

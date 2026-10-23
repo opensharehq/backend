@@ -226,7 +226,7 @@ class ApiAuthV1CoverageTests(TestCase):
     @override_settings(SOCIAL_AUTH_GITHUB_KEY="key", SOCIAL_AUTH_GITHUB_SECRET="secret")
     def test_social_providers_and_connections_cover_configured_states(self):
         """Social provider listing should reflect configured providers."""
-        api_v1._configured_providers.cache_clear()
+        api_v1.configured_providers.cache_clear()
         UserSocialAuth.objects.create(
             user=self.user,
             provider="github",
@@ -248,7 +248,7 @@ class ApiAuthV1CoverageTests(TestCase):
         connection = connections_response.json()["connections"][0]
         self.assertTrue(connection["is_connected"])
         self.assertEqual(connection["username"], "auth-coverage")
-        api_v1._configured_providers.cache_clear()
+        api_v1.configured_providers.cache_clear()
 
     def test_disconnect_social_account_error_and_success_branches(self):
         """Social disconnection should cover not-found, last-method, and success."""
@@ -304,7 +304,7 @@ class ApiAuthV1CoverageTests(TestCase):
     )
     def test_social_start_and_callback_cover_redirect_branches(self):
         """Social start and callback should cover login, anonymous, and missing provider."""
-        api_v1._configured_providers.cache_clear()
+        api_v1.configured_providers.cache_clear()
         factory = RequestFactory()
         access_token = create_access_token(self.user)
 
@@ -361,7 +361,7 @@ class ApiAuthV1CoverageTests(TestCase):
         provider_missing = self.client.get("/api/v1/auth/social/github/callback")
         query = parse_qs(urlparse(provider_missing.url).query)
         self.assertEqual(query["error"], ["provider_not_connected"])
-        api_v1._configured_providers.cache_clear()
+        api_v1.configured_providers.cache_clear()
 
     def test_refresh_logout_me_endpoints_cover_error_branches(self):
         """Auth endpoints should cover invalid token branches."""
@@ -390,7 +390,7 @@ class ApiAuthV1CoverageTests(TestCase):
     @patch("accounts.api_v1.create_exchange_code", return_value="exchange-code")
     def test_social_callback_success_redirects_with_exchange_code(self, _code_mock):
         """A connected callback should issue a one-time exchange code."""
-        api_v1._configured_providers.cache_clear()
+        api_v1.configured_providers.cache_clear()
         self.client.force_login(self.user)
         UserSocialAuth.objects.create(user=self.user, provider="github", uid="github")
 
@@ -399,7 +399,7 @@ class ApiAuthV1CoverageTests(TestCase):
         self.assertEqual(response.status_code, 302)
         query = parse_qs(urlparse(response.url).query)
         self.assertEqual(query["exchange_code"], ["exchange-code"])
-        api_v1._configured_providers.cache_clear()
+        api_v1.configured_providers.cache_clear()
 
     def test_social_exchange_rejects_inactive_or_merged_users(self):
         """Exchange payloads for unusable users should be rejected."""

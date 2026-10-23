@@ -244,13 +244,13 @@ def _build_token_response(user: Any) -> TokenResponseSchema:
 
 
 @lru_cache(maxsize=1)
-def _configured_providers() -> tuple[tuple[str, dict[str, str]], ...]:
+def configured_providers() -> tuple[tuple[str, dict[str, str]], ...]:
     """
     Return providers configured in settings (process-local lazy cache).
 
     Provider configuration is determined by settings at startup and never
     changes during the process lifetime, so we cache the result permanently.
-    Call ``_configured_providers.cache_clear()`` in tests if needed.
+    Call ``configured_providers.cache_clear()`` in tests if needed.
     """
     providers: list[tuple[str, dict[str, str]]] = []
     for provider, provider_info in SOCIAL_PROVIDERS.items():
@@ -429,7 +429,7 @@ def social_providers_endpoint(request: HttpRequest):
             icon=provider_info["icon"],
             start_url=f"/api/v1/auth/social/{provider}/start",
         )
-        for provider, provider_info in _configured_providers()
+        for provider, provider_info in configured_providers()
     ]
     return SocialProvidersResponseSchema(providers=providers)
 
@@ -449,7 +449,7 @@ def social_connections_endpoint(request: HttpRequest):
     included; the SPA's add-account dialog uses ``/auth/social/providers``
     to discover bindable platforms.
     """
-    configured = dict(_configured_providers())
+    configured = dict(configured_providers())
 
     connections: list[SocialConnectionSchema] = []
     user_social_auths = UserSocialAuth.objects.filter(user=request.auth).order_by(

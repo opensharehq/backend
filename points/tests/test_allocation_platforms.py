@@ -30,7 +30,7 @@ class AllocationPlatformTests(TestCase):
             "end_month": "2024-02-01",
         }
         providers = patch(
-            "points.api_v1._configured_providers",
+            "points.api_v1.configured_providers",
             return_value=(
                 ("github", {"name": "GitHub"}),
                 ("gitee", {"name": "Gitee"}),

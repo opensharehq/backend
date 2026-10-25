@@ -192,22 +192,16 @@ def execute_batched_allocation(allocation_id):
         raise
 
 
-def registered_page(allocation, page, page_size):
-    """Find a page using small batch counts, loading only matching batch JSON."""
-    skip = (page - 1) * page_size
-    items = []
-    for batch_id, count in allocation.batches.values_list(
-        "id", "registered_count"
-    ).iterator():
-        if skip >= count:
-            skip -= count
-            continue
-        batch = AllocationBatch.objects.get(pk=batch_id)
-        registered = [
-            item for item in batch.items if item["is_registered"] and item["amount"] > 0
-        ]
-        items.extend(registered[skip : skip + page_size - len(items)])
-        skip = 0
-        if len(items) == page_size:
-            break
-    return items
+def registered_recipients(allocation):
+    """Assemble all registered recipients without caching every batch model."""
+    batches = (
+        allocation.batches.filter(registered_count__gt=0)
+        .values_list("items", flat=True)
+        .iterator(chunk_size=1)
+    )
+    return [
+        item
+        for items in batches
+        for item in items
+        if item["is_registered"] and item["amount"] > 0
+    ]

@@ -36,7 +36,7 @@ from .allocation_batches import (
     BATCH_SIZE,
     batch_status,
     queue_allocation,
-    registered_page,
+    registered_recipients,
     store_batch,
 )
 from .allocation_services import AllocationService
@@ -271,25 +271,17 @@ def _serialize_pool(
     }
 
 
-def _serialize_allocation(
-    allocation: PointAllocation, registered_page_number=1, pending_page_number=1
-) -> dict:
+def _serialize_allocation(allocation: PointAllocation) -> dict:
     source_owner = allocation.source_pool.wallet.owner
     pending_query = allocation.pending_grants.select_related("tag").all()
-    page_size = 20
     if allocation.batch_count:
         pending_count = pending_query.count()
-        pending_start = (pending_page_number - 1) * page_size
-        pending_query = pending_query.order_by("id")[
-            pending_start : pending_start + page_size
-        ]
-        contribution_data = registered_page(
-            allocation, registered_page_number, page_size
-        )
+        pending_query = pending_query.order_by("id")
+        contribution_data = registered_recipients(allocation)
     else:
         pending_count = None
         contribution_data = allocation.contribution_data
-    pending_grants = list(pending_query)
+    pending_grants = pending_query.iterator(chunk_size=1000)
     return {
         "id": allocation.id,
         "status": allocation.status,
@@ -307,14 +299,11 @@ def _serialize_allocation(
         "adjustment_ratio": float(allocation.adjustment_ratio),
         "individual_adjustments": allocation.individual_adjustments,
         "contribution_data": contribution_data,
-        "paginated": bool(allocation.batch_count),
-        "page_size": page_size,
+        # Keep pagination metadata for clients deployed before full-list details.
+        "paginated": False,
+        "page_size": 20,
         "pending_count": pending_count,
-        "registered_count": allocation.batches.aggregate(count=Sum("registered_count"))[
-            "count"
-        ]
-        if allocation.batch_count
-        else None,
+        "registered_count": len(contribution_data) if allocation.batch_count else None,
         "total_recipients": allocation.total_recipients,
         "registered_recipients": allocation.registered_recipients,
         "unregistered_recipients": allocation.unregistered_recipients,
@@ -1440,10 +1429,8 @@ def _serialize_allocation_summary(allocation: PointAllocation) -> dict:
 
 
 @router.get("/allocations/{allocation_id}")
-def allocation_detail_endpoint(
-    request, allocation_id: int, registered_page: int = 1, pending_page: int = 1
-):
-    """Return a single allocation record."""
+def allocation_detail_endpoint(request, allocation_id: int):
+    """Return a single allocation record with complete recipient lists."""
     allocation = get_object_or_404(
         PointAllocation.objects.select_related(
             "source_pool__wallet__content_type", "source_pool__tag"
@@ -1456,9 +1443,7 @@ def allocation_detail_endpoint(
             403,
             "You do not have permission to view this allocation.",
         )
-    return _serialize_allocation(
-        allocation, max(1, registered_page), max(1, pending_page)
-    )
+    return _serialize_allocation(allocation)
 
 
 @router.get("/allocations/{allocation_id}/summary")

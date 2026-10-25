@@ -26,7 +26,7 @@ from common.middleware import show_debug_toolbar
 from points.allocation_batches import (
     execute_batched_allocation,
     queue_allocation,
-    registered_page,
+    registered_recipients,
 )
 from points.allocation_funding import fail_allocation
 from points.allocation_worker import AllocationWorker as Worker
@@ -146,7 +146,7 @@ class AllocationBatchTests(TestCase):
         detail = self.client.get(
             f"/api/v1/points/allocations/{self.allocation.id}", **self.headers
         ).json()
-        self.assertTrue(detail["paginated"])
+        self.assertFalse(detail["paginated"])
         self.assertEqual(len(detail["contribution_data"]), 1)
         self.assertEqual(len(detail["pending_grants"]), 2)
 
@@ -286,17 +286,50 @@ class AllocationBatchTests(TestCase):
         self.assertFalse(DBTaskResult.objects.exists())
         self.assertFalse(PendingPointGrant.objects.exists())
 
-    def test_registered_pages_cross_batch_boundaries(self):
+    def test_registered_recipients_cross_batch_boundaries(self):
         self.create()
-        self.upload(0, [self.item(0, True), self.item(1, True)])
+        self.upload(0, [self.item(0, True), self.item(1, True, amount=0)])
         self.upload(1, [self.item(2, True)])
+        with self.assertNumQueries(1):
+            items = registered_recipients(self.allocation)
+        self.assertEqual([item["actor_id"] for item in items], ["0", "2"])
+
+    def test_detail_returns_all_registered_and_pending_recipients(self):
+        # Both lists exceed the former server page size and span many batches.
+        self.config.update(total_recipients=44, total_amount=43)
+        self.create()
+        items = [
+            self.item(i, registered=i < 22, amount=0 if i == 21 else 1)
+            for i in range(44)
+        ]
+        for start in range(0, len(items), 2):
+            self.assertEqual(
+                self.upload(start // 2, items[start : start + 2]).status_code, 200
+            )
+        self.queue()
+        execute_batched_allocation.func(self.allocation.id)
+        url = f"/api/v1/points/allocations/{self.allocation.id}"
+        response = self.client.get(url, **self.headers)
+        self.assertEqual(response.status_code, 200)
+        detail = response.json()
+        self.assertFalse(detail["paginated"])
+        self.assertEqual(detail["registered_count"], 21)
+        self.assertEqual(detail["pending_count"], 22)
         self.assertEqual(
-            [r["actor_id"] for r in registered_page(self.allocation, 1, 2)], ["0", "1"]
+            [item["actor_id"] for item in detail["contribution_data"]],
+            [str(i) for i in range(21)],
         )
         self.assertEqual(
-            [r["actor_id"] for r in registered_page(self.allocation, 2, 2)], ["2"]
+            [item["actor_id"] for item in detail["pending_grants"]],
+            [str(i) for i in range(22, 44)],
         )
-        self.assertEqual(registered_page(self.allocation, 3, 2), [])
+        # Older clients may still send page parameters; these must not truncate.
+        self.assertEqual(
+            self.client.get(
+                url, {"registered_page": 2, "pending_page": 2}, **self.headers
+            ).json(),
+            detail,
+        )
 
     @override_settings(INSTALLED_APPS=[*settings.INSTALLED_APPS, "debug_toolbar"])
     def test_legacy_oversize_request_is_413_even_with_debug_toolbar(self):

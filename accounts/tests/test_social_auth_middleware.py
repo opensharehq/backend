@@ -4,7 +4,11 @@ from urllib.parse import parse_qs, urlparse
 
 from django.http import HttpResponseRedirect
 from django.test import RequestFactory, TestCase, override_settings
-from social_core.exceptions import AuthFailed
+
+try:
+    from social_core.exceptions import AuthFailed
+except ImportError:  # social-auth-core 6.x removed the legacy alias.
+    from social_core.exceptions import AuthCanceled as AuthFailed
 
 from accounts.social_auth import (
     FrontendSocialCallbackNotConfigured,

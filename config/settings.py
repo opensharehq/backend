@@ -1,5 +1,6 @@
 """Django settings for fullsite project."""
 
+import importlib.util
 import os
 import sys
 import tempfile
@@ -345,22 +346,35 @@ if TESTING:
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 SOCIAL_AUTH_JSONFIELD_ENABLED = True
 
-AUTHENTICATION_BACKENDS = (
-    "social_core.backends.github.GithubOAuth2",
-    "social_core.backends.google.GoogleOAuth2",
-    "social_core.backends.bitbucket.BitbucketOAuth2",
-    "social_core.backends.docker.DockerOAuth2",
-    "social_core.backends.facebook.FacebookOAuth2",
-    "social_core.backends.gitlab.GitLabOAuth2",
-    "social_core.backends.gitea.GiteaOAuth2",
-    "accounts.backends.GiteeOAuth2",
-    "accounts.backends.AtomGitOAuth2",
-    "social_core.backends.linkedin.LinkedinOAuth2",
-    "social_core.backends.twitter.TwitterOAuth",
-    "accounts.backends.HuggingFaceOAuth2",
-    "social_core.backends.email.EmailAuth",
-    "social_core.backends.username.UsernameAuth",
-    "django.contrib.auth.backends.ModelBackend",
+# social-auth-core 6+ removed the Docker backend module; keep the app compatible
+# with both older and newer library releases without failing import-time backend
+# discovery in Django admin/test flows.
+_DOCKER_BACKEND = (
+    "social_core.backends.docker.DockerOAuth2"
+    if importlib.util.find_spec("social_core.backends.docker") is not None
+    else None
+)
+
+AUTHENTICATION_BACKENDS = tuple(
+    backend
+    for backend in (
+        "social_core.backends.github.GithubOAuth2",
+        "social_core.backends.google.GoogleOAuth2",
+        "social_core.backends.bitbucket.BitbucketOAuth2",
+        _DOCKER_BACKEND,
+        "social_core.backends.facebook.FacebookOAuth2",
+        "social_core.backends.gitlab.GitLabOAuth2",
+        "social_core.backends.gitea.GiteaOAuth2",
+        "accounts.backends.GiteeOAuth2",
+        "accounts.backends.AtomGitOAuth2",
+        "social_core.backends.linkedin.LinkedinOAuth2",
+        "social_core.backends.twitter.TwitterOAuth",
+        "accounts.backends.HuggingFaceOAuth2",
+        "social_core.backends.email.EmailAuth",
+        "social_core.backends.username.UsernameAuth",
+        "django.contrib.auth.backends.ModelBackend",
+    )
+    if backend is not None
 )
 
 # custom user
